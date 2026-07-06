@@ -21,5 +21,11 @@ graphify / graphifyy
 Adapted content
 --------------------------------------------------------------------------------
 
-(To be populated during extraction: any file carrying a non-empty `adapted_from`
-field in its frontmatter is listed here with its upstream source and version.)
+This section is generated from skill frontmatter -- do not hand-edit it.
+Run `python catalog/generate_notice.py --write` after adding or changing a
+skill's `adapted_from` field.
+
+<!-- ADAPTED-CONTENT:START -->
+No adapted content at this time -- every skill in this repo is
+ground-up (`origin: ground-up`, `adapted_from: ~`).
+<!-- ADAPTED-CONTENT:END -->
