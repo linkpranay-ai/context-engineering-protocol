@@ -1,9 +1,9 @@
-# How an spw skill should consume the code graph
+# How a consuming skill should consume the code graph
 
-> **Status: piloting** — this contract is being validated with a small set
-> of engineering volunteers running it on large codebases (500 KSLOC+),
-> where `graph.json` itself can be tens of MB. Report findings back to the
-> RadiSys Skills Guild so this can graduate out of pilot status.
+> **Status: piloting** — this contract is being validated on large
+> codebases (500 KSLOC+), where `graph.json` itself can be tens of MB.
+> Report findings as an issue in this repo so this can graduate out of
+> pilot status.
 
 Any skill that reads, writes, modifies, reviews, or judges project code/tests
 should follow this before doing that work:
@@ -121,34 +121,28 @@ should follow this before doing that work:
 
 ---
 
-This file is the single source of truth for "how does an spw skill consult
-the generated code graph." It is referenced by a one-line pointer from a
-small, deliberately-limited subset of `spw-*.prompt.md` shims — not copied
-into each one — so the protocol is written, reviewed, and updated in exactly
-one place. The contract's own trigger (step 1: "any skill that reads,
-writes, modifies, reviews, or judges project code/tests") covers most of
-the `spw-*` family; the wired-in subset is intentionally narrower than that
-during the pilot, so the pattern stays trivial to revert or adjust before
-it earns a wider rollout.
+This file is the single source of truth for "how does a consuming skill
+consult the generated code graph." It is referenced by a one-line pointer
+from each consuming skill's `.prompt.md`/`SKILL.md` — not copied into each
+one — so the protocol is written, reviewed, and updated in exactly one
+place. The contract's own trigger (step 1: "any skill that reads, writes,
+modifies, reviews, or judges project code/tests") is broad; during a pilot
+rollout, a maintainer may choose to wire in only a deliberately-limited
+subset of consuming skills first, so the pattern stays trivial to revert
+or adjust before it earns a wider rollout.
 
-Current subset and why each was picked first:
-- `spw-write-plan` / `spw-debug` — planning a change and diagnosing a
-  problem, the two shapes of "touching code" most directly helped by a
-  structural map.
-- `spw-brainstorm` — answers "is this a new feature or an extension of
-  something that already exists," a question a scoped `graphify
-  query`/`explain` on the proposed feature's domain concepts can answer
-  even when naming differs enough that grep would miss the overlap.
-- `spw-request-review` / `spw-receive-review` — surfacing a change's blast
-  radius (what calls/imports/depends on it) before write-up, and checking
-  whether reviewer claims like "this might break X" are structurally
-  grounded — both are the same "what depends on this" question `spw-debug`
-  already asks, just from the review side of the loop.
-
-Other `spw-*` skills (TDD, execute-plan, verify, etc.) may be wired in
-later if the pilot validates the pattern more broadly — held back for now
-because their core loops center on the immediate function/task rather than
-codebase-wide structure, making the value less obvious to assess up front.
+Candidates worth wiring in first, and why: a skill that plans a change or
+diagnoses a problem (helped directly by a structural map); a skill that
+answers "is this a new feature or an extension of something that already
+exists" (a scoped `graphify query`/`explain` on the proposed feature's
+domain concepts can answer this even when naming differs enough that grep
+would miss the overlap); a skill that surfaces a change's blast radius
+before write-up, or checks whether a reviewer claim like "this might break
+X" is structurally grounded (both the same "what depends on this"
+question, just from opposite sides of the loop). Skills whose core loop
+centers on an immediate function/task rather than codebase-wide structure
+are natural candidates to wire in later, once the pilot validates the
+pattern more broadly — the value there is less obvious to assess up front.
 
 It is colocated with `ult-codegraph/SKILL.md` — the skill that produces the
 artifact this file describes how to consume — so anyone changing one sees the

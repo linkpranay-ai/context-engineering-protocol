@@ -6,7 +6,7 @@
       "type": "positive",
       "input": "Before writing user stories for the guest-role feature, assemble a context package from the code graph, requirements, and constraints.",
       "expected_skill": "context-generate",
-      "notes": "Canonical trigger: assembling a context package before a downstream spw generation skill runs."
+      "notes": "Canonical trigger: assembling a context package before a downstream generation skill runs."
     },
     {
       "id": "ult-context-generate-02",

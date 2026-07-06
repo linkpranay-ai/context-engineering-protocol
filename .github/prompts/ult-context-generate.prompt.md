@@ -1,6 +1,6 @@
 ﻿---
 name: context-generate
-description: "Assemble a structured, source-attributed, human-approved context package (code graph, requirements, constraints, blast radius) before any spw artifact-generation skill runs. Piloting."
+description: "Assemble a structured, source-attributed, human-approved context package (code graph, requirements, constraints, blast radius) before any downstream artifact-generation skill runs. Piloting."
 namespace: ult
 version: 0.1.0
 origin: ground-up
@@ -32,4 +32,4 @@ When invoked directly by an engineer:
 5. Review the assembled product context package and org convention package, and say
    APPROVE for both — nothing downstream proceeds without explicit approval.
 6. Once approved, hand off to the artifact-generation skill for the chosen task type
-   (e.g. `/spw-write-user-story` for `user-story`).
+   (whatever skill in your setup handles that `task_type`).

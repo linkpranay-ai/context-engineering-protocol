@@ -814,7 +814,7 @@ class TestValidate(unittest.TestCase):
             root = Path(tmp)
             for skill in (
                 "ult-context-generate", "writing-plans", "brainstorming",
-                "compiling-project-guidelines", "spw-write-user-story",
+                "compiling-project-guidelines", "example-consumer",
                 "sec-threat-model", "security-test-report", "pm-project-plan",
             ):
                 (root / ".github" / "skills" / skill).mkdir(parents=True)

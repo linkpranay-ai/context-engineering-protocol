@@ -1,6 +1,6 @@
 ﻿---
 name: codegraph
-description: "Generate or refresh a codebase knowledge graph (graphify) at its fixed graphify-out/ location so spw-* skills can query cross-file relationships. Piloting — re-run after code changes."
+description: "Generate or refresh a codebase knowledge graph (graphify) at its fixed graphify-out/ location so other skills can query cross-file relationships. Piloting — re-run after code changes."
 namespace: ult
 version: 0.1.0
 origin: ground-up
@@ -28,5 +28,5 @@ When invoked directly by an engineer:
 4. Report back: how many nodes/edges were generated, and point the user at
    `graphify-out/GRAPH_REPORT.md` for the human-readable summary. Nothing to
    copy or normalize — `graphify-out/` is graphify's own fixed, predictable
-   output location, and `spw-*` skills query it there directly (see
+   output location, and consuming skills query it there directly (see
    `CONSUMING-CODE-GRAPH.md`).

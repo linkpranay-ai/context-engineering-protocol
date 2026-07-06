@@ -35,7 +35,7 @@ tier: draft
 >   its own `CONSUMING-COMPILED-GUIDELINES.md` consumers (D20 Phase 2). The
 >   registry's only `kind: file` slot, and the only slot whose D21 default
 >   re-roots to a different bucket (`inputs` → `cache`).
-> - `user_stories_output` — written by `spw-write-user-story` (D20 Phase 2).
+> - `user_stories_output` — written by `example-consumer` (D20 Phase 2, illustrative — not a skill shipped in this repo).
 > - `security_docs` — written by `sec-threat-model` (D20 Phase 2).
 > - `security_report` — written by `security-test-report` (D20 Phase 2).
 > - `project_plan_docs` — written by `pm-project-plan` (D20 Phase 2).
@@ -92,8 +92,8 @@ tier: draft
 None — this skill is foundational. `ult-context-generate` (`utilities`
 bundle, `context_packages`), `writing-plans` (`developer` bundle,
 `plans_output`), `brainstorming` (`developer` bundle, `brainstorm_output`),
-`compiling-project-guidelines` (`developer` bundle, `compiled_guidelines`),
-`spw-write-user-story` (`developer` bundle, `user_stories_output`),
+`compiling-project-guidelines` (`utilities` bundle, `compiled_guidelines`),
+`example-consumer` (`developer` bundle, `user_stories_output`),
 `sec-threat-model` (`security` bundle, `security_docs`),
 `security-test-report` (`security` bundle, `security_report`), and
 `pm-project-plan` (`manager` bundle, `project_plan_docs`) are **consumers** of
@@ -134,7 +134,7 @@ already supported. Phase 1 + Phase 3b + Phase 2 register eight slots:
 | `plans_output` | `directory` | `docs/superpowers/plans/` | `{workspace_root}/outputs/plans/` | — | `writing-plans` |
 | `brainstorm_output` | `directory` | `docs/superpowers/specs/` | `{workspace_root}/outputs/specs/` | — | `brainstorming` |
 | `compiled_guidelines` | `file` | `starter_kit/project_guidelines/COMPILED-GUIDELINES.md` | `{workspace_root}/cache/project-guidelines/COMPILED-GUIDELINES.md` | — | `compiling-project-guidelines` |
-| `user_stories_output` | `directory` | `output_docs/user-stories/` | `{workspace_root}/outputs/user-stories/` | — | `spw-write-user-story` |
+| `user_stories_output` | `directory` | `output_docs/user-stories/` | `{workspace_root}/outputs/user-stories/` | — | `example-consumer` |
 | `security_docs` | `directory` | `output_docs/security_docs/` | `{workspace_root}/outputs/security_docs/` | — | `sec-threat-model` |
 | `security_report` | `directory` | `output_docs/security_report/` | `{workspace_root}/outputs/security_report/` | — | `security-test-report` |
 | `project_plan_docs` | `directory` | `output_docs/project_plan_docs/` | `{workspace_root}/outputs/project_plan_docs/` | — | `pm-project-plan` |
@@ -417,7 +417,7 @@ use if the human opted in above):
        user_stories_output:
          path: output_docs/user-stories/        # or wherever step 2 resolved it
          kind: directory
-         owning_skill: spw-write-user-story
+         owning_skill: example-consumer
        # ...and so on for security_docs, security_report, project_plan_docs --
        # same shape, one entry per remaining row of the slot registry table
        # above.
@@ -539,7 +539,7 @@ path: `ult-context-generate`/`CONSUMING-CONTEXT-PACKAGE.md`
 (`plans_output`), `brainstorming`/`spec-document-reviewer-prompt.md`
 (`brainstorm_output`),
 `compiling-project-guidelines`/`CONSUMING-COMPILED-GUIDELINES.md`
-(`compiled_guidelines`), `spw-write-user-story` (`user_stories_output`),
+(`compiled_guidelines`), `example-consumer` (`user_stories_output`),
 `sec-threat-model` (`security_docs`), `security-test-report`
 (`security_report`), and `pm-project-plan` (`project_plan_docs`):
 

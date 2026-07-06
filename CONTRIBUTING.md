@@ -52,9 +52,9 @@ stays in sync — see below).
 - Increment `MINOR` for meaningful extensions or improvements
 - Increment `PATCH` for fixes, wording corrections, typo repairs
 
-`namespace` should match one already in use in this repo (`ult`, `spw`,
-`demo`) unless your contribution genuinely doesn't fit any of them — new
-namespaces are fine, just make the choice a meaningful one.
+`namespace` should match one already in use in this repo (`ult`, `demo`)
+unless your contribution genuinely doesn't fit either — new namespaces are
+fine, just make the choice a meaningful one.
 
 ## Skill quality standards
 

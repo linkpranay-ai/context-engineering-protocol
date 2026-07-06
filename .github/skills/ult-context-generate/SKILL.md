@@ -1,6 +1,6 @@
 ---
 name: context-generate
-description: Assemble a context package (code graph, requirements, constraints, blast radius) before spw generation runs - human-approved, source-attributed. Do NOT use for simple lookups.
+description: Assemble a context package (code graph, requirements, constraints, blast radius) before a downstream generation task runs - human-approved, source-attributed. Do NOT use for simple lookups.
 namespace: ult
 version: 0.1.0
 origin: ground-up
@@ -17,16 +17,15 @@ tier: draft
 # ult-context-generate
 
 > **Status: piloting.** The What-L3/What-L2 dual-layer model, D10 blast-radius
-> analysis, D11 constraints layer, and the D12 handoff to `spw-write-user-story` were
-> validated end-to-end on a real ~40 KSLOC FastAPI codebase (an RBAC guest-role
-> feature, run through a full context-package generation and approval cycle) before
-> this migration — see `CONTEXT-ENGINEERING-DESIGN.md` for the full design rationale.
-> Now rolling out to a small set of engineering volunteers piloting it on
+> analysis, D11 constraints layer, and the D12 handoff to a downstream generation
+> skill were validated end-to-end on a real ~40 KSLOC FastAPI codebase (an RBAC
+> guest-role feature, run through a full context-package generation and approval
+> cycle) before this migration. Now rolling out to a small set of pilot users on
 > substantially larger codebases (500 KSLOC+, often multi-repo), where the What-L1
 > (external-spec) layer remains disabled and token-cost behavior at this scale is
 > still an open question. Report findings (works well / doesn't / surprises —
-> especially around graphify query budgets and token costs at scale) back to the
-> RadiSys Skills Guild so this can graduate out of pilot status or be reworked.
+> especially around graphify query budgets and token costs at scale) as an issue
+> in this repo so this can graduate out of pilot status or be reworked.
 >
 > **What-L1 fallback (Step 7.1, D13/D14) is also now piloting** — a small
 > `specs/external/` corpus is indexed by `scripts/md_index.py`, a
@@ -917,13 +916,14 @@ If `org_conventions.commit_to_repo: true` (default): remind the user to
 **STOP HERE. This skill's job is context assembly only — it does not generate
 any artifact (user story, test case, design doc, etc.).**
 
-- If this skill was invoked by a chaining skill (e.g. `spw-write-user-story` called
-  `ult-context-generate` as a prerequisite): return control to the calling skill now.
-  The calling skill will proceed with artifact generation using the approved packages.
+- If this skill was invoked by a chaining skill (e.g. a user-story or test-case
+  generation skill called `ult-context-generate` as a prerequisite): return control
+  to the calling skill now. The calling skill will proceed with artifact generation
+  using the approved packages.
 - If this skill was invoked directly (naked, no chaining skill): halt and tell the user
   which skill to invoke next to generate the artifact, e.g.:
   > "Context package is ready and approved. To generate [TASK_TYPE], invoke
-  > `/spw-write-user-story` (or the appropriate generation skill for your task type)."
+  > the appropriate generation skill for your task type."
 
 Do not generate any artifact content. Do not write any user stories, test cases,
 design documents, or other output beyond the two YAML/markdown context files.
@@ -959,7 +959,7 @@ primary Phase 1 measurement gate) **is not yet measurable** from this skill's
 own output. It requires real harness-level usage data collected across pilot
 runs (the `learnings.md` entries above), not self-reported estimates. Treat
 Open Question 4 as open until that data exists — when reporting findings back
-to the RadiSys Skills Guild, include `learnings.md` excerpts (real numbers),
+as an issue in this repo, include `learnings.md` excerpts (real numbers),
 especially from 500 KSLOC+ codebases where What-L3 query volume is the main
 cost driver.
 

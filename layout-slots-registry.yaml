@@ -86,7 +86,7 @@ slots:
     pre_d21_default: output_docs/user-stories/
     workspace_root_leaf: outputs/user-stories/
     config_key: ~
-    producer: spw-write-user-story
+    producer: example-consumer
     consumers: ~   # none registered yet
 
   - id: security_docs

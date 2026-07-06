@@ -129,7 +129,7 @@ SLOT_REGISTRY = {
         "kind": "directory",
         "default": "output_docs/user-stories/",
         "workspace_root_leaf": "outputs/user-stories/",
-        "owning_skill": "spw-write-user-story",
+        "owning_skill": "example-consumer",
     },
     "security_docs": {
         "kind": "directory",

@@ -113,7 +113,7 @@ cache:
   # {workspace_root}/cache/project-guidelines/COMPILED-GUIDELINES.md - the
   # only slot whose D21 bucket differs from its pre-D21 location, inputs ->
   # cache), user_stories_output (default output_docs/user-stories/, written
-  # by spw-write-user-story), security_docs (default
+  # by example-consumer), security_docs (default
   # output_docs/security_docs/, written by sec-threat-model), security_report
   # (default output_docs/security_report/, written by security-test-report),
   # and project_plan_docs (default output_docs/project_plan_docs/, written by

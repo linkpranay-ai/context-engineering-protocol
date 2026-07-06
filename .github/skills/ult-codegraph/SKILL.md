@@ -1,6 +1,6 @@
 ---
 name: codegraph
-description: Generate a codebase knowledge graph with `graphify` at `graphify-out/` so spw-* skills can query cross-file relationships before touching code. Do NOT use for runtime profiling.
+description: Generate a codebase knowledge graph with `graphify` at `graphify-out/` so other skills can query cross-file relationships before touching code. Do NOT use for runtime profiling.
 namespace: ult
 version: 0.1.0
 origin: ground-up
@@ -26,16 +26,15 @@ graph of a codebase — files, functions, classes, and their
 output location, `graphify-out/`, where other skills query it directly.
 
 > **Status: piloting.** Validated on a real ~40 KSLOC FastAPI codebase
-> (a structural lead — `seed_release_links.py → EntryMetricValue`, the
-> bridge between two otherwise-separate subsystems — that a textual `grep`
-> could not find, since the bridging file never mentions the target term)
+> (a structural lead — `webhook_dispatcher.py → RetryPolicy`, the bridge
+> between two otherwise-separate subsystems — that a textual `grep` could
+> not find, since the bridging file never mentions the target term)
 > before this migration. Now rolling out to a small set of engineering
 > volunteers piloting it on substantially larger codebases (500 KSLOC+),
 > where `graph.json` itself can run to tens of MB and the scoped-query
 > pattern below stops being optional and starts being the only thing that
-> scales. Report findings (works well / doesn't / surprises) back to the
-> RadiSys Skills Guild so this can graduate out of pilot status or be
-> reworked.
+> scales. Report findings (works well / doesn't / surprises) as an issue in
+> this repo so this can graduate out of pilot status or be reworked.
 
 ## How to generate / refresh the graph
 
@@ -111,7 +110,7 @@ tool-maintained path, so copying it would only:
 - fight the tool's own incremental-update model, which depends on
   `graphify-out/` staying exactly where `graphify` put it.
 
-So: **`spw-*` skills read `graphify-out/graph.json` and
+So: **consuming skills read `graphify-out/graph.json` and
 `graphify-out/GRAPH_REPORT.md` directly** — no copy, no second location.
 See `CONSUMING-CODE-GRAPH.md` in this folder for the consumption contract
 (which also explains *how* to consume it: prefer scoped `graphify query`

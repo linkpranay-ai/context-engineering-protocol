@@ -175,7 +175,7 @@ Also create a companion markdown summary at
 **`content_hash` maintenance (two-pass save, D19 v2 C1/C2):** any time
 `contexts/<id>.yaml` is written or rewritten — this step's initial save (on
 approval), Step 3's fold-addenda re-save, or a consumer skill's domain-enrichment
-write-back (e.g. `spw-write-user-story` Step 4.5) — save in two passes:
+write-back (per `CONSUMING-CONTEXT-PACKAGE.md`) — save in two passes:
 1. Write the YAML with `content_hash` omitted (first save) or left at its
    prior, now-stale value.
 2. Run `python scripts/content_hash.py contexts/<id>.yaml` to compute the
