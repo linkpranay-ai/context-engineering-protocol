@@ -1,0 +1,11 @@
+---
+description: "Worked example that discovers, loads, and tags a context package per CONSUMING-CONTEXT-PACKAGE.md, then writes a reverse-index addendum — proves the produce/consume/tag loop end-to-end. Do NOT use for real feature work."
+globs:
+alwaysApply: false
+---
+
+# Demo: Consuming a Context Package (worked example)
+
+This repository packages its capabilities as portable skills for AI
+coding agents. Read `.github/skills/demo-consume-context/SKILL.md` and follow it
+when this rule applies.

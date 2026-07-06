@@ -1,0 +1,11 @@
+---
+description: "Generate a codebase knowledge graph with `graphify` at `graphify-out/` so other skills can query cross-file relationships before touching code. Do NOT use for runtime profiling."
+globs:
+alwaysApply: false
+---
+
+# Codebase Graph (graphify wrapper)
+
+This repository packages its capabilities as portable skills for AI
+coding agents. Read `.github/skills/ult-codegraph/SKILL.md` and follow it
+when this rule applies.

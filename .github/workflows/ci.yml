@@ -26,3 +26,6 @@ jobs:
 
       - name: Check NOTICE is up to date with adapted_from frontmatter
         run: python catalog/generate_notice.py --check
+
+      - name: Check cross-runtime adapters (Copilot/Cursor/Codex) are up to date
+        run: python catalog/export_adapters.py --check
