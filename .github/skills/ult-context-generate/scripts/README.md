@@ -14,6 +14,10 @@ Build-once → write JSON → skills query the JSON. Same contract graphify uses
   step.
 - **Runs on Windows** (developed/validated on Python 3.12.5 / PowerShell). Uses
   `pathlib`; normalises `\r\n` and lone `\r` line endings before parsing.
+- **Domain-pluggable, not hardcoded to any one standards body.** Heading/clause-id
+  conventions and cross-reference phrasings live in a small JSON "profile" file, not
+  in the parser. Four ship today (`generic`/`3gpp`/`rfc`/`ieee`); adding a profile for
+  your own domain's documents needs no code change — see **Profiles** below.
 
 > Scope note: **R1, R2, and R3** (including the `rfc.json`/`ieee.json` profiles) are
 > complete, with a regression suite in `tests/`. The rewrite of
