@@ -1,0 +1,25 @@
+Context Engineering Protocol
+Copyright 2026 Pranay Mishra
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project was originally prototyped by the author as part of unrelated internal
+work, and is released here as an independent personal project.
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+graphify / graphifyy
+  https://github.com/safishamsi/graphify
+  License: MIT
+  Used by: ult-codegraph (SKILL.md) as an external CLI dependency, not vendored
+  source. graphify is installed by the user (via `uv`/`pipx`) and invoked as a
+  subprocess; no graphify source code is redistributed in this repository.
+
+--------------------------------------------------------------------------------
+Adapted content
+--------------------------------------------------------------------------------
+
+(To be populated during extraction: any file carrying a non-empty `adapted_from`
+field in its frontmatter is listed here with its upstream source and version.)

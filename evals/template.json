@@ -1,0 +1,27 @@
+{
+  "$comment": "Template for skill eval cases (EDD — Evaluation-Driven Development). Copy this structure into evals/<skill-name>.eval.json. Minimum 3 cases per skill: at least 2 positive (this skill SHOULD trigger) and 1 negative (this skill should NOT trigger, even though the input superficially resembles a trigger). Write these cases before or alongside SKILL.md changes, not after — that's the 'D' in EDD. Checked by catalog/check_eval_triggers.py via simple keyword-overlap (no LLM call) — see CONTRIBUTING.md.",
+  "skill": "<skill-name, matching the SKILL.md frontmatter name field exactly>",
+  "cases": [
+    {
+      "id": "<skill-name>-01",
+      "type": "positive",
+      "input": "<a realistic user message that SHOULD trigger this skill>",
+      "expected_skill": "<skill-name>",
+      "notes": "<what this case verifies — which real-world phrasing or use case>"
+    },
+    {
+      "id": "<skill-name>-02",
+      "type": "positive",
+      "input": "<a second realistic user message, phrased differently, that SHOULD trigger this skill>",
+      "expected_skill": "<skill-name>",
+      "notes": "<what this case verifies>"
+    },
+    {
+      "id": "<skill-name>-03-negative",
+      "type": "negative",
+      "input": "<a realistic user message that should NOT trigger this skill, despite superficial similarity>",
+      "not_expected_skill": "<skill-name>",
+      "notes": "<the false-positive routing failure this guards against — usually tied to the skill's 'Do NOT use for...' description clause>"
+    }
+  ]
+}

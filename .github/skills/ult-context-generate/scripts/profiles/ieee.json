@@ -1,0 +1,10 @@
+{
+  "name": "ieee",
+  "description": "IEEE standard house style. Headings are dotted-numeric (e.g. '9.3.2 Title'). Cross-refs use the section-sign form '§9.3.2', optionally prefixed by a document designator ('IEEE 802.11-2020 §9.3.2' — the designator is ignored, only the trailing clause id is captured for same-file resolution), plus 'Clause 9.3.2' / 'subclause 9.3.2'.",
+  "clause_id_regex": "^(\\d+(?:\\.\\d+)*)\\s+(.+)$",
+  "cross_ref_patterns": [
+    {"regex": "§\\s*(\\d+(?:\\.\\d+)*)", "kind": "section"},
+    {"regex": "\\b(?:[Cc]lause|[Ss]ubclause)\\s+(\\d+(?:\\.\\d+)*)\\b", "kind": "clause"}
+  ],
+  "toc_titles_to_suppress": ["contents", "table of contents"]
+}

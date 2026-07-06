@@ -1,0 +1,10 @@
+{
+  "name": "rfc",
+  "description": "IETF RFC house style. Headings are dotted-numeric, optionally followed by a literal '.' before the title (e.g. '5.2.2.  Title' or '5.2.2 Title'). Cross-refs appear in prose as 'Section N.M' / 'Sections N and M' and '(see Section N.M)'.",
+  "clause_id_regex": "^(\\d+(?:\\.\\d+)*)\\.?\\s+(.+)$",
+  "cross_ref_patterns": [
+    {"regex": "\\bSections?\\s+(\\d+(?:\\.\\d+)*)\\b", "kind": "section"},
+    {"regex": "\\(\\s*see\\s+Section\\s+(\\d+(?:\\.\\d+)*)\\s*\\)", "kind": "see"}
+  ],
+  "toc_titles_to_suppress": ["table of contents"]
+}

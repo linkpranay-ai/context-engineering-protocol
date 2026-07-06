@@ -1,0 +1,26 @@
+{
+  "skill": "context-generate",
+  "cases": [
+    {
+      "id": "ult-context-generate-01",
+      "type": "positive",
+      "input": "Before writing user stories for the guest-role feature, assemble a context package from the code graph, requirements, and constraints.",
+      "expected_skill": "context-generate",
+      "notes": "Canonical trigger: assembling a context package before a downstream spw generation skill runs."
+    },
+    {
+      "id": "ult-context-generate-02",
+      "type": "positive",
+      "input": "I need a source-attributed, human-approved context package covering blast radius for this RBAC change before any artifact gets generated from it.",
+      "expected_skill": "context-generate",
+      "notes": "Emphasizes blast radius + human-approved + source-attributed, distinct phrasing from case 01."
+    },
+    {
+      "id": "ult-context-generate-03-negative",
+      "type": "negative",
+      "input": "Quick question — what does the get_db function in this file actually do?",
+      "not_expected_skill": "context-generate",
+      "notes": "A simple lookup — exactly the case the skill's own 'Do NOT use for simple lookups' clause exists to redirect away from the full context-assembly pipeline."
+    }
+  ]
+}
