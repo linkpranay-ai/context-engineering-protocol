@@ -223,9 +223,9 @@ Propose aspects from `FEATURE_TERM` plus the Step 1 answers:
   **existing baseline** from **the new extension/delta being added**. These
   are exactly the aspects most likely to have divergent coverage — the
   baseline is in code and old docs; the extension may only be in an updated
-  external spec, or nowhere yet. Example: extending LTE Carrier Aggregation
-  to LTE-Advanced → aspects `"Carrier Aggregation (LTE baseline)"` and
-  `"Carrier Aggregation LTE-Advanced extension"`.
+  external spec, or nowhere yet. Example: extending an existing password-reset
+  flow to support passkeys → aspects `"Password reset (baseline)"` and
+  `"Password reset — passkey extension"`.
 - Add a distinct aspect for anything called out in Step 1's "known gaps"
   answer.
 

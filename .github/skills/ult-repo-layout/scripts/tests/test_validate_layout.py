@@ -960,7 +960,7 @@ class TestRegistryConsistency(unittest.TestCase):
             self.assertFalse(any("registry/code drift" in line for line in report))
 
     def test_real_registry_file_is_consistent_with_slot_registry(self):
-        # The actual radisys-ai-power-lib/layout-slots-registry.yaml (§16.8)
+        # The actual repo-root layout-slots-registry.yaml (§16.8)
         # must stay in sync with SLOT_REGISTRY above - this is the direct
         # regression check for that.
         repo_root = Path(__file__).resolve().parents[5]

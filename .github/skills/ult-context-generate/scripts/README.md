@@ -97,12 +97,12 @@ it depends on how many aspects a given run has).
 ```powershell
 # Build a 3GPP-profile index of TS 33.401
 python md_index.py index `
-  "C:\Users\pmishra\OneDrive - RadiSys Corporation\Desktop\MetricsDashboard\specs\external\3gpp-ts33401-security-architecture-rel17.md" `
+  corpus\3gpp-ts33401-security-architecture-rel17.md `
   -o specs-out\ts33401.json --profile 3gpp
 
 # Build a generic-profile index of the NIST excerpt
 python md_index.py index `
-  "C:\Users\pmishra\OneDrive - RadiSys Corporation\Desktop\MetricsDashboard\specs\external\session-management.md" `
+  corpus\session-management.md `
   -o specs-out\session.json --profile generic
 
 # Query the gap topic + synonyms (D13/D14)

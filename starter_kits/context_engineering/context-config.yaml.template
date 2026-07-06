@@ -36,7 +36,7 @@ layers:
                           # OUTSIDE `path` to also index wholesale (no
                           # exclude-filtering — being listed here IS the
                           # inclusion decision). Empty list (default) = no-op.
-                          # Example for a radisys SDLC-shaped project that
+                          # Example for a project with its own SDLC layout that
                           # remaps outputs/-bucket slots to its existing
                           # output_docs_structure/ layout (§16.7):
                           #   include_roots:

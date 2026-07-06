@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import validate_layout as vl  # noqa: E402
 
-# .github/skills/ult-repo-layout/scripts/tests/ -> radisys-ai-power-lib/
+# .github/skills/ult-repo-layout/scripts/tests/ -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[5]
 TEMPLATE_PATH = REPO_ROOT / "starter_kits" / "context_engineering" / "context-config.yaml.template"
 

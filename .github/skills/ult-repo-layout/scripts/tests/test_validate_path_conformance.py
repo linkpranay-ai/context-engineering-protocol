@@ -254,13 +254,10 @@ class TestRealSkillFiles(unittest.TestCase):
 
     def test_runs_cleanly_against_existing_skills(self):
         repo_root = Path(__file__).resolve().parents[5]
-        for skill_dir in (
-            "security-test-report",
-            "pm-project-plan",
-            "ult-repo-layout",
-        ):
-            target = repo_root / ".github" / "skills" / skill_dir / "SKILL.md"
-            self.assertTrue(target.exists(), f"{target} is missing")
+        skills_dir = repo_root / ".github" / "skills"
+        targets = sorted(skills_dir.glob("*/SKILL.md"))
+        self.assertTrue(targets, f"no SKILL.md files found under {skills_dir}")
+        for target in targets:
             report = vpc.validate(target, repo_root)
             self.assertIsInstance(report, list)
             for line in report:

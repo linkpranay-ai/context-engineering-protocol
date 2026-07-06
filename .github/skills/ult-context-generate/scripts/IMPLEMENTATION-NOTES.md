@@ -10,9 +10,9 @@ session needs to rewrite Step 7.1 (R4).
 
 Run against the two real files the deleted prototype was validated on:
 
-- `…/MetricsDashboard/specs/external/3gpp-ts33401-security-architecture-rel17.md`
+- `corpus/3gpp-ts33401-security-architecture-rel17.md`
   (real TS 33.401, 12,018 lines, 524,635 bytes, `--profile 3gpp`)
-- `…/MetricsDashboard/specs/external/session-management.md`
+- `corpus/session-management.md`
   (53-line NIST SP 800-63B excerpt, `--profile generic`)
 
 | # | Acceptance check | Expected (D14) | Produced | Verdict |

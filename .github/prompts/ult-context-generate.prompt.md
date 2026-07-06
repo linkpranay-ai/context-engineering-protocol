@@ -5,7 +5,7 @@ namespace: ult
 version: 0.1.0
 origin: ground-up
 author: Pranay Mishra
-maintainer: RadiSys Skills Guild
+maintainer: Pranay Mishra
 adapted_from: ~
 upstream_version: ~
 released: 2026-06-10
