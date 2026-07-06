@@ -1,0 +1,26 @@
+{
+  "skill": "compiling-project-guidelines",
+  "cases": [
+    {
+      "id": "compiling-project-guidelines-01",
+      "type": "positive",
+      "input": "We have coding conventions scattered across CONTRIBUTING.md, a wiki, and some PDFs — can you compile them into one scope-aware guidelines doc for the team?",
+      "expected_skill": "compiling-project-guidelines",
+      "notes": "Canonical trigger: compiling scattered guideline sources into one scope-aware doc."
+    },
+    {
+      "id": "compiling-project-guidelines-02",
+      "type": "positive",
+      "input": "Before ult-context-generate builds its constraints layer, merge our scattered project guidelines from docs, PDFs, and tribal knowledge into a single conflict-resolved COMPILED-GUIDELINES.md.",
+      "expected_skill": "compiling-project-guidelines",
+      "notes": "Emphasizes the ult-context-generate Constraints-layer consumer, distinct phrasing from case 01."
+    },
+    {
+      "id": "compiling-project-guidelines-03-negative",
+      "type": "negative",
+      "input": "Can you add a pre-commit hook that blocks commits violating our style guide automatically?",
+      "not_expected_skill": "compiling-project-guidelines",
+      "notes": "Runtime rule enforcement — exactly the case the skill's 'Do NOT use to enforce rules at runtime' clause exists to redirect away from guideline compilation."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "skill": "codegraph",
+  "cases": [
+    {
+      "id": "ult-codegraph-01",
+      "type": "positive",
+      "input": "Before I touch this code, generate a knowledge graph of the codebase using graphify so I can check cross-file call relationships.",
+      "expected_skill": "codegraph",
+      "notes": "Canonical trigger: building the code graph before making changes."
+    },
+    {
+      "id": "ult-codegraph-02",
+      "type": "positive",
+      "input": "Can you build a code-graph for this repo with the graphify CLI before I start refactoring, so other skills can query call/import relationships across files?",
+      "expected_skill": "codegraph",
+      "notes": "Emphasizes downstream-skill querying, distinct phrasing from case 01."
+    },
+    {
+      "id": "ult-codegraph-03-negative",
+      "type": "negative",
+      "input": "I want to profile CPU and memory usage while the application runs in production, to find performance bottlenecks.",
+      "not_expected_skill": "codegraph",
+      "notes": "Runtime performance profiling — exactly the case the skill's 'Do NOT use for runtime profiling' clause exists to redirect away from static code-graph generation."
+    }
+  ]
+}
