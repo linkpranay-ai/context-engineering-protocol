@@ -1,18 +1,20 @@
-# How an spw skill should consume an approved context package
+# How a consuming skill should consume an approved context package
 
-> **Status: piloting** — this contract is the first wiring of context-package
-> reuse beyond `spw-write-user-story` (which generates/consumes packages
-> directly via `ult-context-generate`'s own flow). It starts with
-> `spw-brainstorm` and `spw-write-plan`. Report findings back to the RadiSys
-> Skills Guild so this can graduate out of pilot status, and so the addenda
-> mechanism (steps 5–7 below) can be extended to more consumers.
+> **Status: piloting** — this contract is the general "any skill or tool"
+> consumption story for context packages, independent of any specific
+> downstream skill set. `demo-consume-context` is a small, from-scratch
+> worked example that exercises it end-to-end. Any skill whose job is to
+> produce an artifact for a specific feature (a design, a plan, test cases, a
+> code review, a debug session, ...) is a candidate consumer.
 >
 > **D19 v2 additions (newest pilot surface):** step 0 (tag discovery —
 > existence/hash/supersession checks against `<package-id>@<hash8>` tags) and
 > step 9 (tag emission + reverse-index addenda) are the traceability-tag
-> half of this contract. `spw-write-user-story` is the first producer of the
-> item-level `[Context: ...]` tags step 0 looks for; every other consuming
-> skill both reads them (step 0) and writes its own document-level/attribution
+> half of this contract. Item-level `[Context: ...]` tags (step 0 looks for
+> these) are produced by whichever skill pushes individually-addressable
+> sub-units to an external tracker — none of the skills in this repo do that
+> today, so item-level tags are N/A here; every consuming skill still reads
+> them when present (step 0) and writes its own document-level/attribution
 > tags (step 9).
 >
 > **Path resolution (D20 Phase 1 + D21 Phase 3a):** `contexts/` throughout
@@ -58,8 +60,9 @@ follow this before doing that work:
      the newer package too."` Do not auto-switch to the superseding package.
 
    Every package that survives the existence check becomes a "Found" package
-   for step 2 onward — **regardless of its own `task_type`** (a tag minted by
-   `spw-write-user-story` is still useful context for `spw-write-plan`, etc.).
+   for step 2 onward — **regardless of its own `task_type`** (a tag minted for
+   one task type is still useful context for a related one — e.g. a
+   design-note package can inform a later test-planning task).
    Merge (dedupe by `<package-id>`) with whatever step 1's glob check also
    finds.
 
@@ -164,7 +167,7 @@ follow this before doing that work:
    addenda:
      - id: add_<NNN>
        kind: context_item        # or: decision
-       added_by: <skill-name>          # e.g. spw-brainstorm
+       added_by: <skill-name>          # e.g. demo-consume-context
        added_at: <ISO timestamp>
        note: >
          <one line — what was being looked up, and why>
@@ -182,22 +185,22 @@ follow this before doing that work:
      `;`-separate them: `<id1>@<hash8-1>; <id2>@<hash8-2>`.
    - or `"No context package found — proceeding without it."`
 
-   For skills whose output is primarily a chat response (`spw-debug`,
-   `spw-tdd`, `spw-verify`, `spw-request-review`/`spw-receive-review`,
-   `spw-execute-plan`), this line *is* the tag (D19 v2, step 9) — no separate
+   For skills whose output is primarily a chat response rather than a
+   persisted file, this line *is* the tag (D19 v2, step 9) — no separate
    file action is needed.
 
 9. **Document-level tag and reverse index (D19 v2)** — if this skill's work
-   produces a **persisted file** (e.g. `spw-write-plan`'s plan file,
-   `spw-brainstorm`'s saved design notes), add a `**Context package(s):**
+   produces a **persisted file** (a plan document, saved design notes, a
+   generated report, ...), add a `**Context package(s):**
    <id1>@<hash8-1>[, <id2>@<hash8-2>...]` line near the top of that file,
    listing every package consulted (resolved via steps 0 and/or 1).
 
    **Item-level tags** (`[Context: <package-id>@<hash8> · ctx_NNN · aspect
-   <id>]` as the first line of a generated item's body) are N/A for these 8
-   consuming skills today — none of them push individually-addressable
-   sub-units to an external tracker. `spw-write-user-story` is the first
-   producer of item-level tags; see its `SKILL.md` Step 3c/3d.
+   <id>]` as the first line of a generated item's body) are N/A for
+   document- or chat-response-level consuming skills — they only apply to a
+   producer that pushes individually-addressable sub-units to an external
+   tracker (e.g. a user-story generator writing one tracker item per story).
+   None of the skills in this repo do that today.
 
    **Reverse-index addendum (core):** for every package named in step 8's
    attribution line or this step's document-level tag, write a
@@ -208,7 +211,7 @@ follow this before doing that work:
    addenda:
      - id: add_<NNN>
        kind: reference
-       added_by: <skill-name>           # e.g. spw-brainstorm
+       added_by: <skill-name>           # e.g. demo-consume-context
        added_at: <ISO timestamp>
        artifact: <path-to-output, or "chat response">
        cites: { ctx_ids: [...], aspect_ids: [...] }
@@ -216,14 +219,15 @@ follow this before doing that work:
 
    This lets a future reader of `contexts/<package-id>.yaml` discover every
    downstream artifact that consulted it — the reverse of the forward tags
-   `spw-write-user-story` emits.
+   this step writes.
 
 ---
 
-This file is the single source of truth for "how does an spw skill consume
+This file is the single source of truth for "how does a consuming skill use
 an approved context package and its addenda." It is referenced by a one-line
-pointer from `spw-*.prompt.md` shims rather than copied into each one — the
-protocol is written, reviewed, and updated in exactly one place.
+pointer from each consuming skill's `SKILL.md`/`.prompt.md` rather than
+copied into each one — the protocol is written, reviewed, and updated in
+exactly one place.
 
 It is colocated with `ult-context-generate/SKILL.md` — the skill that
 produces the package this file describes how to consume — so anyone changing
