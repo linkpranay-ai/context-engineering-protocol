@@ -1,0 +1,56 @@
+name: Bug report
+description: Report something that is broken or misleading.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve Context Engineering Protocol.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ult-context-generate
+        - ult-codegraph
+        - ult-repo-layout
+        - compiling-project-guidelines
+        - adapters or catalog
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include commands, inputs, and relevant paths if possible.
+      placeholder: |
+        1. Run ...
+        2. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Agent runtime, OS, Python version, and any relevant tool versions.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      render: shell

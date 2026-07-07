@@ -1,5 +1,9 @@
 # Context Engineering Protocol
 
+[![CI](https://github.com/linkpranay-ai/context-engineering-protocol/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/linkpranay-ai/context-engineering-protocol/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/linkpranay-ai/context-engineering-protocol/releases/tag/v0.1.0)
+
 A set of AI-coding-agent skills that assemble a **human-approved, source-attributed context
 package** — code graph + requirements + org conventions + constraints — before a generation task
 runs, instead of letting the agent free-read the repo and guess.
