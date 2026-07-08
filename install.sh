@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# Installs this repo's skill library (.github/skills/, .github/prompts/,
+# .cursor/rules/, AGENTS.md) into an existing target project directory.
+#
+# Not a package-manager-style installer: no version pinning, no network
+# fetch. Run this from inside a clone of context-engineering-oss, pointed at
+# a separate target project directory.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: install.sh --target <dir> [--init-project] [--dry-run]
+
+  --target <dir>    Required. Path to an existing target project directory.
+  --init-project    Also scaffold context-config.yaml (if absent) and
+                     starter_kit/project_guidelines/.pointer.md (if absent).
+  --dry-run         Print what would be done without writing anything.
+  -h, --help        Show this help.
+EOF
+}
+
+TARGET=""
+INIT_PROJECT=0
+DRY_RUN=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --target)
+      TARGET="${2:-}"
+      shift 2
+      ;;
+    --init-project)
+      INIT_PROJECT=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "$TARGET" ]; then
+  echo "Error: --target <dir> is required." >&2
+  usage >&2
+  exit 1
+fi
+
+if [ ! -d "$TARGET" ]; then
+  echo "Error: target directory does not exist: $TARGET" >&2
+  exit 1
+fi
+
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+TARGET="$(cd "$TARGET" && pwd)"
+
+if [ "$SOURCE_ROOT" = "$TARGET" ]; then
+  echo "Error: target directory must not be the same as the library source directory ($SOURCE_ROOT)." >&2
+  exit 1
+fi
+
+ACTION_COUNT=0
+
+log_action() {
+  ACTION_COUNT=$((ACTION_COUNT + 1))
+  echo "$1"
+}
+
+# copy_tree <src-rel-path> <dst-rel-path>
+# Always overwrites the destination — library-owned files are meant to
+# always mirror the source library, same as vendored code.
+copy_tree() {
+  local src="$SOURCE_ROOT/$1"
+  local dst="$TARGET/$2"
+
+  if [ ! -e "$src" ]; then
+    echo "Error: expected source path missing: $src" >&2
+    exit 1
+  fi
+
+  local existed=0
+  [ -e "$dst" ] && existed=1
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [ "$existed" -eq 1 ]; then
+      log_action "would overwrite: $2"
+    else
+      log_action "would create: $2"
+    fi
+    return
+  fi
+
+  mkdir -p "$(dirname "$dst")"
+  rm -rf "$dst"
+  cp -R "$src" "$dst"
+
+  if [ "$existed" -eq 1 ]; then
+    log_action "overwrote: $2"
+  else
+    log_action "created: $2"
+  fi
+}
+
+BEGIN_MARKER="<!-- BEGIN context-engineering-protocol SKILLS (auto-generated, do not edit) -->"
+END_MARKER="<!-- END context-engineering-protocol SKILLS -->"
+
+# merge_agents_md: writes/replaces only the marked block in the target's
+# AGENTS.md, leaving any other content in that file untouched. Creates the
+# file (with just the block) if it doesn't exist yet.
+merge_agents_md() {
+  local src="$SOURCE_ROOT/AGENTS.md"
+  local dst="$TARGET/AGENTS.md"
+
+  if [ ! -f "$src" ]; then
+    echo "Error: expected source file missing: $src" >&2
+    exit 1
+  fi
+
+  local dst_exists=0
+  [ -f "$dst" ] && dst_exists=1
+
+  local has_block=0
+  if [ "$dst_exists" -eq 1 ] && grep -qF "$BEGIN_MARKER" "$dst"; then
+    has_block=1
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [ "$has_block" -eq 1 ]; then
+      log_action "would update block in: AGENTS.md"
+    elif [ "$dst_exists" -eq 1 ]; then
+      log_action "would append block to: AGENTS.md"
+    else
+      log_action "would create: AGENTS.md"
+    fi
+    return
+  fi
+
+  local block_file
+  block_file="$(mktemp)"
+  {
+    printf '%s\n' "$BEGIN_MARKER"
+    cat "$src"
+    printf '%s\n' "$END_MARKER"
+  } > "$block_file"
+
+  if [ "$has_block" -eq 1 ]; then
+    local before after tmp
+    before="$(mktemp)"
+    after="$(mktemp)"
+    tmp="$(mktemp)"
+    awk -v b="$BEGIN_MARKER" 'index($0,b)==1{exit} {print}' "$dst" > "$before"
+    awk -v e="$END_MARKER" 'f{print} index($0,e)==1{f=1}' "$dst" > "$after"
+    cat "$before" "$block_file" "$after" > "$tmp"
+    mv "$tmp" "$dst"
+    rm -f "$before" "$after"
+    log_action "updated block in: AGENTS.md"
+  elif [ "$dst_exists" -eq 1 ]; then
+    { cat "$dst"; printf '\n'; cat "$block_file"; } > "${dst}.new"
+    mv "${dst}.new" "$dst"
+    log_action "appended block to: AGENTS.md"
+  else
+    cp "$block_file" "$dst"
+    log_action "created: AGENTS.md"
+  fi
+
+  rm -f "$block_file"
+}
+
+# scaffold_context_config: creates context-config.yaml from the template
+# with the 5-row mechanical substitution, only if not already present.
+scaffold_context_config() {
+  local src="$SOURCE_ROOT/starter_kits/context_engineering/context-config.yaml.template"
+  local dst="$TARGET/context-config.yaml"
+
+  if [ ! -f "$src" ]; then
+    echo "Error: expected source file missing: $src" >&2
+    exit 1
+  fi
+
+  if [ -f "$dst" ]; then
+    log_action "skipped (exists): context-config.yaml"
+    return
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log_action "would create: context-config.yaml"
+    return
+  fi
+
+  # sed (not bash parameter substitution via command substitution) so the
+  # template's exact trailing-newline byte layout survives untouched — the
+  # test suite compares this output byte-for-byte against the template
+  # read directly in Python.
+  sed \
+    -e 's#<source code root, e.g. app/ or src/>#.#g' \
+    -e 's#<requirements docs root, e.g. docs/requirements/>#docs/requirements/#g' \
+    -e 's#<external reference root, e.g. specs/external/>#specs/external/#g' \
+    -e 's#<org conventions/templates root, e.g. org/>#org/#g' \
+    -e 's#<process standards root, e.g. org/process-standards/>#org/process-standards/#g' \
+    "$src" > "$dst"
+  log_action "created: context-config.yaml"
+}
+
+# scaffold_pointer: (re)writes starter_kit/project_guidelines/.pointer.md.
+# Idempotent and additive — creates the drop-zone directory if absent,
+# overwrites only the pointer file; any other files placed there are left
+# alone. Only the project_guidelines leaf is scaffolded: it's the only one
+# of the 5 documented starter-kit leaves actually read by a skill shipped in
+# this repo (compiling-project-guidelines); the other 4 have no shipped
+# library-source content to point at.
+scaffold_pointer() {
+  local leaf_dir="$TARGET/starter_kit/project_guidelines"
+  local dst="$leaf_dir/.pointer.md"
+  local existed=0
+  [ -f "$dst" ] && existed=1
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [ "$existed" -eq 1 ]; then
+      log_action "would update: starter_kit/project_guidelines/.pointer.md"
+    else
+      log_action "would create: starter_kit/project_guidelines/.pointer.md"
+    fi
+    return
+  fi
+
+  mkdir -p "$leaf_dir"
+  cat > "$dst" <<'POINTER_EOF'
+# project_guidelines — starter-kit drop-zone
+
+This directory holds project-owned, human-curated material for `project_guidelines`.
+Current template and README: `starter_kits/project_guidelines/` in the
+skills library this project pulls from.
+
+This file is regenerated by the installer's -InitProject/--init-project mode
+and by `/ult-repo-layout init`/`reconcile` — do not edit it directly. Place
+your own files alongside it; they are never touched.
+POINTER_EOF
+
+  if [ "$existed" -eq 1 ]; then
+    log_action "overwrote: starter_kit/project_guidelines/.pointer.md"
+  else
+    log_action "created: starter_kit/project_guidelines/.pointer.md"
+  fi
+}
+
+copy_tree ".github/skills" ".github/skills"
+copy_tree ".github/prompts" ".github/prompts"
+copy_tree ".cursor/rules" ".cursor/rules"
+merge_agents_md
+
+if [ "$INIT_PROJECT" -eq 1 ]; then
+  scaffold_context_config
+  scaffold_pointer
+fi
+
+echo ""
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "Dry run complete ($ACTION_COUNT action(s) previewed) — no files were written."
+else
+  echo "Install complete: $ACTION_COUNT action(s) taken in $TARGET"
+fi

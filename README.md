@@ -54,8 +54,22 @@ true" as a first-class question, not an assumption.
 
 ## Quickstart
 
-See [`user_guides/topics/project-setup-context-engineering.md`](user_guides/topics/project-setup-context-engineering.md)
-for the two paths:
+Clone this repo, then copy its skill set into your target project:
+
+```sh
+git clone https://github.com/linkpranay-ai/context-engineering-protocol.git
+cd context-engineering-protocol
+./install.sh --target /path/to/your/project --init-project   # or install.ps1 -TargetPath ... -InitProject
+```
+
+That copies `.github/skills/`, `.github/prompts/`, `.cursor/rules/`, and `AGENTS.md` into your
+project, and (with `--init-project`/`-InitProject`) scaffolds a starter `context-config.yaml`.
+Re-running is safe — library files are refreshed, project-owned files (like a filled-in
+`context-config.yaml`) are left alone. Run `./install.sh --help` / `Get-Help ./install.ps1` for
+the full flag list, including `--dry-run`/`-DryRun`.
+
+Then see [`user_guides/topics/project-setup-context-engineering.md`](user_guides/topics/project-setup-context-engineering.md)
+for the two setup paths:
 
 - **Path A** (simple) — just compile scattered guideline sources into one conflict-checked
   `COMPILED-GUIDELINES.md` for any AI agent to read. 3 steps.
@@ -88,8 +102,8 @@ The full formal contract (addenda, multi-package edge cases, tag-discovery rules
 
 ## Roadmap
 
-What's planned next — installer, How-L1 implementation, cross-file citation resolution, and
-more — is tracked in [`ROADMAP.md`](ROADMAP.md), roughly prioritized.
+What's planned next — How-L1 implementation, cross-file citation resolution, and more — is
+tracked in [`ROADMAP.md`](ROADMAP.md), roughly prioritized.
 
 ## Runtime support
 
@@ -141,11 +155,6 @@ against a real Cursor installation — see "What's not yet done" below. Run
 Disclosed plainly rather than glossed over. Full prioritized list with more detail:
 [`ROADMAP.md`](ROADMAP.md).
 
-- **No installer script exists.** Several `SKILL.md` files reference `install.ps1`/`install.sh
-  -InitProject` as how a consuming project gets set up, but no such script exists anywhere in
-  this repo yet — adoption today means manually copying `.github/skills/`, `.github/prompts/`,
-  and `AGENTS.md`/`.cursor/rules/` into the target project. Confirmed painful but workable during
-  the Phase 9 dogfood run; top item on [`ROADMAP.md`](ROADMAP.md).
 - **How-L1** (org-wide process-standard ingestion, e.g. CMMI/ISO/IEEE) is not implemented — only
   How-L2 (compiled project guidelines) exists today. Its intended design is specified in
   [`PROTOCOL.md`](PROTOCOL.md#5-how-l1--specified-now-built-later-phase-2).

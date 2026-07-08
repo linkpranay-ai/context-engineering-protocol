@@ -4,19 +4,7 @@ What's planned beyond v0.1.0, roughly prioritized. Nothing here has a committed 
 disclosure of known gaps and candidate next work, not a promise. Open an issue if one of these
 would unblock your project; that's the signal used to reprioritize this list.
 
-## 1. Installer script
-
-**Status: not started — top priority.** Several `SKILL.md` files already reference
-`install.ps1` / `install.sh -InitProject` as how a consuming project gets set up, but no such
-script exists yet. Today, adopting this protocol in a new project means manually copying
-`.github/skills/`, `.github/prompts/`, and the generated `AGENTS.md`/`.cursor/rules/` files into
-the target repo. Confirmed workable but tedious during the Phase 9 dogfood run against
-`Textualize/textual`. Scope: a script that copies the skill set, optionally scaffolds
-`context-config.yaml` from the template, and reports what it did — not a package-manager-style
-installer with version pinning (that's a later concern, if this ever needs to support multiple
-protocol versions coexisting).
-
-## 2. How-L1 implementation
+## 1. How-L1 implementation
 
 **Status: specified, not built.** The intended design — what it ingests (org-wide process
 standards: CMMI, ISO 9001, IEEE process standards), where it slots into `ult-context-generate`'s
@@ -27,7 +15,7 @@ query step between the existing How-L2 check and the What-layer gap detection. R
 `md_index.py` indexing mechanism What-L1 already uses — this is largely a wiring/gating task, not
 new infrastructure.
 
-## 3. Cross-file citation resolution
+## 2. Cross-file citation resolution
 
 **Status: spec written, not implemented.** Today's `cross_refs` resolution in `md_index.py` is
 single-hop and same-file — `(see clause 7.5)` resolves if `7.5` is a heading in the *same* file,
@@ -37,14 +25,14 @@ see [`scripts/README.md` §"Future work (R9): cross-file citation resolution"](.
 for the full spec, including why it's deliberately deferred until confidence-scoring on
 single-file resolution is solid first.
 
-## 4. `graphify merge-graphs` multi-root fix
+## 3. `graphify merge-graphs` multi-root fix
 
 **Status: known broken, documented workaround.** Multi-root repos (more than one independent
 source tree) can't currently merge their per-root graphs into one. Workaround: point
 `ult-codegraph` at one root at a time and treat each as independent for now. Root-caused but not
 yet fixed.
 
-## 5. Cursor live-install validation
+## 4. Cursor live-install validation
 
 **Status: generated, doc-verified, not field-tested.** `catalog/export_adapters.py` generates
 `.cursor/rules/*.mdc` deterministically from each skill's `SKILL.md` frontmatter, checked against
@@ -55,7 +43,7 @@ Copilot both have this field validation already; Codex has it via Codex Desktop 
 installation to run the same kind of dogfood pass Phase 9 already did for the other three
 runtimes.
 
-## 6. Real-corpus telecom example
+## 5. Real-corpus telecom example
 
 **Status: interim synthetic version shipped.** [`examples/telecom-what-l1-demo/`](examples/telecom-what-l1-demo/)
 demonstrates the What-L1 mechanism against a hand-authored, clearly-labeled synthetic 3GPP-style
@@ -65,7 +53,7 @@ someone wants to run the same commands against their own licensed corpus and con
 sanitized writeup), swapping it in is a documentation-only change — see that demo's "Using your
 own real corpus" section for the exact steps, which already work today with no code changes.
 
-## 7. Smaller, lower-priority items
+## 6. Smaller, lower-priority items
 
 - **Independent token-cost measurement.** `ult-context-generate`'s token-cost/savings claims are
   currently partly self-reported from the tool's own runs, not independently measured against a

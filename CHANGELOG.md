@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses simple `MAJOR.MINOR.PATCH`
 versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMAP.md`](ROADMAP.md)).
 
+## [Unreleased]
+
+### Added
+
+- **`install.sh` / `install.ps1`**: the installer promised by several `SKILL.md` files and
+  `ROADMAP.md`'s former top-priority item. Copies `.github/skills/`, `.github/prompts/`,
+  `.cursor/rules/`, and `AGENTS.md` (merged into a marked block, not overwritten wholesale) into
+  a target project directory; with `--init-project`/`-InitProject`, also scaffolds
+  `context-config.yaml` from the template and `starter_kit/project_guidelines/.pointer.md`, each
+  only if not already present. Supports `--dry-run`/`-DryRun` and requires an explicit, existing
+  `--target`/`-TargetPath`. Re-running is idempotent and never clobbers project-owned files.
+
 ## [0.1.0]
 
 Initial public release.
