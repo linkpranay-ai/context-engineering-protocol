@@ -152,8 +152,8 @@ they're what "protocol" means here rather than "product":
 **How-L1 is not implemented today.** `context-config.yaml`'s `how_l1` section exists and is
 always `enabled: false`; there is no query step in `ult-context-generate` that reads it yet. This
 section describes its intended design so the protocol names its own shape honestly, rather than
-leaving a layer undefined until someone gets around to building it. Tracked as the #2 item in
-[`ROADMAP.md`](ROADMAP.md) (after the installer).
+leaving a layer undefined until someone gets around to building it. Tracked as the #1 item in
+[`ROADMAP.md`](ROADMAP.md).
 
 **What it would ingest:** org-wide *process* standards — the kind of thing a CMMI appraisal, an
 ISO 9001 quality manual, or an IEEE process standard describes — as distinct from How-L2's

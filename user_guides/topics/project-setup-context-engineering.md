@@ -70,11 +70,14 @@ anything downstream is generated.
    This is What-L3. No normalization or copying — `graphify`'s own fixed output
    location is read directly by `ult-context-generate`.
 
-3. **Add a `context-config.yaml`** at the project root. Copy the template:
+3. **Add a `context-config.yaml`** at the project root. If you ran
+   `./install.sh --init-project` / `install.ps1 -InitProject` (see the
+   [Quickstart](../../README.md#quickstart)), this file already exists — skip the copy
+   and go straight to filling it in. Otherwise, copy the template by hand:
    ```
    starter_kits/context_engineering/context-config.yaml.template → ./context-config.yaml
    ```
-   Fill in `project_name`, `description`, and the layer paths
+   Either way, fill in `project_name`, `description`, and the layer paths
    (`what_l3.path` = source root, `what_l2.path` = requirements docs root,
    `how_l2.path` = org conventions root). For `what_l1`, see step 4 below — leave
    `how_l1` disabled (see
