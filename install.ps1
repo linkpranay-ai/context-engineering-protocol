@@ -48,6 +48,10 @@ if ($TargetPath -eq $SourceRoot) {
 
 $script:ActionCount = 0
 
+# $env:OS is only ever "Windows_NT" on Windows — true on both Windows
+# PowerShell 5.1 and pwsh, unlike $IsWindows which doesn't exist in 5.1.
+$script:IsWindowsPlatform = ($env:OS -eq "Windows_NT")
+
 function Write-InstallAction([string]$Message) {
     $script:ActionCount++
     Write-Host $Message
@@ -72,15 +76,28 @@ function Copy-LibraryTree([string]$RelSrc, [string]$RelDst) {
         return
     }
 
-    # robocopy /MIR mirrors src onto dst (creating dst if needed, purging
-    # anything in dst not present in src) via APIs that handle long paths
-    # reliably — Remove-Item/Copy-Item -Recurse are not long-path-safe on
-    # Windows PowerShell 5.1 and fail on deeply nested trees. Exit codes
-    # 0-7 are success; 8+ is failure.
-    $null = robocopy $src $dst /MIR /NFL /NDL /NJH /NJS /NC /NS /NP
-    if ($LASTEXITCODE -ge 8) {
-        Write-Error "robocopy failed copying $src to $dst (exit code $LASTEXITCODE)"
-        exit 1
+    if ($script:IsWindowsPlatform) {
+        # robocopy /MIR mirrors src onto dst (creating dst if needed, purging
+        # anything in dst not present in src) via APIs that handle long paths
+        # reliably — Remove-Item/Copy-Item -Recurse are not long-path-safe on
+        # Windows PowerShell 5.1 and fail on deeply nested trees. Exit codes
+        # 0-7 are success; 8+ is failure. robocopy itself is Windows-only, so
+        # this branch never runs under pwsh on Linux/macOS (see below).
+        $null = robocopy $src $dst /MIR /NFL /NDL /NJH /NJS /NC /NS /NP
+        if ($LASTEXITCODE -ge 8) {
+            Write-Error "robocopy failed copying $src to $dst (exit code $LASTEXITCODE)"
+            exit 1
+        }
+    }
+    else {
+        # Non-Windows pwsh (e.g. CI's ubuntu-latest): no robocopy, and no
+        # MAX_PATH limitation to work around, so plain Remove-Item +
+        # Copy-Item -Recurse mirrors src onto dst just as well.
+        if ($existed) {
+            Remove-Item -LiteralPath $dst -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path (Split-Path -Parent $dst) -Force | Out-Null
+        Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
     }
 
     if ($existed) { Write-InstallAction "overwrote: $RelDst" }
