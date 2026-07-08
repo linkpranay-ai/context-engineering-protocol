@@ -110,10 +110,16 @@ and schema were already final from R1/R3.
 
 ### Genuine limitations (by design, for v1)
 
-- **Single-file, single-hop cross-ref resolution only.** Refs resolve against the same
-  file's clause table; cross-FILE refs ("see TS 38.214 clause 5.2.2") are unresolved
-  (`resolved:false`). This is R9 future work — the index already has every file's clause
-  table, so corpus-wide resolution is a later lookup change, not a parser change.
+- **Cross-file cross-ref resolution (R9/Phase B) is implemented, but requires a
+  `doc_id` join key.** A ref with a document designator (e.g. `IEEE 802.11-2020
+  §9.3.2`) only resolves if the target file has a matching `doc_id: <value>` line in
+  its front matter; a target file indexed without `doc_id` front matter can never be
+  matched, and stays `resolved:false` with `resolution_status:
+  "unresolved-doc-not-found"` even if the clause genuinely exists there. Same-file
+  refs with no designator are unaffected. See `README.md`'s "Cross-file citation
+  resolution (R9)" section and `examples/cross-file-resolution-demo/` for the
+  end-to-end mechanism and worked cases (resolved, doc-not-found, doc-ambiguous,
+  clause-not-found).
 - **Indented-code detection is a CommonMark approximation** (4-space indent preceded by a
   blank line). Pathological mixes of lazy-continuation paragraphs and 4-space indents
   could in theory mis-mask, but TS 33.401's headings are never indented so this is safe

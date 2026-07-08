@@ -26,7 +26,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 # Directory holding the bundled profile pattern-packs.
 PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
@@ -317,6 +317,32 @@ def compute_section_bounds(headings, total_lines):
         h["section_bounds"] = [content_start, end_line]
 
 
+_DOC_ID_RE = re.compile(r"^\s*doc_id\s*:\s*(.+?)\s*$")
+
+
+def extract_front_matter_doc_id(lines, front_matter_bounds):
+    """Extract a ``doc_id: <value>`` scalar from a file's front matter.
+
+    This is a single-line text scan, not a YAML parser - it works uniformly for
+    both the YAML ``---``/``---`` style and the HTML-comment style front matter
+    ``compute_masks`` already detects, since both are just lines of text within
+    ``front_matter_bounds`` (1-based, inclusive). Returns None if there is no
+    front matter or no doc_id line. Surrounding quotes are stripped.
+    """
+    if not front_matter_bounds:
+        return None
+    start, end = front_matter_bounds
+    for lineno in range(start, end + 1):
+        text = lines[lineno - 1]
+        m = _DOC_ID_RE.match(text)
+        if m:
+            value = m.group(1)
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            return value
+    return None
+
+
 def build_clause_index(headings):
     """Map clause_id -> heading id (first occurrence), plus the set of clause
     ids that appear on more than one heading in this file.
@@ -341,13 +367,26 @@ def build_clause_index(headings):
 def find_cross_refs(body_text, profile, clause_index, ambiguous_ids):
     """Find and resolve cross-references in a section body.
 
-    Returns a de-duplicated list of cross_ref dicts. Resolution is single-hop,
-    same-file: a ref resolves only if its target clause id is a heading in THIS
-    file. Each ref carries a resolution_status:
-      - "resolved": target_clause matches exactly one heading.
+    Returns a de-duplicated list of cross_ref dicts. A ref's pattern may
+    optionally capture a document designator via a named group (`(?P<doc>...)`
+    alongside `(?P<clause>...)`); when present, the ref targets a DIFFERENT
+    file and is left pending here for resolve_cross_file_refs() to finish in a
+    corpus-wide second pass - it is deliberately NOT looked up in this file's
+    own clause_index, even if the clause id happens to coincide locally, to
+    avoid resolving a cross-doc-looking reference against the wrong file.
+    Patterns with no named groups keep today's `m.group(1)` behaviour
+    (`target_doc` is always None) and resolve same-file, single-hop, as before.
+
+    Each ref carries a resolution_status:
+      - "resolved": target_clause matches exactly one heading (same-file case)
+        or was resolved cross-file in pass 2.
       - "unresolved-ambiguous": target_clause matches more than one heading in
-        this file - never guessed, resolved_heading_id stays None.
-      - "unresolved-not-found": target_clause matches no heading in this file.
+        the (same or resolved target) file - never guessed, resolved_heading_id
+        stays None.
+      - "unresolved-not-found": target_clause matches no heading in the file.
+      - "unresolved-cross-file-pending": target_doc is set; awaiting pass 2.
+      - "unresolved-doc-not-found" / "unresolved-doc-ambiguous": pass 2 could
+        not uniquely match target_doc to a file.
     `resolved` (bool) is kept as a derived convenience field, True iff
     resolution_status == "resolved", so existing consumers keying off the
     boolean are unaffected.
@@ -356,16 +395,25 @@ def find_cross_refs(body_text, profile, clause_index, ambiguous_ids):
     for regex, kind in profile["_cross_ref_res"]:
         for m in regex.finditer(body_text):
             raw = m.group(0).strip()
-            target = m.group(1)
-            if kind == "annex":
-                # 'Annex A.3' -> clause id 'A.3'; 'Annex E' -> 'E'.
-                target_clause = target
+            groups = m.groupdict()
+            if "clause" in groups:
+                target_clause = groups["clause"]
+                target_doc = groups.get("doc")
+                if target_doc is not None:
+                    # A designator pattern's `\s+` may span a hard line-wrap in
+                    # the source prose; collapse to single spaces so it still
+                    # exact-matches a clean single-line doc_id in pass 2.
+                    target_doc = " ".join(target_doc.split())
             else:
-                target_clause = target
-            key = (raw.lower(), target_clause)
+                target_clause = m.group(1)
+                target_doc = None
+            key = (raw.lower(), target_doc, target_clause)
             if key in seen:
                 continue
-            if target_clause in ambiguous_ids:
+            if target_doc is not None:
+                status = "unresolved-cross-file-pending"
+                resolved_id = None
+            elif target_clause in ambiguous_ids:
                 status = "unresolved-ambiguous"
                 resolved_id = None
             elif target_clause in clause_index:
@@ -377,12 +425,55 @@ def find_cross_refs(body_text, profile, clause_index, ambiguous_ids):
             seen[key] = {
                 "raw": raw,
                 "kind": kind,
+                "target_doc": target_doc,
                 "target_clause": target_clause,
+                "resolved_file": None,
                 "resolved_heading_id": resolved_id,
                 "resolved": status == "resolved",
                 "resolution_status": status,
             }
     return list(seen.values())
+
+
+def resolve_cross_file_refs(file_entries):
+    """Second pass: resolve cross_refs left pending by find_cross_refs()
+    because their pattern captured a document designator (target_doc).
+
+    Runs after every file has been parsed, so it has full corpus visibility -
+    unlike find_cross_refs(), which only ever sees one file. Matching target_doc
+    to a file is exact-string equality against that file's doc_id (front matter);
+    no fuzzy matching, consistent with "never guess" elsewhere in this module.
+    """
+    by_doc_id = {}
+    for entry in file_entries:
+        doc_id = entry.get("doc_id")
+        if doc_id:
+            by_doc_id.setdefault(doc_id, []).append(entry)
+
+    for entry in file_entries:
+        for h in entry["headings"]:
+            for ref in h["cross_refs"]:
+                if ref["resolution_status"] != "unresolved-cross-file-pending":
+                    continue
+                matches = by_doc_id.get(ref["target_doc"], [])
+                if not matches:
+                    ref["resolution_status"] = "unresolved-doc-not-found"
+                    continue
+                if len(matches) > 1:
+                    ref["resolution_status"] = "unresolved-doc-ambiguous"
+                    continue
+                target_file = matches[0]
+                clause_index, ambiguous_ids = build_clause_index(target_file["headings"])
+                target_clause = ref["target_clause"]
+                if target_clause in ambiguous_ids:
+                    ref["resolution_status"] = "unresolved-ambiguous"
+                elif target_clause in clause_index:
+                    ref["resolution_status"] = "resolved"
+                    ref["resolved"] = True
+                    ref["resolved_file"] = target_file["path"]
+                    ref["resolved_heading_id"] = clause_index[target_clause]
+                else:
+                    ref["resolution_status"] = "unresolved-not-found"
 
 
 # --------------------------------------------------------------------------- #
@@ -393,6 +484,7 @@ def parse_file(path, root, profile):
     """Parse a single markdown file into the file-entry dict for the index."""
     data_bytes, lines = read_lines(path)
     mask, front_matter = compute_masks(lines)
+    doc_id = extract_front_matter_doc_id(lines, front_matter)
     raw_headings = detect_headings(lines, mask, profile)
 
     # Assign stable ids + clause ids + TOC suppression flag.
@@ -442,6 +534,7 @@ def parse_file(path, root, profile):
         "path": rel,
         "sha256": sha256_of(data_bytes),
         "front_matter_lines": front_matter,
+        "doc_id": doc_id,
         "headings": out_headings,
     }
 
@@ -502,6 +595,7 @@ def build_index(target, profile_name, exclude=None, include_roots=None):
     files, root = gather_md_files(target, exclude=exclude, include_roots=include_roots)
     profile = load_profile(profile_name)
     file_entries = [parse_file(f, root, profile) for f in files]
+    resolve_cross_file_refs(file_entries)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),

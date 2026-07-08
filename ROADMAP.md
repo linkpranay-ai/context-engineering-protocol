@@ -12,17 +12,21 @@ left out.
 
 ## 1. Cross-file citation resolution
 
-**Status: spec written, not implemented.** Today's `cross_refs` resolution in `md_index.py` is
-single-hop and same-file — `(see clause 7.5)` resolves if `7.5` is a heading in the *same* file,
-but a reference that spans files (`"see TS 38.214 clause 5.2.2"` from a different indexed
-document) isn't followed. The design for multi-hop, cross-file resolution is already written:
-see [`scripts/README.md` §"Future work (R9): cross-file citation resolution"](.github/skills/ult-context-generate/scripts/README.md)
-for the full spec, including why it's deliberately deferred until confidence-scoring on
-single-file resolution is solid first. **Candidate approach for that confidence score:**
-SelfCite's self-supervised context-attribution scoring is a reasonable concrete mechanism for the
-gate; GraphRAG's local-to-global traversal is a reasonable shape for the multi-hop resolution
-algorithm itself once the gate is passed. Neither is committed yet — both need a design pass
-against our source-attribution/content-hash requirements first.
+**Status: implemented (Phase A + Phase B).** `md_index.py`'s `cross_refs` resolution now spans
+the whole indexed corpus, not just the referencing file. Phase A (schema v1.1) made same-file
+resolution distinguish `resolved` / `unresolved-not-found` / `unresolved-ambiguous` instead of
+silently guessing. Phase B (schema v1.2) added the cross-file hop itself: a reference like
+`IEEE 802.11-2020 §9.3.2` in one file resolves to a heading in a *different* indexed file, joined
+on a new file-level `doc_id` front-matter field, matched by exact string equality only (never
+fuzzy). See [`scripts/README.md` §"Cross-file citation resolution (R9) — implemented (Phase
+B)"](.github/skills/ult-context-generate/scripts/README.md) for the full mechanism, and
+[`examples/cross-file-resolution-demo/`](examples/cross-file-resolution-demo/) for a runnable,
+verified demo. Built against a small synthetic 2-3 file corpus rather than waiting for a real
+multi-spec corpus (a deliberate override of the original spec text, approved by the project
+owner). The confidence-scoring ideas below (SelfCite, GraphRAG) were considered as a possible
+gate before implementing this; they were not needed in practice — the deterministic
+exact-match-or-fail approach was sufficient and is kept for reference as related prior art, not
+as a design that was adopted.
 
 ## 2. Selective/granular install
 

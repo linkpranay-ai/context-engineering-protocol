@@ -236,6 +236,133 @@ class TestAmbiguousClauseId(unittest.TestCase):
         self.assertIsNone(ambiguous[0]["resolved_heading_id"])
 
 
+class TestCrossFileResolution(unittest.TestCase):
+    """Phase B: a citation like 'IEEE 802.11-2020 section-sign 9.3.2' in one
+    file resolves to a heading in a DIFFERENT file, joined via that file's
+    doc_id front matter -- never guessed (R9). Synthetic 2-3 file corpora,
+    written inline per-test via tempfile.TemporaryDirectory(), following the
+    established pattern in TestWhatL2ExcludeAndIncludeRoots."""
+
+    SECTION_SIGN = "§"
+
+    def _write(self, root, rel_path, text):
+        p = root / rel_path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def test_cross_file_ref_resolves_via_doc_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root, "spec_a.md",
+                        "---\ndoc_id: IEEE 802.11-2020\n---\n"
+                        "# 9.3.2 Frame Format\n\nDetails of frame format.\n")
+            self._write(root, "spec_b.md",
+                        "# 5.1 Overview\n\n"
+                        "See IEEE 802.11-2020 {}9.3.2 for details.\n".format(self.SECTION_SIGN))
+
+            index = mi.build_index(root, "ieee")
+            by_path = {f["path"]: f for f in index["files"]}
+            a_heading = by_path["spec_a.md"]["headings"][0]
+            b_ref = xrefs_by_target(by_path["spec_b.md"]["headings"][0], "9.3.2")[0]
+
+            self.assertEqual(b_ref["target_doc"], "IEEE 802.11-2020")
+            self.assertTrue(b_ref["resolved"])
+            self.assertEqual(b_ref["resolution_status"], "resolved")
+            self.assertEqual(b_ref["resolved_file"], "spec_a.md")
+            self.assertEqual(b_ref["resolved_heading_id"], a_heading["id"])
+
+    def test_cross_file_ref_no_designator_still_resolves_same_file(self):
+        # Backward compatibility: a bare section-sign ref (no doc designator)
+        # must keep resolving same-file, single-hop, exactly as before Phase B.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root, "spec.md",
+                        "# 9.3.2 Frame Format\n\nDetails.\n\n"
+                        "# 5.1 Overview\n\nSee {}9.3.2 for details.\n".format(self.SECTION_SIGN))
+            index = mi.build_index(root, "ieee")
+            entry = index["files"][0]
+            ref = xrefs_by_target(entry["headings"][1], "9.3.2")[0]
+            self.assertIsNone(ref["target_doc"])
+            self.assertTrue(ref["resolved"])
+            self.assertEqual(len(entry["headings"][1]["cross_refs"]), 1)
+
+    def test_cross_file_ref_doc_not_found(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root, "spec_a.md",
+                        "---\ndoc_id: IEEE 802.11-2020\n---\n# 9.3.2 Frame Format\n\nDetails.\n")
+            self._write(root, "spec_b.md",
+                        "# 5.1 Overview\n\nSee IEEE 999.99-2099 {}1.1 for details.\n".format(self.SECTION_SIGN))
+            index = mi.build_index(root, "ieee")
+            by_path = {f["path"]: f for f in index["files"]}
+            ref = xrefs_by_target(by_path["spec_b.md"]["headings"][0], "1.1")[0]
+            self.assertEqual(ref["resolution_status"], "unresolved-doc-not-found")
+            self.assertFalse(ref["resolved"])
+            self.assertIsNone(ref["resolved_file"])
+
+    def test_cross_file_ref_doc_id_ambiguous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root, "spec_a.md",
+                        "---\ndoc_id: IEEE 802.11-2020\n---\n# 9.3.2 Frame Format\n\nDetails.\n")
+            self._write(root, "spec_a_dup.md",
+                        "---\ndoc_id: IEEE 802.11-2020\n---\n# 9.3.2 Frame Format (dup)\n\nDetails.\n")
+            self._write(root, "spec_b.md",
+                        "# 5.1 Overview\n\nSee IEEE 802.11-2020 {}9.3.2 for details.\n".format(self.SECTION_SIGN))
+            index = mi.build_index(root, "ieee")
+            by_path = {f["path"]: f for f in index["files"]}
+            ref = xrefs_by_target(by_path["spec_b.md"]["headings"][0], "9.3.2")[0]
+            self.assertEqual(ref["resolution_status"], "unresolved-doc-ambiguous")
+            self.assertFalse(ref["resolved"])
+
+    def test_cross_file_ref_clause_not_found_in_matched_doc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root, "spec_a.md",
+                        "---\ndoc_id: IEEE 802.11-2020\n---\n# 9.3.2 Frame Format\n\nDetails.\n")
+            self._write(root, "spec_b.md",
+                        "# 5.1 Overview\n\nSee IEEE 802.11-2020 {}9.9.9 for details.\n".format(self.SECTION_SIGN))
+            index = mi.build_index(root, "ieee")
+            by_path = {f["path"]: f for f in index["files"]}
+            ref = xrefs_by_target(by_path["spec_b.md"]["headings"][0], "9.9.9")[0]
+            self.assertEqual(ref["resolution_status"], "unresolved-not-found")
+            self.assertFalse(ref["resolved"])
+
+    def test_cross_file_ref_clause_ambiguous_in_matched_doc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root, "spec_a.md",
+                        "---\ndoc_id: IEEE 802.11-2020\n---\n"
+                        "# 9.3.2 Frame Format\n\nDetails.\n\n"
+                        "# Annex C (informative): Duplicate\n\n"
+                        "## 9.3.2 Frame Format\n\nAccidental duplicate.\n")
+            self._write(root, "spec_b.md",
+                        "# 5.1 Overview\n\nSee IEEE 802.11-2020 {}9.3.2 for details.\n".format(self.SECTION_SIGN))
+            index = mi.build_index(root, "ieee")
+            by_path = {f["path"]: f for f in index["files"]}
+            ref = xrefs_by_target(by_path["spec_b.md"]["headings"][0], "9.3.2")[0]
+            self.assertEqual(ref["resolution_status"], "unresolved-ambiguous")
+            self.assertFalse(ref["resolved"])
+
+    def test_cross_file_ref_designator_line_wrap_still_resolves(self):
+        # A hard line-wrap between "IEEE" and "802.11-2020" in the source
+        # prose must not leave an embedded newline in target_doc - that would
+        # never exact-match a clean single-line doc_id.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root, "spec_a.md",
+                        "---\ndoc_id: IEEE 802.11-2020\n---\n# 9.3.2 Frame Format\n\nDetails.\n")
+            self._write(root, "spec_b.md",
+                        "# 5.1 Overview\n\nSee IEEE\n802.11-2020 {}9.3.2 for details.\n".format(self.SECTION_SIGN))
+            index = mi.build_index(root, "ieee")
+            by_path = {f["path"]: f for f in index["files"]}
+            ref = xrefs_by_target(by_path["spec_b.md"]["headings"][0], "9.3.2")[0]
+            self.assertEqual(ref["target_doc"], "IEEE 802.11-2020")
+            self.assertTrue(ref["resolved"])
+            self.assertEqual(ref["resolved_file"], "spec_a.md")
+
+
 class TestDeepNesting(unittest.TestCase):
     """Clause ids nested 6 levels deep (7.2.9.2.1.3) must parse, and the
     deepest section's bounds must not collapse to an empty range."""

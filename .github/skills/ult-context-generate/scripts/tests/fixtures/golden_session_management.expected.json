@@ -2,12 +2,13 @@
   "path": "golden_session_management.md",
   "sha256": "a7b592f97eed3c1b4848a832a1639c359da707b4fa6df7d87a483be53a7cf362",
   "front_matter_lines": null,
+  "doc_id": null,
   "headings": [
     {
       "id": "h_0000",
       "style": "atx",
       "level": 1,
-      "title": "Digital Identity Guidelines \u2014 Session Management (Reference Excerpt)",
+      "title": "Digital Identity Guidelines — Session Management (Reference Excerpt)",
       "clause_id": null,
       "is_toc": false,
       "line": 1,
@@ -19,7 +20,9 @@
         {
           "raw": "Section 7",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7",
+          "resolved_file": null,
           "resolved_heading_id": null,
           "resolved": false,
           "resolution_status": "unresolved-not-found"
@@ -27,7 +30,9 @@
         {
           "raw": "clause 7.2",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.2",
+          "resolved_file": null,
           "resolved_heading_id": "h_0003",
           "resolved": true,
           "resolution_status": "resolved"
@@ -35,7 +40,9 @@
         {
           "raw": "clause 7.1.1",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.1.1",
+          "resolved_file": null,
           "resolved_heading_id": "h_0002",
           "resolved": true,
           "resolution_status": "resolved"
@@ -43,7 +50,9 @@
         {
           "raw": "clause 7.3",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.3",
+          "resolved_file": null,
           "resolved_heading_id": "h_0004",
           "resolved": true,
           "resolution_status": "resolved"
@@ -66,7 +75,9 @@
         {
           "raw": "clause 7.2",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.2",
+          "resolved_file": null,
           "resolved_heading_id": "h_0003",
           "resolved": true,
           "resolution_status": "resolved"
@@ -89,7 +100,9 @@
         {
           "raw": "clause 7.2",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.2",
+          "resolved_file": null,
           "resolved_heading_id": "h_0003",
           "resolved": true,
           "resolution_status": "resolved"
@@ -112,7 +125,9 @@
         {
           "raw": "clause 7.1.1",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.1.1",
+          "resolved_file": null,
           "resolved_heading_id": "h_0002",
           "resolved": true,
           "resolution_status": "resolved"
@@ -120,7 +135,9 @@
         {
           "raw": "clause 7.3",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.3",
+          "resolved_file": null,
           "resolved_heading_id": "h_0004",
           "resolved": true,
           "resolution_status": "resolved"
@@ -143,7 +160,9 @@
         {
           "raw": "clause 7.1.1",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.1.1",
+          "resolved_file": null,
           "resolved_heading_id": "h_0002",
           "resolved": true,
           "resolution_status": "resolved"
@@ -151,7 +170,9 @@
         {
           "raw": "clause 7.2",
           "kind": "clause",
+          "target_doc": null,
           "target_clause": "7.2",
+          "resolved_file": null,
           "resolved_heading_id": "h_0003",
           "resolved": true,
           "resolution_status": "resolved"

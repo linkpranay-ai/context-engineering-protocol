@@ -116,11 +116,11 @@ python md_index.py query specs-out\session.json `
 
 ---
 
-## Output schema (`index.json`) — v1.1, as implemented
+## Output schema (`index.json`) — v1.2, as implemented
 
 ```jsonc
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "generated_at": "2026-06-11T...Z",   // ISO-8601 UTC
   "profile": "3gpp",
   "root": "C:/.../specs/external",       // absolute dir the file paths are relative to;
@@ -130,6 +130,8 @@ python md_index.py query specs-out\session.json `
       "path": "session-management.md",   // POSIX-style, relative to "root"
       "sha256": "<sha256 of the file's ORIGINAL bytes>",
       "front_matter_lines": [1, 10],     // 1-based inclusive [start,end], or null
+      "doc_id": "IEEE 802.11-2020",      // optional front-matter `doc_id:` scalar; null if absent.
+                                          // corpus-wide join key for cross-file resolution (R9/Phase B)
       "headings": [
         {
           "id": "h_0042",                // stable within a file: h_ + zero-padded ordinal
@@ -144,10 +146,18 @@ python md_index.py query specs-out\session.json `
             {
               "raw": "clause 7.5",
               "kind": "clause",          // clause | annex | see (from the profile pattern)
+              "target_doc": null,        // non-null doc-designator (e.g. "IEEE 802.11-2020")
+                                          // for a cross-file ref; null means same-file, as in v1.1
               "target_clause": "7.5",
+              "resolved_file": null,     // matched file's "path", set only when target_doc
+                                          // resolved to exactly one file
               "resolved_heading_id": "h_0107",  // null unless resolution_status == "resolved"
               "resolved": true,          // derived: true iff resolution_status == "resolved"
-              "resolution_status": "resolved"   // resolved | unresolved-not-found | unresolved-ambiguous
+              "resolution_status": "resolved"
+              // one of: resolved | unresolved-not-found | unresolved-ambiguous
+              //       | unresolved-doc-not-found | unresolved-doc-ambiguous
+              //       | unresolved-cross-file-pending (transient Pass-1 state, never
+              //         present once build_index() completes Pass 2)
             }
           ]
         }
@@ -214,8 +224,9 @@ Domain conventions are **pluggable**, not hardcoded. A profile is a small JSON f
 - `rfc.json` — IETF RFC house style: dotted-numeric headings with an optional trailing
   `.` (`5.2.2.  Title`); cross-refs `Section(s) N.M`, `(see Section N.M)`.
 - `ieee.json` — IEEE standard house style: dotted-numeric headings (`9.3.2 Title`);
-  cross-refs `§9.3.2` (section-sign, optional document-designator prefix is ignored) and
-  `Clause/subclause N.M`.
+  cross-refs `§9.3.2` (section-sign, with an optional leading document designator, e.g.
+  `IEEE 802.11-2020 §9.3.2`, resolved cross-file against another indexed file's
+  `doc_id` — see R9/Phase B below) and `Clause/subclause N.M`.
 
 ### Profile schema (so your own `<name>.json` is trivial to add)
 
@@ -228,13 +239,25 @@ Domain conventions are **pluggable**, not hardcoded. A profile is a small JSON f
   //   (attribute-stripped) title. If it does not match, clause_id is null.
   "cross_ref_patterns": [
     {"regex": "...", "kind": "clause"}
-    // Each pattern: group 1 must capture the target clause id. `kind` is a free-form
+    // Same-file form: group 1 must capture the target clause id. `kind` is a free-form
     // label copied into each cross_ref ("clause" | "annex" | "see" | <your-kind>).
     // Matched case-insensitively. Resolution is single-hop, same-file: the captured id
     // is looked up in THIS file's clause-id table only. resolution_status is one of
     // resolved | unresolved-not-found | unresolved-ambiguous (a clause id shared by more
     // than one heading is never guessed); resolved:false + resolved_heading_id:null for
     // either unresolved case.
+    //
+    // Cross-file form (R9/Phase B): use named groups `(?P<doc>...)` and
+    // `(?P<clause>...)` instead of a bare group 1. `find_cross_refs()` detects named
+    // groups via `m.groupdict()` and, when present, extracts `target_doc` from `doc`
+    // (may be None if that part of the pattern didn't match — make the designator
+    // group optional with `(?:...)?` so one pattern handles both same-file and
+    // cross-file phrasings, e.g.
+    // "(?:(?P<doc>IEEE\\s+[\\w.-]+)\\s+)?§\\s*(?P<clause>\\d+(?:\\.\\d+)*)"). A
+    // non-null `target_doc` is matched against every other indexed file's `doc_id`
+    // (exact string equality only, never fuzzy) to find `resolved_file`; patterns
+    // with no named groups (all other shipped patterns) are unaffected and keep
+    // resolving same-file exactly as v1.1.
   ],
   "toc_titles_to_suppress": ["contents", "table of contents"]
   // Case-insensitive exact-title match. A matching heading still appears in the list
@@ -312,56 +335,60 @@ validation run against the real spec.
 
 ---
 
-## Future work (R9): cross-file citation resolution — spec, not yet implemented
+## Cross-file citation resolution (R9) — implemented (Phase B)
 
-Today, `cross_refs` resolution (single-hop) is scoped to **the same file**: a
-reference like `clause 7.5` is looked up only in the file that contains the
-referencing section. A reference to a *different* document — e.g. "see TS
-38.214 clause 5.2.2" from within a TS 33.401 section — cannot resolve today and
-is correctly kept as `resolved: false`.
+`cross_refs` resolution now spans the whole indexed corpus, not just the
+referencing file. A reference like `IEEE 802.11-2020 §9.3.2` written inside a
+different file (e.g. an 802.1X spec) resolves to the heading in
+`spec-802-11-mac.md` using `index.json`'s corpus-wide view — never guessing.
+References with no document designator (`§9.3.2`, `clause 7.5`) keep resolving
+within the same file exactly as v1.1.
 
-This is deliberately **out of scope for v1**. `ROADMAP.md` previously deferred this work
-"until confidence-scoring on single-file resolution is solid first" — that prerequisite
-is now closed: same-file resolution (schema v1.1) distinguishes `resolved` from
-`unresolved-not-found` from `unresolved-ambiguous` (a clause id shared by more than one
-heading is never silently resolved to whichever occurrence came first). What follows
-below is the remaining, still-unimplemented cross-file spec. Once a project builds one
-`index.json` across a real multi-file corpus (e.g. `what_l1.path` pointing at a
-directory of several 3GPP TS files), cross-file resolution becomes tractable:
-the index already has *every* file's clause-id table, so resolving a cross-file
-reference is a lookup across the corpus index, not a parsing change. The spec
-for that future work:
+**Mechanism.** No new top-level structure — cross-file resolution reuses the
+same `cross_refs` array, with two new per-ref fields: `target_doc` (string or
+`null`) and `resolved_file` (the matched file's `path`, or `null`). A new
+file-level `doc_id` field (parsed from a `doc_id: <value>` line in front
+matter, `null` if absent) is the corpus-wide join key.
 
-- **Mechanism stays `cross_refs`.** No new top-level structure — multi-file
-  resolution is the *same* `cross_refs` mechanism, resolved against the union
-  of all files' clause-id tables in `index.json`, instead of just the
-  referencing file's own table.
-- **Profiles gain an optional document-designator capture.** A cross-ref
-  pattern like `(see TS <doc-id> clause <id>)` would need its `cross_ref_patterns`
-  regex to capture both a `target_doc` (e.g. `38.214`) and `target_clause`
-  (e.g. `5.2.2`), where today's patterns capture only `target_clause`. Refs
-  with no document-designator (today's only case) keep `target_doc: null` and
-  resolve within the same file, exactly as v1 — fully backward compatible.
-- **Two-step resolution.** (1) If `target_doc` is non-null, find the file(s) in
-  `index.json["files"]` whose path or a file-level identifier matches
-  `target_doc`. (2) Within that file's (or those files') `headings`, look up
-  `target_clause` exactly as the existing single-file resolution does today.
-  `resolved: true` requires both steps to succeed; ambiguous matches (multiple
-  files matching `target_doc`) or no match keep `resolved: false` — never
-  guess.
-- **New cross_ref fields**: `target_doc` (string or `null`) and
-  `resolved_file` (the matched file's `path`, or `null`) alongside the existing
-  `target_clause` / `resolved_heading_id` / `resolved`.
-- **Defer implementation until a real multi-spec corpus exists.** A single-file
-  fixture cannot exercise the genuinely hard edge cases here (ambiguous
-  document-id matches, a series number matching multiple files, ranking when
-  several candidate files all have a clause `5.2.2`). Build the fixture suite
-  *from* a real multi-file corpus when one is available, not from an invented
-  one.
-- **Do not implement this as LLM-simulated parsing.** Per the adversarial
-  review (R9): cross-file resolution only becomes safe on top of the
-  deterministic index — an LLM "guessing" which file `TS 38.214` refers to is
-  exactly the failure mode D13/D14/R1 were built to eliminate.
+**Backward-compatible pattern extension via named groups.** Rather than a new
+JSON schema flag, profiles opt into cross-file capture with Python regex named
+groups: `(?P<doc>...)` and `(?P<clause>...)`. `find_cross_refs()` checks
+`m.groupdict()` — if `"clause"` is present, it extracts `target_doc`/
+`target_clause` from the named groups (`doc` may be `None` when the
+designator part of the pattern didn't match); otherwise it falls back to the
+legacy `m.group(1)` extraction with `target_doc` always `None`. This is why
+`generic.json`, `3gpp.json`, `rfc.json`, and `ieee.json`'s "Clause/subclause"
+pattern needed **zero changes** — only `ieee.json`'s bare-`§` pattern was
+extended (by replacement, to avoid duplicate matches) to
+`"(?:(?P<doc>IEEE\\s+[\\w.-]+)\\s+)?§\\s*(?P<clause>\\d+(?:\\.\\d+)*)"`.
+
+**Two-pass resolution.** Pass 1 (`parse_file()` → `find_cross_refs()`, per
+file): same-file refs resolve exactly as before; a ref with a non-null
+`target_doc` skips the local clause-id lookup entirely and is left as
+`resolution_status: "unresolved-cross-file-pending"` (a transient state, never
+present in a finished `index.json`). Pass 2 (`resolve_cross_file_refs()`,
+called once from `build_index()` after every file is parsed, with full-corpus
+visibility): for each pending ref, matches `target_doc` against every file's
+`doc_id` by **exact string equality only** (never fuzzy) — zero matches gives
+`"unresolved-doc-not-found"`, more than one gives `"unresolved-doc-ambiguous"`,
+exactly one match proceeds to a `target_clause` lookup in that file (reusing
+the existing `build_clause_index()`) with the same
+`resolved` / `unresolved-not-found` / `unresolved-ambiguous` outcomes as
+same-file resolution.
+
+**Deliberate deviations from the original R9 spec text.** The original spec
+said to defer implementation "until a real multi-spec corpus exists" and to
+build the fixture suite from one, not an invented corpus, and to ship
+unit-tests-only. Both were overridden by the project owner: a small synthetic
+2-3 file corpus was used to drive `TestCrossFileResolution` in
+`test_md_index.py` now, rather than waiting, and a runnable
+`examples/cross-file-resolution-demo/` (with `WALKTHROUGH.md`, mirroring
+`examples/how-l1-dogfood-demo/`) was built alongside the unit tests so the
+mechanism can be seen end-to-end without a real multi-spec corpus on hand.
+
+**Still not LLM-simulated parsing.** Per the original adversarial review (R9):
+resolution is a deterministic lookup against `doc_id` values already present
+in the index — never an LLM guessing which file a designator refers to.
 
 ---
 
