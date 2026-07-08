@@ -116,11 +116,11 @@ python md_index.py query specs-out\session.json `
 
 ---
 
-## Output schema (`index.json`) — v1.0, as implemented
+## Output schema (`index.json`) — v1.1, as implemented
 
 ```jsonc
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "generated_at": "2026-06-11T...Z",   // ISO-8601 UTC
   "profile": "3gpp",
   "root": "C:/.../specs/external",       // absolute dir the file paths are relative to;
@@ -145,8 +145,9 @@ python md_index.py query specs-out\session.json `
               "raw": "clause 7.5",
               "kind": "clause",          // clause | annex | see (from the profile pattern)
               "target_clause": "7.5",
-              "resolved_heading_id": "h_0107",  // null if unresolved
-              "resolved": true           // false => no heading in THIS file has that id
+              "resolved_heading_id": "h_0107",  // null unless resolution_status == "resolved"
+              "resolved": true,          // derived: true iff resolution_status == "resolved"
+              "resolution_status": "resolved"   // resolved | unresolved-not-found | unresolved-ambiguous
             }
           ]
         }
@@ -230,8 +231,10 @@ Domain conventions are **pluggable**, not hardcoded. A profile is a small JSON f
     // Each pattern: group 1 must capture the target clause id. `kind` is a free-form
     // label copied into each cross_ref ("clause" | "annex" | "see" | <your-kind>).
     // Matched case-insensitively. Resolution is single-hop, same-file: the captured id
-    // is looked up in THIS file's clause-id table only; unresolved => resolved:false,
-    // resolved_heading_id:null (never guessed).
+    // is looked up in THIS file's clause-id table only. resolution_status is one of
+    // resolved | unresolved-not-found | unresolved-ambiguous (a clause id shared by more
+    // than one heading is never guessed); resolved:false + resolved_heading_id:null for
+    // either unresolved case.
   ],
   "toc_titles_to_suppress": ["contents", "table of contents"]
   // Case-insensitive exact-title match. A matching heading still appears in the list
@@ -268,7 +271,10 @@ only a new JSON file plus, ideally, a fixture in `tests/fixtures/` (see "Testing
 6. **Cross-refs:** profile `cross_ref_patterns` run over each section's body (scoped to
    its own bounds), de-duplicated, resolved single-hop against this file's clause-id
    table. Unresolved refs are kept with `resolved:false` (never dropped silently, never
-   guessed) so a reviewer can see a dangling citation.
+   guessed) so a reviewer can see a dangling citation. `resolution_status` distinguishes
+   *why* a ref is unresolved: `unresolved-not-found` (no heading in this file has that
+   clause id) vs `unresolved-ambiguous` (more than one heading shares it — never guessed
+   which one is meant).
 
 See `IMPLEMENTATION-NOTES.md` for validation results and deferred work.
 
@@ -289,7 +295,8 @@ case the original agent-simulated mechanism never had a regression test for:
 | `front_matter_and_code_fences.md` | YAML front matter; a fenced code block containing `# not a heading`, `---`, `\|---\|---\|` — none detected as structure. |
 | `non_3gpp_numbering.md` | A trailing-period RFC heading (`5.2.2.  Title`) parses its clause id **only** under `rfc`; `generic`/`3gpp`/`ieee` correctly return `null` (no hallucinated clause id). A plain dotted-numeric heading (`9.3.2 Title`) parses identically under all four profiles. Also exercises the `ieee` `§` cross-ref. |
 | `alignment_colon_tables.md` | `\|:--\|--:\|` alignment tables, plus a table-separator row immediately followed by a bare `---` — neither produces a spurious heading. |
-| `cross_refs.md` | `clause`, `Annex`, and `(see …)` cross-refs, including one **dangling** ref to a clause id that doesn't exist — kept with `resolved:false`, never dropped. |
+| `cross_refs.md` | `clause`, `Annex`, and `(see …)` cross-refs, including one **dangling** ref to a clause id that doesn't exist — kept with `resolved:false` / `resolution_status: unresolved-not-found`, never dropped. |
+| `cross_refs_ambiguous.md` | A clause id (`6.1`) shared by two headings in the same file (main body + annex) — a ref targeting it is kept with `resolved:false` / `resolution_status: unresolved-ambiguous`, never resolved to either heading by guessing. |
 | `deep_nesting.md` | Clause ids 6 levels deep (`7.2.9.2.1.3`) parse correctly and the deepest section's bounds don't collapse to empty. |
 | `golden_session_management.md` | Verbatim copy of the real 53-line NIST excerpt used to validate D13/D14; full `parse_file()` output snapshot-tested against `golden_session_management.expected.json`. |
 
@@ -313,7 +320,12 @@ referencing section. A reference to a *different* document — e.g. "see TS
 38.214 clause 5.2.2" from within a TS 33.401 section — cannot resolve today and
 is correctly kept as `resolved: false`.
 
-This is deliberately **out of scope for v1**. Once a project builds one
+This is deliberately **out of scope for v1**. `ROADMAP.md` previously deferred this work
+"until confidence-scoring on single-file resolution is solid first" — that prerequisite
+is now closed: same-file resolution (schema v1.1) distinguishes `resolved` from
+`unresolved-not-found` from `unresolved-ambiguous` (a clause id shared by more than one
+heading is never silently resolved to whichever occurrence came first). What follows
+below is the remaining, still-unimplemented cross-file spec. Once a project builds one
 `index.json` across a real multi-file corpus (e.g. `what_l1.path` pointing at a
 directory of several 3GPP TS files), cross-file resolution becomes tractable:
 the index already has *every* file's clause-id table, so resolving a cross-file

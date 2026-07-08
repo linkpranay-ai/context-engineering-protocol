@@ -88,10 +88,13 @@ works, but a *persisted* fixture suite is R2's job (below).
    followed by a bare `---` never become headings.
 5. `cross_refs.md` — in-file `clause X` / `Annex Y.Z` / `(see W)` plus a **dangling**
    ref to a non-existent clause (`clause 9.9`); resolved ones link, the dangling one is
-   kept with `resolved:false` (this script keeps dangling refs visible rather than
-   dropping them — the slight contract difference from D14's "drop" wording is
-   documented in the README).
+   kept with `resolved:false` / `resolution_status: unresolved-not-found` (this script
+   keeps dangling refs visible rather than dropping them — the slight contract
+   difference from D14's "drop" wording is documented in the README).
 6. `deep_nesting.md` — `7.2.9.2.1.3`-depth ids parse and bounds don't collapse at depth.
+7. `cross_refs_ambiguous.md` (schema v1.1) — a clause id shared by two headings in the
+   same file is never silently resolved to whichever came first; kept with
+   `resolved:false` / `resolution_status: unresolved-ambiguous`.
 
 Plus `golden_session_management.md` (verbatim copy of the real `session-management.md`)
 as a full-snapshot golden regression input. The real TS 33.401 file is not vendored

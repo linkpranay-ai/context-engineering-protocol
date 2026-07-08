@@ -26,7 +26,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 # Directory holding the bundled profile pattern-packs.
 PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
@@ -318,21 +318,39 @@ def compute_section_bounds(headings, total_lines):
 
 
 def build_clause_index(headings):
-    """Map clause_id -> heading id (first occurrence wins)."""
+    """Map clause_id -> heading id (first occurrence), plus the set of clause
+    ids that appear on more than one heading in this file.
+
+    Ambiguous ids are tracked rather than silently resolved to whichever
+    heading happened to come first - a cross-ref targeting one is kept
+    unresolved (see find_cross_refs) instead of guessing.
+    """
     index = {}
+    seen_counts = {}
     for h in headings:
         cid = h.get("clause_id")
-        if cid and cid not in index:
+        if not cid:
+            continue
+        seen_counts[cid] = seen_counts.get(cid, 0) + 1
+        if cid not in index:
             index[cid] = h["id"]
-    return index
+    ambiguous_ids = {cid for cid, count in seen_counts.items() if count > 1}
+    return index, ambiguous_ids
 
 
-def find_cross_refs(body_text, profile, clause_index):
+def find_cross_refs(body_text, profile, clause_index, ambiguous_ids):
     """Find and resolve cross-references in a section body.
 
     Returns a de-duplicated list of cross_ref dicts. Resolution is single-hop,
     same-file: a ref resolves only if its target clause id is a heading in THIS
-    file. Unresolved refs are kept with resolved=False (never guessed).
+    file. Each ref carries a resolution_status:
+      - "resolved": target_clause matches exactly one heading.
+      - "unresolved-ambiguous": target_clause matches more than one heading in
+        this file - never guessed, resolved_heading_id stays None.
+      - "unresolved-not-found": target_clause matches no heading in this file.
+    `resolved` (bool) is kept as a derived convenience field, True iff
+    resolution_status == "resolved", so existing consumers keying off the
+    boolean are unaffected.
     """
     seen = {}
     for regex, kind in profile["_cross_ref_res"]:
@@ -347,13 +365,22 @@ def find_cross_refs(body_text, profile, clause_index):
             key = (raw.lower(), target_clause)
             if key in seen:
                 continue
-            resolved_id = clause_index.get(target_clause)
+            if target_clause in ambiguous_ids:
+                status = "unresolved-ambiguous"
+                resolved_id = None
+            elif target_clause in clause_index:
+                status = "resolved"
+                resolved_id = clause_index[target_clause]
+            else:
+                status = "unresolved-not-found"
+                resolved_id = None
             seen[key] = {
                 "raw": raw,
                 "kind": kind,
                 "target_clause": target_clause,
                 "resolved_heading_id": resolved_id,
-                "resolved": resolved_id is not None,
+                "resolved": status == "resolved",
+                "resolution_status": status,
             }
     return list(seen.values())
 
@@ -379,7 +406,7 @@ def parse_file(path, root, profile):
 
     total_lines = len(lines)
     compute_section_bounds(raw_headings, total_lines)
-    clause_index = build_clause_index(raw_headings)
+    clause_index, ambiguous_ids = build_clause_index(raw_headings)
 
     # Cross-refs: scan each section's body (scoped to its own bounds).
     for h in raw_headings:
@@ -388,7 +415,7 @@ def parse_file(path, root, profile):
             body = "\n".join(lines[start - 1:end])  # 1-based -> slice
         else:
             body = ""
-        h["cross_refs"] = find_cross_refs(body, profile, clause_index)
+        h["cross_refs"] = find_cross_refs(body, profile, clause_index, ambiguous_ids)
 
     # Emit final heading objects (drop internal-only keys).
     out_headings = []

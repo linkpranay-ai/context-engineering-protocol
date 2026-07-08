@@ -192,16 +192,19 @@ class TestCrossRefs(unittest.TestCase):
         clause_ref = xrefs_by_target(km, "5.2")[0]
         self.assertEqual(clause_ref["kind"], "clause")
         self.assertTrue(clause_ref["resolved"])
+        self.assertEqual(clause_ref["resolution_status"], "resolved")
         self.assertEqual(clause_ref["resolved_heading_id"], heading_by_clause(self.entry, "5.2")["id"])
 
         annex_ref = xrefs_by_target(km, "B.1")[0]
         self.assertEqual(annex_ref["kind"], "annex")
         self.assertTrue(annex_ref["resolved"])
+        self.assertEqual(annex_ref["resolution_status"], "resolved")
         self.assertEqual(annex_ref["resolved_heading_id"], heading_by_clause(self.entry, "B.1")["id"])
 
         see_ref = xrefs_by_target(km, "4.2")[0]
         self.assertEqual(see_ref["kind"], "see")
         self.assertTrue(see_ref["resolved"])
+        self.assertEqual(see_ref["resolution_status"], "resolved")
 
     def test_dangling_ref_kept_not_dropped(self):
         km = heading_by_clause(self.entry, "4.1")
@@ -209,7 +212,28 @@ class TestCrossRefs(unittest.TestCase):
         self.assertEqual(len(dangling), 1)
         self.assertEqual(dangling[0]["kind"], "clause")
         self.assertFalse(dangling[0]["resolved"])
+        self.assertEqual(dangling[0]["resolution_status"], "unresolved-not-found")
         self.assertIsNone(dangling[0]["resolved_heading_id"])
+
+
+class TestAmbiguousClauseId(unittest.TestCase):
+    """A clause id (6.1) appears on two headings in the same file (main body
+    and an annex). A cross-ref targeting it must never guess which one is
+    meant -- it stays unresolved with resolution_status=unresolved-ambiguous,
+    even though resolved-vs-dangling alone couldn't tell this case apart from
+    a clean resolution."""
+
+    def setUp(self):
+        self.entry = parse("cross_refs_ambiguous.md", "3gpp")
+
+    def test_ambiguous_clause_id_not_silently_resolved(self):
+        pointer = heading_by_clause(self.entry, "8.1")
+        ambiguous = xrefs_by_target(pointer, "6.1")
+        self.assertEqual(len(ambiguous), 1)
+        self.assertEqual(ambiguous[0]["kind"], "clause")
+        self.assertFalse(ambiguous[0]["resolved"])
+        self.assertEqual(ambiguous[0]["resolution_status"], "unresolved-ambiguous")
+        self.assertIsNone(ambiguous[0]["resolved_heading_id"])
 
 
 class TestDeepNesting(unittest.TestCase):
