@@ -66,7 +66,8 @@ That copies `.github/skills/`, `.github/prompts/`, `.cursor/rules/`, and `AGENTS
 project, and (with `--init-project`/`-InitProject`) scaffolds a starter `context-config.yaml`.
 Re-running is safe — library files are refreshed, project-owned files (like a filled-in
 `context-config.yaml`) are left alone. Run `./install.sh --help` / `Get-Help ./install.ps1` for
-the full flag list, including `--dry-run`/`-DryRun`.
+the full flag list, including `--dry-run`/`-DryRun` and `--only`/`-Only <skill1,skill2>` to
+install just a subset of skills instead of the full set.
 
 Then see [`user_guides/topics/project-setup-context-engineering.md`](user_guides/topics/project-setup-context-engineering.md)
 for the two setup paths:

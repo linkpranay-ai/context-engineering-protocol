@@ -30,11 +30,14 @@ as a design that was adopted.
 
 ## 2. Selective/granular install
 
-**Status: not started.** `install.sh`/`install.ps1` (shipped) always copy the full skill set. Add
-an `--only <skill1,skill2>`/`-Only <skill1,skill2>` flag so a consumer who only wants, say,
-`compiling-project-guidelines` doesn't get the full pipeline copied into their project. Small,
-low-risk extension of the installer that just shipped — no design questions open, just
-implementation and tests matching the existing `test_install_scripts.py` pattern.
+**Status: implemented.** `install.sh`/`install.ps1` now accept `--only <skill1,skill2>`/
+`-Only <skill1,skill2>` — a comma-separated list of skill directory names (validated against the
+real `.github/skills/*` directories; an unknown name is a clear, immediate error) that installs
+just those skills' `.github/skills/<name>/`, `.github/prompts/<name>.prompt.md`, and
+`.cursor/rules/<name>.mdc`, instead of the full set. The merged `AGENTS.md` block is filtered down
+to just the selected skills' rows too, so a partial install never advertises a skill it didn't
+actually copy in. Full install (no `--only`/`-Only`) is unchanged. Covered by three new cases in
+`test_install_scripts.py`, run against both installers.
 
 ## 3. `SKILL.md` / agentskills.io compatibility check
 

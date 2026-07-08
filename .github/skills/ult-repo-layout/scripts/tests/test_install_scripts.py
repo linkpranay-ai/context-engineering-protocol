@@ -146,11 +146,79 @@ class _InstallScriptTestBase:
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("does not exist", result.stderr + result.stdout)
 
+    def _skill_paths(self, name):
+        return [
+            f".github/skills/{name}",
+            f".github/prompts/{name}.prompt.md",
+            f".cursor/rules/{name}.mdc",
+        ]
+
+    def test_only_flag_installs_selected_skill_and_skips_others(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.only_flag, "demo-consume-context"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            for rel in self._skill_paths("demo-consume-context"):
+                self.assertEqual(
+                    (target / rel).is_dir(),
+                    (REPO_ROOT / rel).is_dir(),
+                    f"tree-shape mismatch: {rel}",
+                )
+            _assert_tree_matches(
+                self,
+                REPO_ROOT / ".github/skills/demo-consume-context",
+                target / ".github/skills/demo-consume-context",
+            )
+            self.assertEqual(
+                (REPO_ROOT / ".github/prompts/demo-consume-context.prompt.md").read_bytes(),
+                (target / ".github/prompts/demo-consume-context.prompt.md").read_bytes(),
+            )
+            self.assertEqual(
+                (REPO_ROOT / ".cursor/rules/demo-consume-context.mdc").read_bytes(),
+                (target / ".cursor/rules/demo-consume-context.mdc").read_bytes(),
+            )
+
+            for rel in self._skill_paths("ult-codegraph"):
+                self.assertFalse((target / rel).exists(), f"unselected skill leaked in: {rel}")
+
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("demo-consume-context", agents)
+            self.assertNotIn("ult-codegraph", agents)
+
+    def test_only_flag_supports_multiple_skills(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(
+                target, [self.only_flag, "demo-consume-context, ult-codegraph"]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            for name in ("demo-consume-context", "ult-codegraph"):
+                for rel in self._skill_paths(name):
+                    self.assertTrue((target / rel).exists(), f"missing selected skill path: {rel}")
+
+            for rel in self._skill_paths("compiling-project-guidelines"):
+                self.assertFalse((target / rel).exists(), f"unselected skill leaked in: {rel}")
+
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("demo-consume-context", agents)
+            self.assertIn("ult-codegraph", agents)
+            self.assertNotIn("compiling-project-guidelines", agents)
+
+    def test_only_flag_rejects_unknown_skill_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.only_flag, "bogus-skill-name"])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("bogus-skill-name", result.stderr + result.stdout)
+
 
 @unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
 class TestInstallSh(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "--init-project"
     dry_run_flag = "--dry-run"
+    only_flag = "--only"
 
     def _run(self, target, args):
         return subprocess.run(
@@ -169,6 +237,7 @@ def _powershell_executable():
 class TestInstallPs1(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "-InitProject"
     dry_run_flag = "-DryRun"
+    only_flag = "-Only"
 
     def _run(self, target, args):
         exe = _powershell_executable()
