@@ -1,0 +1,11 @@
+---
+description: "Compile scattered guideline sources into one scope-aware COMPILED-GUIDELINES.md for other skills and ult-context-generate's Constraints layer. Do NOT use to enforce rules at runtime."
+globs:
+alwaysApply: false
+---
+
+# Compiling Project Guidelines
+
+This repository packages its capabilities as portable skills for AI
+coding agents. Read `.github/skills/compiling-project-guidelines/SKILL.md` and follow it
+when this rule applies.

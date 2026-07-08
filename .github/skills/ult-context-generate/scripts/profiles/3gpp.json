@@ -1,0 +1,11 @@
+{
+  "name": "3gpp",
+  "description": "3GPP / ETSI house style. Clause ids look like 7.2.9.2, E.2.7, 5.3.4a, A.5 (optional single leading capital for annex letter, optional trailing lowercase letter for amendments). Cross-refs use 'clause(s)/subclause(s)/section(s) <id>', 'Annex <Letter>(.<id>)*', and '(see <id>)'.",
+  "clause_id_regex": "^([A-Z](?:\\.\\d+)+|[A-Z]?\\d+(?:\\.\\d+)*[a-z]?)\\s+(.+)$",
+  "cross_ref_patterns": [
+    {"regex": "\\b(?:clause|clauses|subclause|subclauses|section|sections)\\s+([A-Z](?:\\.\\d+)+|[A-Z]?\\d+(?:\\.\\d+)*[a-z]?)\\b", "kind": "clause"},
+    {"regex": "\\bAnnex\\s+([A-Z](?:\\.\\d+)*)\\b", "kind": "annex"},
+    {"regex": "\\(\\s*see\\s+([A-Z](?:\\.\\d+)+|[A-Z]?\\d+(?:\\.\\d+)*[a-z]?)\\s*\\)", "kind": "see"}
+  ],
+  "toc_titles_to_suppress": ["contents", "table of contents"]
+}

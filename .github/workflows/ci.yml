@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run ult-context-generate test suite
+        run: python -m unittest discover -s .github/skills/ult-context-generate/scripts/tests -p "test_*.py" -v
+
+      - name: Run ult-repo-layout test suite
+        run: python -m unittest discover -s .github/skills/ult-repo-layout/scripts/tests -p "test_*.py" -v
+
+      - name: Check skill eval-trigger accuracy
+        run: python catalog/check_eval_triggers.py
+
+      - name: Check NOTICE is up to date with adapted_from frontmatter
+        run: python catalog/generate_notice.py --check
+
+      - name: Check cross-runtime adapters (Copilot/Cursor/Codex) are up to date
+        run: python catalog/export_adapters.py --check

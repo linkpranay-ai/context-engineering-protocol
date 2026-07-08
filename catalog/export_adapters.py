@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""
+Generate cross-runtime adapter files from each skill's SKILL.md frontmatter,
+so a skill is picked up by GitHub Copilot, Cursor, and OpenAI Codex without
+hand-authoring a per-runtime file for each one.
+
+Usage:
+  python catalog/export_adapters.py           # print a summary of what would change
+  python catalog/export_adapters.py --write   # write generated files to disk
+  python catalog/export_adapters.py --check   # exit 1 if generated files are stale (CI)
+
+Ownership split:
+  - .github/prompts/<skill-dir>.prompt.md (Copilot) - generated ONLY for
+    skills in GENERATE_PROMPT_FOR below. The skills in HAND_AUTHORED_PROMPTS
+    already have hand-written wrappers with per-skill "When invoked directly"
+    steps this script cannot derive mechanically from frontmatter alone -
+    those files are never read, written, or checked by this script.
+  - .cursor/rules/<skill-dir>.mdc (Cursor) - one per skill, every skill,
+    always generator-owned.
+  - AGENTS.md (Codex) - one root file listing every skill, always
+    generator-owned.
+
+Both generated file kinds are fully generated (no hand-edited region) -
+--check compares the whole file's expected bytes against what's on disk.
+"""
+import re
+import sys
+from pathlib import Path
+
+LIBRARY_ROOT = Path(__file__).resolve().parent.parent
+SKILLS_DIR = LIBRARY_ROOT / ".github" / "skills"
+PROMPTS_DIR = LIBRARY_ROOT / ".github" / "prompts"
+CURSOR_RULES_DIR = LIBRARY_ROOT / ".cursor" / "rules"
+AGENTS_MD_PATH = LIBRARY_ROOT / "AGENTS.md"
+
+FRONTMATTER_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n", re.DOTALL)
+H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+
+# Skills with a hand-authored Copilot wrapper that has unique, non-mechanical
+# "When invoked directly" steps. Never touched by this script, in any mode.
+HAND_AUTHORED_PROMPTS = {"ult-context-generate", "ult-codegraph", "demo-consume-context"}
+
+PROMPT_FIELDS = [
+    "name", "description", "namespace", "version", "origin", "author",
+    "maintainer", "adapted_from", "upstream_version", "released", "tags",
+    "bundle",
+]
+
+
+def field(fm_text, name):
+    m = re.search(rf"^{name}:\s*(.+)$", fm_text, re.MULTILINE)
+    return m.group(1).strip() if m else ""
+
+
+def quote_yaml_scalar(value):
+    """Wrap a frontmatter scalar in double quotes, escaping embedded quotes.
+
+    Guards against any future description containing ": " (which would break
+    an unquoted YAML scalar) without needing to detect that case specially.
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def load_skill(skill_md_path):
+    text = skill_md_path.read_text(encoding="utf-8-sig", errors="replace")
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        return None
+    fm = m.group(1)
+    h1 = H1_RE.search(text[m.end():])
+    return {
+        "dir": skill_md_path.parent.name,
+        "fm_raw": {name: field(fm, name) for name in PROMPT_FIELDS},
+        "description": field(fm, "description").strip('"'),
+        "title": h1.group(1).strip() if h1 else skill_md_path.parent.name,
+    }
+
+
+def collect_skills():
+    skills = []
+    for skill_md in sorted(SKILLS_DIR.glob("*/SKILL.md")):
+        skill = load_skill(skill_md)
+        if skill is not None:
+            skills.append(skill)
+    return skills
+
+
+def render_prompt_wrapper(skill):
+    lines = ["---"]
+    for name in PROMPT_FIELDS:
+        value = skill["fm_raw"][name]
+        if name == "description":
+            value = quote_yaml_scalar(skill["description"])
+        lines.append(f"{name}: {value}")
+    lines.append("---")
+    lines.append("")
+    lines.append(f'Read and follow the skill at `.github/skills/{skill["dir"]}/SKILL.md`.')
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_cursor_rule(skill):
+    lines = [
+        "---",
+        f"description: {quote_yaml_scalar(skill['description'])}",
+        "globs:",
+        "alwaysApply: false",
+        "---",
+        "",
+        f"# {skill['title']}",
+        "",
+        "This repository packages its capabilities as portable skills for AI",
+        f'coding agents. Read `.github/skills/{skill["dir"]}/SKILL.md` and follow it',
+        "when this rule applies.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def render_agents_md(skills):
+    lines = [
+        "# AGENTS.md",
+        "",
+        "Instructions for AI coding agents (e.g. OpenAI Codex) working in this",
+        "repository.",
+        "",
+        "This repository packages its capabilities as portable \"skills\" - read the",
+        "relevant skill's `SKILL.md` in full and follow it before acting in the",
+        "corresponding area. Do not guess at a skill's behavior from this table alone.",
+        "",
+        "| Skill | Description | Path |",
+        "|---|---|---|",
+    ]
+    for skill in skills:
+        desc = skill["description"].replace("|", "\\|")
+        lines.append(f'| {skill["dir"]} | {desc} | `.github/skills/{skill["dir"]}/SKILL.md` |')
+    lines.append("")
+    lines.append(
+        "Generated by `catalog/export_adapters.py` from each skill's SKILL.md "
+        "frontmatter - do not hand-edit; run `python catalog/export_adapters.py "
+        "--write` after adding or changing a skill."
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def generated_prompt_targets(skills):
+    return {
+        skill["dir"]: PROMPTS_DIR / f'{skill["dir"]}.prompt.md'
+        for skill in skills
+        if skill["dir"] not in HAND_AUTHORED_PROMPTS
+    }
+
+
+def plan(skills):
+    """Return [(path, expected_text, is_bom)] for every generator-owned file."""
+    entries = []
+    for skill_dir, path in generated_prompt_targets(skills).items():
+        skill = next(s for s in skills if s["dir"] == skill_dir)
+        entries.append((path, render_prompt_wrapper(skill), True))
+    for skill in skills:
+        path = CURSOR_RULES_DIR / f'{skill["dir"]}.mdc'
+        entries.append((path, render_cursor_rule(skill), False))
+    entries.append((AGENTS_MD_PATH, render_agents_md(skills), False))
+    return entries
+
+
+def current_text(path, is_bom):
+    if not path.exists():
+        return None
+    encoding = "utf-8-sig" if is_bom else "utf-8"
+    return path.read_text(encoding=encoding)
+
+
+def write_text(path, text, is_bom):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoding = "utf-8-sig" if is_bom else "utf-8"
+    path.write_text(text, encoding=encoding)
+
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else "--print"
+    skills = collect_skills()
+    entries = plan(skills)
+
+    stale = []
+    for path, expected, is_bom in entries:
+        if current_text(path, is_bom) != expected:
+            stale.append((path, expected, is_bom))
+
+    rel = lambda p: p.relative_to(LIBRARY_ROOT).as_posix()
+
+    if mode == "--check":
+        if stale:
+            print("Stale/missing generated adapter files:")
+            for path, _, _ in stale:
+                print(f"  {rel(path)}")
+            print("Run `python catalog/export_adapters.py --write` to regenerate.")
+            return 1
+        print(f"All {len(entries)} generated adapter file(s) are up to date.")
+        return 0
+
+    if mode == "--write":
+        for path, expected, is_bom in entries:
+            write_text(path, expected, is_bom)
+        print(f"Wrote {len(entries)} generated adapter file(s):")
+        for path, _, _ in entries:
+            print(f"  {rel(path)}")
+        return 0
+
+    stale_paths = {path for path, _, _ in stale}
+    print(f"{len(entries)} adapter file(s) would be generated for {len(skills)} skill(s):")
+    for path, _, _ in entries:
+        marker = " (stale/missing)" if path in stale_paths else ""
+        print(f"  {rel(path)}{marker}")
+    if stale:
+        print(f"\n{len(stale)} file(s) are stale or missing. Run with --write to update.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

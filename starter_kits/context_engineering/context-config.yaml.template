@@ -1,0 +1,158 @@
+# Context Engineering Framework — Project Configuration Template
+#
+# Copy this file to the project root as `context-config.yaml` and adjust the paths
+# below to match this project's actual directory layout. If `context-config.yaml`
+# is absent entirely, `ult-context-generate` falls back to the defaults documented
+# in its SKILL.md "Config reference" section — these are the same defaults, written
+# out and annotated, so copying this file just makes them explicit and editable.
+
+project_name: <your-project-name>
+description: <one-line description of what this product/service does>
+
+layers:
+  what_l3:
+    enabled: true
+    path: <source code root, e.g. app/ or src/>
+    graphify_budget: 50
+  what_l2:
+    enabled: true
+    path: <requirements docs root, e.g. docs/requirements/>
+                          # D21 §16.5: if layout.workspace_root is set and this
+                          # key is left absent/unset, the default becomes
+                          # {workspace_root}/ (the whole workspace subtree)
+                          # instead of docs/requirements/ — pair with `exclude`
+                          # below to keep contexts/, inputs/, cache/ out of the
+                          # What-L2 corpus.
+    exclude: []           # D21 §16.5 (Phase 3c): subtree paths relative to
+                          # `path` to skip when widening `path` to a workspace
+                          # root. Empty list (default) = no-op — matches
+                          # nothing, so projects that don't set this are
+                          # unaffected. Recommended when workspace_root is set:
+                          #   exclude:
+                          #     - contexts/   # indexed separately: D19 v2 / CONSUMING-CONTEXT-PACKAGE.md — not dead
+                          #     - inputs/     # indexed separately: what_l1.index_path / How dimension — not dead
+                          #     - cache/      # derived/regenerable; MUST cover index_path below (M3 invariant)
+    include_roots: []     # D21 §16.7 (Phase 3c): additional directories
+                          # OUTSIDE `path` to also index wholesale (no
+                          # exclude-filtering — being listed here IS the
+                          # inclusion decision). Empty list (default) = no-op.
+                          # Example for a project with its own SDLC layout that
+                          # remaps outputs/-bucket slots to its existing
+                          # output_docs_structure/ layout (§16.7):
+                          #   include_roots:
+                          #     - output_docs_structure/Requirements/
+                          #     - output_docs_structure/Designs/
+    graphify_budget: 30   # direct-read mode: requirement sections to extract per
+                          # aspect; indexed mode: section_bounds line-ranges read
+                          # per aspect (same budget, reused — see Step 5)
+    min_results_warning_threshold: 5   # warn user if fewer results than this
+    large_corpus_threshold: 10  # .md file count under what_l2.path; at or below,
+                          # direct-read mode (above). Above this, switch to
+                          # md_index.py indexed mode — same mechanism as What-L1,
+                          # Step 7.1.
+    md_index_profile: generic  # generic | 3gpp | rfc | ieee | <your-profile>.json
+                          # — only used in indexed mode. See what_l1.md_index_profile
+                          # below and scripts/README.md "Profiles".
+    index_path: specs-out/l2_index.json  # build artifact (gitignore-able) for
+                          # indexed mode — same role as what_l1.index_path below.
+  what_l1:
+    enabled: false     # External reference material (NIST/3GPP/ISO/IEEE/competitor
+                        # docs/etc., per D2's source-diversity clause) — direct-read
+                        # pilot (D13). Set true and point `path` at a directory of
+                        # `.md` files (e.g. specs/external/) for Step 7.1 to
+                        # build/query a deterministic structural index
+                        # (scripts/md_index.py — zero-LLM extraction, the
+                        # "graphify for markdown") on both-layers-gap topics.
+    path: <external reference root, e.g. specs/external/>
+    md_index_profile: generic  # generic | 3gpp | rfc | ieee | <your-profile>.json
+                        # Selects scripts/profiles/<name>.json, which governs
+                        # clause-id parsing and cross-reference patterns for this
+                        # corpus's house style. See scripts/README.md "Profiles"
+                        # to write your own (no code change needed).
+    index_path: specs-out/index.json  # build artifact (gitignore-able), like
+                        # graphify-out/graph.json below. Rebuilt automatically by
+                        # Step 7.1 via `md_index.py index --stale-check` whenever
+                        # any input file under `path` changes.
+    graphify_budget: 20  # soft cap on section line-ranges Read per gap topic
+    allow_web_fallback: false  # if true, Step 7.1 step 5a may attempt one
+                        # scoped WebSearch/WebFetch before offering
+                        # training-knowledge (Q3); off by default (D18)
+    # A full multi-spec corpus (e.g. an entire 3GPP series) indexes the same way —
+    # one index.json across all files. Cross-FILE citation following ("see TS
+    # 38.214 clause 5.2.2") is future work; see ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md R9.
+
+how_dimension:
+  how_l2:
+    enabled: true
+    path: <org conventions/templates root, e.g. org/>
+    cache_path: org-conventions/
+  how_l1:
+    enabled: false     # Org-wide process standards (CMMI/ISO/IEEE) — enable once loaded
+    path: <process standards root, e.g. org/process-standards/>
+
+cache:
+  product_context_path: contexts/
+  # Filename format: <feature-slug>_<task-type>_<YYYYMMDD>.yaml
+  # Path-slot note (D20 §15): this is the context_packages slot's documented
+  # default/fallback. Once /ult-repo-layout init|reconcile has run, the
+  # resolved location is tracked by project_layout.slots.context_packages (a
+  # generated index — never hand-author that section). See
+  # .github/skills/ult-repo-layout/SKILL.md.
+  #
+  # Two more registered slots (D21 §16.4, Gap B) have no config-key fallback
+  # here - plans_output (default docs/superpowers/plans/, written by
+  # writing-plans) and brainstorm_output (default docs/superpowers/specs/,
+  # written by brainstorming). Same resolution algorithm and generated
+  # project_layout.slots.<slot> index; see ult-repo-layout/SKILL.md's slot
+  # registry table.
+  #
+  # Five more registered slots (D20 Phase 2, D21 §16.4) also have no
+  # config-key fallback here - compiled_guidelines (the registry's only
+  # kind: file slot; default starter_kit/project_guidelines/COMPILED-GUIDELINES.md,
+  # written by compiling-project-guidelines; D21 re-roots it to
+  # {workspace_root}/cache/project-guidelines/COMPILED-GUIDELINES.md - the
+  # only slot whose D21 bucket differs from its pre-D21 location, inputs ->
+  # cache), user_stories_output (default output_docs/user-stories/, written
+  # by example-consumer), security_docs (default
+  # output_docs/security_docs/, written by sec-threat-model), security_report
+  # (default output_docs/security_report/, written by security-test-report),
+  # and project_plan_docs (default output_docs/project_plan_docs/, written by
+  # pm-project-plan). Same resolution algorithm and generated
+  # project_layout.slots.<slot> index; see ult-repo-layout/SKILL.md's slot
+  # registry table.
+
+layout:
+  # workspace_root (D21 §16.2): optional. When set, an UNMARKED path-slot
+  # (context_packages, plans_output, brainstorm_output, ...) with no explicit
+  # project_layout.slots.<slot>.path resolves to {workspace_root}/<bucket>/<leaf>
+  # instead of its pre-D21 default (§16.4) - e.g. context_packages ->
+  # {workspace_root}/contexts/, plans_output -> {workspace_root}/outputs/plans/,
+  # brainstorm_output -> {workspace_root}/outputs/specs/. Markers
+  # (.layout-slots.yaml) and explicit project_layout.slots.<slot>.path entries
+  # always win regardless of this setting (S16) - workspace_root changes
+  # DEFAULTS only.
+  # Absent by default: every project that never sets this key resolves
+  # exactly as before Phase 3a, forever (§16.10's zero-impact guarantee).
+  # MUST be a non-empty repo-relative directory path - '.' and '' are
+  # rejected by validate_layout.py (S22).
+  # workspace_root: docs/
+
+  # on_missing_write_path (D20 §15.6): what a skill does when it tries to
+  # WRITE to a path-slot (context_packages, plans_output, brainstorm_output,
+  # ...) whose resolved path doesn't exist yet.
+  #   prompt - ask interactively (create / give a new path / skip this write)
+  #   skip   - warn, don't write, report the write as skipped
+  #   create - silently create the directory (opt-in: declares "the
+  #            configured path is always correct, create it if absent")
+  # If unset (the default below): prompt in interactive sessions, skip
+  # otherwise - never create automatically.
+  # on_missing_write_path: skip
+
+org_conventions:
+  commit_to_repo: true   # set false to gitignore and regenerate per machine
+
+graphify:
+  graph_path: graphify-out/graph.json
+  # Path filtering is post-query: layer assignment is determined by node file path prefix
+  # what-l3 nodes: file path starts with the what_l3.path above
+  # what-l2 nodes: file path starts with the what_l2.path above

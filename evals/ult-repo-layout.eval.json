@@ -1,0 +1,26 @@
+{
+  "skill": "repo-layout",
+  "cases": [
+    {
+      "id": "ult-repo-layout-01",
+      "type": "positive",
+      "input": "The contexts/ output directory got moved to a new location — can you register it as a path-slot via .layout-slots.yaml markers so future runs resolve it correctly?",
+      "expected_skill": "repo-layout",
+      "notes": "Canonical trigger: registering/relocating a path-slot via a marker file."
+    },
+    {
+      "id": "ult-repo-layout-02",
+      "type": "positive",
+      "input": "Before the pipeline runs, validate that every configured path-slot in this project still resolves to a real directory and flag any drift from the registry.",
+      "expected_skill": "repo-layout",
+      "notes": "Validation-mode trigger, distinct phrasing from case 01 (checking vs. registering)."
+    },
+    {
+      "id": "ult-repo-layout-03-negative",
+      "type": "negative",
+      "input": "Can you explain what the calculate_total function does in billing.py?",
+      "not_expected_skill": "repo-layout",
+      "notes": "A simple single-file code lookup — exactly the case the skill's 'Do NOT use for single-file lookups' clause exists to redirect away from path-slot registration/validation."
+    }
+  ]
+}

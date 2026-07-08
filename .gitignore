@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# md_index.py build artifacts embed the local machine's absolute filesystem
+# path in their "root" field - never commit these (see
+# starter_kits/context_engineering/context-config.yaml.template).
+specs-out/

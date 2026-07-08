@@ -1,0 +1,223 @@
+# layout-slots-registry.yaml
+#
+# Library-level superset registry (D21 CONTEXT-ENGINEERING-DESIGN.md §16.8).
+# One row per path any skill in this library reads or writes outside the code
+# tree. Lives only here -- NOT copied into consuming projects by
+# install.ps1/install.sh. A consuming project's own context-config.yaml
+# project_layout.slots is a per-project instance of the `slots:` entries
+# below, scoped to whichever owning skills that project has installed (S8).
+#
+# Consumers of this file:
+#   - .github/skills/ult-repo-layout/scripts/validate_layout.py's
+#     registry-consistency check: every `slots:` entry with
+#     project_layout_slot: true must have a matching key in that script's
+#     SLOT_REGISTRY, and vice versa (FAIL on drift). No-op for any repo where
+#     this file is absent -- i.e. every consuming project.
+#   - meta-skills/amb-review-contribution/SKILL.md's 7th "Path-dependency
+#     conformance" dimension
+#     (.github/skills/ult-repo-layout/scripts/validate_path_conformance.py):
+#     checks a contributed SKILL.md's write-verb-object path literals against
+#     pre_d21_default/workspace_root_leaf below before suggesting that a new
+#     convention be registered here.
+#
+# Mirrors context-engineering/CONTEXT-ENGINEERING-DESIGN.md §16.4's table.
+# "{workspace_root}" below is literal -- substituted at resolution time per
+# §16.2 step 3 (see ult-repo-layout/SKILL.md "Resolved defaults per slot").
+
+schema_version: 1
+
+# --- project_layout.slots entries (D20 §15.2 + Phase 2, D21 §16.4) ---------
+# Each has a .layout-slots.yaml marker and is resolved via the §15.5 + §16.2
+# algorithm. kind/pre_d21_default/workspace_root_leaf/producer mirror
+# validate_layout.py's SLOT_REGISTRY (default/workspace_root_leaf/owning_skill)
+# exactly; default_bucket/config_key/consumers are this registry's §16.8
+# columns that SLOT_REGISTRY doesn't separately carry.
+slots:
+  - id: context_packages
+    project_layout_slot: true
+    kind: directory
+    default_bucket: contexts
+    pre_d21_default: contexts/
+    workspace_root_leaf: contexts/
+    config_key: cache.product_context_path
+    producer: ult-context-generate
+    consumers:
+      - ult-context-generate/CONSUMING-CONTEXT-PACKAGE.md (D19 v2 pilot chain)
+
+  - id: plans_output
+    project_layout_slot: true
+    kind: directory
+    default_bucket: outputs
+    pre_d21_default: docs/superpowers/plans/
+    workspace_root_leaf: outputs/plans/
+    config_key: ~   # NEW slot (Gap-B) -- no pre-existing config-key fallback
+    producer: writing-plans
+    consumers:
+      - subagent-driven-development
+      - requesting-code-review
+
+  - id: brainstorm_output
+    project_layout_slot: true
+    kind: directory
+    default_bucket: outputs
+    pre_d21_default: docs/superpowers/specs/
+    workspace_root_leaf: outputs/specs/
+    config_key: ~   # NEW slot (Gap-B) -- no pre-existing config-key fallback
+    producer: brainstorming
+    consumers:
+      - brainstorming/spec-document-reviewer-prompt.md
+
+  - id: compiled_guidelines
+    project_layout_slot: true
+    kind: file
+    default_bucket: cache
+    pre_d21_default: starter_kit/project_guidelines/COMPILED-GUIDELINES.md
+    workspace_root_leaf: cache/project-guidelines/COMPILED-GUIDELINES.md
+    config_key: ~
+    note: "bucket-reassigned (inputs -> cache) as well as re-rooted -- a derived, regenerable artifact, not project-authored input. The only kind:file slot in this registry."
+    producer: compiling-project-guidelines
+    consumers:
+      - compiling-project-guidelines/CONSUMING-COMPILED-GUIDELINES.md
+
+  - id: user_stories_output
+    project_layout_slot: true
+    kind: directory
+    default_bucket: outputs
+    pre_d21_default: output_docs/user-stories/
+    workspace_root_leaf: outputs/user-stories/
+    config_key: ~
+    producer: example-consumer
+    consumers: ~   # none registered yet
+
+  - id: security_docs
+    project_layout_slot: true
+    kind: directory
+    default_bucket: outputs
+    pre_d21_default: output_docs/security_docs/
+    workspace_root_leaf: outputs/security_docs/
+    config_key: ~
+    producer: sec-threat-model
+    consumers: ~   # none registered yet
+
+  - id: security_report
+    project_layout_slot: true
+    kind: directory
+    default_bucket: outputs
+    pre_d21_default: output_docs/security_report/
+    workspace_root_leaf: outputs/security_report/
+    config_key: ~
+    producer: security-test-report
+    consumers: ~   # none registered yet
+
+  - id: project_plan_docs
+    project_layout_slot: true
+    kind: directory
+    default_bucket: outputs
+    pre_d21_default: output_docs/project_plan_docs/
+    workspace_root_leaf: outputs/project_plan_docs/
+    config_key: ~
+    producer: pm-project-plan
+    consumers: ~   # none registered yet
+
+# --- existing layers.*/how_dimension.*/graphify.*/cache.* config keys ------
+# Not project_layout.slots entries (no marker/resolution mechanism) -- D20
+# §15.2 explicitly scopes slots to paths that AREN'T already a config key.
+# Listed so the 7th amb-review dimension recognizes these literals as
+# "already a documented config-key default", not an unregistered convention.
+config_keys:
+  - id: what_l2_path
+    project_layout_slot: false
+    config_key: layers.what_l2.path
+    kind: directory
+    pre_d21_default: docs/requirements/
+    workspace_root_default: "{workspace_root}/"
+    note: "redefined, not re-rooted -- corpus root = workspace_root itself (§16.5)"
+
+  - id: what_l1_path
+    project_layout_slot: false
+    config_key: layers.what_l1.path
+    kind: directory
+    default_bucket: inputs
+    pre_d21_default: specs/external/
+    workspace_root_leaf: inputs/external-specs/
+
+  - id: how_dimension_path
+    project_layout_slot: false
+    config_key: how_dimension.how_l2.path / how_dimension.how_l1.path
+    kind: directory
+    default_bucket: inputs
+    pre_d21_default: org/
+    workspace_root_leaf: inputs/org/
+
+  - id: how_l2_cache_path
+    project_layout_slot: false
+    config_key: how_dimension.how_l2.cache_path
+    kind: directory
+    default_bucket: cache
+    pre_d21_default: org-conventions/
+    workspace_root_leaf: cache/org-conventions/
+
+  - id: graphify_graph_path
+    project_layout_slot: false
+    config_key: graphify.graph_path
+    kind: file
+    default_bucket: cache
+    pre_d21_default: graphify-out/graph.json
+    workspace_root_leaf: cache/graphify-out/graph.json
+
+  - id: index_paths
+    project_layout_slot: false
+    config_key: what_l1.index_path / what_l2.index_path
+    kind: file
+    default_bucket: cache
+    pre_d21_default: specs-out/*.json
+    workspace_root_leaf: cache/specs-out/*.json
+
+# --- starter-kit drop-zones (D21 §16.6, Phase 3d) ---------------------------
+# No marker/resolution mechanism -- regenerated .pointer.md scaffolds at
+# starter_kit/<leaf>/ (pre-D21) or {workspace_root}/inputs/starter-kit/<leaf>/
+# (D21). install.ps1/install.sh's BUNDLE_STARTER_KIT map drives these.
+starter_kit_dropzones:
+  - id: threat_modeling
+    project_layout_slot: false
+    kind: directory
+    default_bucket: inputs
+    pre_d21_default: starter_kit/threat_modeling/
+    workspace_root_leaf: inputs/starter-kit/threat_modeling/
+    consumers:
+      - sec-threat-model
+
+  - id: secure_coding_guidelines
+    project_layout_slot: false
+    kind: directory
+    default_bucket: inputs
+    pre_d21_default: starter_kit/secure_coding_guidelines/
+    workspace_root_leaf: inputs/starter-kit/secure_coding_guidelines/
+    consumers: ~   # none registered yet
+
+  - id: security_test_data
+    project_layout_slot: false
+    kind: directory
+    default_bucket: inputs
+    pre_d21_default: starter_kit/security_test_data/
+    workspace_root_leaf: inputs/starter-kit/security_test_data/
+    consumers:
+      - security-test-report
+
+  - id: project_plan
+    project_layout_slot: false
+    kind: directory
+    default_bucket: inputs
+    pre_d21_default: starter_kit/project_plan/
+    workspace_root_leaf: inputs/starter-kit/project_plan/
+    consumers:
+      - pm-project-plan
+
+  - id: project_guidelines
+    project_layout_slot: false
+    kind: directory
+    default_bucket: inputs
+    pre_d21_default: starter_kit/project_guidelines/
+    workspace_root_leaf: inputs/starter-kit/project_guidelines/
+    consumers:
+      - compiling-project-guidelines

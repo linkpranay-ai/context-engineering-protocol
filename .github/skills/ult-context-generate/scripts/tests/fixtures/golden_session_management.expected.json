@@ -1,0 +1,166 @@
+{
+  "path": "golden_session_management.md",
+  "sha256": "a7b592f97eed3c1b4848a832a1639c359da707b4fa6df7d87a483be53a7cf362",
+  "front_matter_lines": null,
+  "headings": [
+    {
+      "id": "h_0000",
+      "style": "atx",
+      "level": 1,
+      "title": "Digital Identity Guidelines — Session Management (Reference Excerpt)",
+      "clause_id": null,
+      "is_toc": false,
+      "line": 1,
+      "section_bounds": [
+        2,
+        53
+      ],
+      "cross_refs": [
+        {
+          "raw": "Section 7",
+          "kind": "clause",
+          "target_clause": "7",
+          "resolved_heading_id": null,
+          "resolved": false
+        },
+        {
+          "raw": "clause 7.2",
+          "kind": "clause",
+          "target_clause": "7.2",
+          "resolved_heading_id": "h_0003",
+          "resolved": true
+        },
+        {
+          "raw": "clause 7.1.1",
+          "kind": "clause",
+          "target_clause": "7.1.1",
+          "resolved_heading_id": "h_0002",
+          "resolved": true
+        },
+        {
+          "raw": "clause 7.3",
+          "kind": "clause",
+          "target_clause": "7.3",
+          "resolved_heading_id": "h_0004",
+          "resolved": true
+        }
+      ]
+    },
+    {
+      "id": "h_0001",
+      "style": "atx",
+      "level": 2,
+      "title": "7.1 Session Bindings",
+      "clause_id": "7.1",
+      "is_toc": false,
+      "line": 6,
+      "section_bounds": [
+        7,
+        22
+      ],
+      "cross_refs": [
+        {
+          "raw": "clause 7.2",
+          "kind": "clause",
+          "target_clause": "7.2",
+          "resolved_heading_id": "h_0003",
+          "resolved": true
+        }
+      ]
+    },
+    {
+      "id": "h_0002",
+      "style": "atx",
+      "level": 3,
+      "title": "7.1.1 Reauthentication Timeout by AAL",
+      "clause_id": "7.1.1",
+      "is_toc": false,
+      "line": 13,
+      "section_bounds": [
+        14,
+        22
+      ],
+      "cross_refs": [
+        {
+          "raw": "clause 7.2",
+          "kind": "clause",
+          "target_clause": "7.2",
+          "resolved_heading_id": "h_0003",
+          "resolved": true
+        }
+      ]
+    },
+    {
+      "id": "h_0003",
+      "style": "atx",
+      "level": 2,
+      "title": "7.2 Session Termination",
+      "clause_id": "7.2",
+      "is_toc": false,
+      "line": 23,
+      "section_bounds": [
+        24,
+        33
+      ],
+      "cross_refs": [
+        {
+          "raw": "clause 7.1.1",
+          "kind": "clause",
+          "target_clause": "7.1.1",
+          "resolved_heading_id": "h_0002",
+          "resolved": true
+        },
+        {
+          "raw": "clause 7.3",
+          "kind": "clause",
+          "target_clause": "7.3",
+          "resolved_heading_id": "h_0004",
+          "resolved": true
+        }
+      ]
+    },
+    {
+      "id": "h_0004",
+      "style": "atx",
+      "level": 2,
+      "title": "7.3 Time-Bound and Guest Credentials",
+      "clause_id": "7.3",
+      "is_toc": false,
+      "line": 34,
+      "section_bounds": [
+        35,
+        46
+      ],
+      "cross_refs": [
+        {
+          "raw": "clause 7.1.1",
+          "kind": "clause",
+          "target_clause": "7.1.1",
+          "resolved_heading_id": "h_0002",
+          "resolved": true
+        },
+        {
+          "raw": "clause 7.2",
+          "kind": "clause",
+          "target_clause": "7.2",
+          "resolved_heading_id": "h_0003",
+          "resolved": true
+        }
+      ]
+    },
+    {
+      "id": "h_0005",
+      "style": "atx",
+      "level": 2,
+      "title": "7.4 Notification of Upcoming Expiration",
+      "clause_id": "7.4",
+      "is_toc": false,
+      "line": 47,
+      "section_bounds": [
+        48,
+        53
+      ],
+      "cross_refs": []
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "skill": "demo-consume-context",
+  "cases": [
+    {
+      "id": "demo-consume-context-01",
+      "type": "positive",
+      "input": "Walk me through a worked example of discovering, loading, and tagging a context package end-to-end, without doing any real feature work.",
+      "expected_skill": "demo-consume-context",
+      "notes": "Canonical trigger: asking for the worked example that exercises discover/load/tag on a context package, explicitly not real feature work."
+    },
+    {
+      "id": "demo-consume-context-02",
+      "type": "positive",
+      "input": "Run the demo that consumes a context package and writes the reverse-index addendum, just to prove the tag loop actually works.",
+      "expected_skill": "demo-consume-context",
+      "notes": "Different phrasing, emphasizes 'demo' plus the reverse-index addendum and tag loop from steps 3-4 of the skill."
+    },
+    {
+      "id": "demo-consume-context-03-negative",
+      "type": "negative",
+      "input": "Implement the new search-filter feature for the product catalog page and open a PR when it's ready.",
+      "not_expected_skill": "demo-consume-context",
+      "notes": "Real feature implementation work — exactly what this skill's 'Do NOT use for real feature work' clause exists to redirect away from."
+    }
+  ]
+}
