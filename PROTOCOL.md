@@ -40,7 +40,7 @@ importance.
 | **What-L2** | This product's own requirements/spec documents | Implemented | `docs/requirements/` (path configurable) |
 | **What-L1** | External references — industry standards, competitor docs, architecture whitepapers (e.g. 3GPP, ISO, IEEE) | **Piloting** | `specs/external/` (path configurable), indexed by `md_index.py` |
 | **How-L2** | Your org's compiled, scope-aware conventions (style guides, templates, examples) | Implemented | `compiling-project-guidelines`, cached as `COMPILED-GUIDELINES.md` |
-| **How-L1** | Org-wide **process** standards (CMMI, ISO 9001, IEEE process standards, etc.) | **Not yet implemented** — see §5 | n/a |
+| **How-L1** | Org-wide **process** standards (CMMI, ISO 9001, IEEE process standards, etc.) | **Piloting** — see §5 | `org/process-standards/` (path configurable), indexed by `md_index.py` |
 
 **Why external specs (What-L1) rank below your own docs (What-L2/L3):** an external standard
 describes what the *industry* does, not what *this product* does or requires. When a What-L1
@@ -62,7 +62,7 @@ flowchart LR
         L2W["What-L2<br/>requirements docs"]
         L1W["What-L1 (piloting)<br/>external specs"]
         L2H["How-L2<br/>compiled guidelines"]
-        L1H["How-L1 (planned)<br/>org process standards"]
+        L1H["How-L1 (piloting)<br/>org process standards"]
     end
 
     Sources --> Engine["ult-context-generate<br/>gap · conflict · staleness checks"]
@@ -147,38 +147,41 @@ they're what "protocol" means here rather than "product":
   package follows the same numbered steps (discover → confirm → load → spot-check → cite →
   tag) — see §3.4's links.
 
-## 5. How-L1 — specified now, built later (Phase 2)
+## 5. How-L1 — gap-triggered, task-type-scoped (piloting)
 
-**How-L1 is not implemented today.** `context-config.yaml`'s `how_l1` section exists and is
-always `enabled: false`; there is no query step in `ult-context-generate` that reads it yet. This
-section describes its intended design so the protocol names its own shape honestly, rather than
-leaving a layer undefined until someone gets around to building it. Tracked as the #1 item in
-[`ROADMAP.md`](ROADMAP.md).
+**How-L1 is implemented, but newly added and not yet field-validated against a real corpus.**
+`context-config.yaml`'s `how_l1` section defaults to `enabled: false`; leave it that way until
+you've run it once against your own org's process-standard `.md` files and confirmed the results
+look right. Once enabled, it reuses the same deterministic `md_index.py` mechanism as What-L1
+(§2 above), but is wired into the flow differently, described below.
 
-**What it would ingest:** org-wide *process* standards — the kind of thing a CMMI appraisal, an
+**What it ingests:** org-wide *process* standards — the kind of thing a CMMI appraisal, an
 ISO 9001 quality manual, or an IEEE process standard describes — as distinct from How-L2's
 project-specific compiled conventions (style guides, templates, examples). Where How-L2 answers
-"how does *this team* format a design doc," How-L1 would answer "what does *this
-organization's* quality process require of any design doc, regardless of team."
+"how does *this team* format a design doc," How-L1 answers "what does *this organization's*
+quality process require of any design doc, regardless of team."
 
-**Where it would slot in:** between the existing Step 2 (How-L2 org convention check) and Step 3
-of `ult-context-generate`'s flow — a new query step reading `how_l1.path`, structurally parallel
-to how What-L1 (§2 above) already works: build a deterministic index once, query it per aspect,
-surface matches as gated review items rather than auto-including them.
+**Where it slots in:** inside Step 2's existing D8 branch ("How dimension complete gap" — How-L2
+has no relevant content for this task type), not between Step 2 and Step 3, and not per aspect.
+Step 2 has no aspect loop, so How-L1 fires **once per package**, gap-triggered off How-L2 coming
+up empty for the task type — structurally parallel to What-L1's Step 7.1, but task-type-scoped
+rather than aspect-scoped. See `ult-context-generate/references/how-l1-fallback-query.md` for the
+exact procedure. Unlike What-L1, there is no web-search/training-knowledge fallback chain of its
+own: Step 2's existing D8 prompt ("(a) use my best-practice suggestion / (b) I'll provide the
+template myself") already gives the human an equivalent decision point when How-L1 finds nothing.
 
-**How it would be gated:** the same way What-L1 fallback items are gated today — a dedicated
-`[HOW-L1 FALLBACK ITEMS — REVIEW]` block at the human-review step, tagged with provenance, never
-auto-approved. A How-L1 item describes what the *organization's process* requires, not what
+**How it's gated:** the same way What-L1 fallback items are gated — a dedicated
+`[HOW-L1 FALLBACK ITEMS — REVIEW]` block at Step 9's human-review step, tagged with provenance,
+never auto-approved. A How-L1 item describes what the *organization's process* requires, not what
 *this product* does — the same "informative, not automatically authoritative" caveat that
-applies to What-L1 items today applies here too.
+applies to What-L1 items applies here too. Rejecting an item decrements
+`how_l1_fallback_count`, removes it from `context_items`, and (if it was the only How-L1 evidence
+for the package) resets `how_l1_covered` to `false` and re-surfaces Step 2's D8 prompt.
 
-**What exists today instead:** the supported path for org-wide process guidance right now is
-**How-L2** — drop relevant excerpts or summaries into `org/guidelines/` as narrative content.
-It's manual (someone has to curate the excerpt) rather than indexed/queried automatically, but it
-works today. Full How-L1 support means a config schema change and a new Step 2 sub-flow — real
-scope, which is why it's Phase 2 rather than a small addition. Open an issue in this repo if
-having it would unblock your project; that's the signal this gets prioritized against other
-Phase-2 items.
+**What's still manual:** curating the process-standard corpus itself (dropping the relevant
+CMMI/ISO/IEEE `.md` files under `how_l1.path` and building the index) is on the org, same as
+How-L2's `org/guidelines/` corpus. How-L2 remains the supported path for project-specific
+narrative process guidance; How-L1 only fires when How-L2 has nothing for the task type at hand.
 
 ## 6. Runtime adapters are generated, the protocol isn't
 

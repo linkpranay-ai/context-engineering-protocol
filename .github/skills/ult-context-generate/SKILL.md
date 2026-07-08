@@ -56,6 +56,14 @@ tier: draft
 > correctly bounded. **Zero-LLM extraction** — a stdlib subprocess builds the
 > index; the agent only reads the matched `section_bounds` line-ranges. See
 > D13/D14.
+>
+> **How-L1 fallback (Step 2.1, D13/D14) is newly added, not yet field-validated
+> against a real corpus.** It reuses the same `scripts/md_index.py` mechanism as
+> What-L1's Step 7.1, gap-triggered off the existing How-L2 org-convention check
+> (Step 2) instead of per-aspect, and with no web-search/training-knowledge
+> fallback chain of its own — see `references/how-l1-fallback-query.md`. Leave
+> `how_l1.enabled: false` until you've run it once against your own org's
+> process-standard `.md` files and confirmed the results look right.
 
 ## Dependencies
 
@@ -82,7 +90,8 @@ may use them.
 ## Config reference
 
 Read `context-config.yaml` at the project root before starting. It specifies:
-- Layer paths (`what_l3.path`, `what_l2.path`, `what_l1.path`, `how_l2.path`)
+- Layer paths (`what_l3.path`, `what_l2.path`, `what_l1.path`, `how_l2.path`,
+  `how_l1.path`)
 - Budget limits per layer
 - `org_conventions.commit_to_repo` flag
 - Product context packages location — the `context_packages` path-slot (D20
@@ -95,13 +104,14 @@ If the file does not exist, use these defaults:
   mode via `md_index.py` (same mechanism as What-L1; see below)
 - What-L1: disabled
 - How-L2 path (`how_l2.path`): `org/`, cache: `org-conventions/`
+- How-L1: disabled
 - Product context packages path (`context_packages` path-slot): `contexts/`
 
-**Throughout this skill**, `what_l3.path`, `what_l2.path`, `what_l1.path`, and
-`how_l2.path` mean "the value configured for this key in `context-config.yaml`,
-or the default above if the file or key is absent." Where the Flow below shows
-a literal example path like `app/` or `docs/requirements/`, substitute this
-project's configured value.
+**Throughout this skill**, `what_l3.path`, `what_l2.path`, `what_l1.path`,
+`how_l2.path`, and `how_l1.path` mean "the value configured for this key in
+`context-config.yaml`, or the default above if the file or key is absent."
+Where the Flow below shows a literal example path like `app/` or
+`docs/requirements/`, substitute this project's configured value.
 
 **`context_packages` (D20 §15.5, D21 §16.2):** every literal `contexts/` in
 the Flow below is the `context_packages` path-slot, resolved via
@@ -169,6 +179,20 @@ an `outputs/`-bucket slot remapped *outside* `{workspace_root}` (e.g. to this
 repo's own `output_docs_structure/Requirements/`, `output_docs_structure/Designs/`
 via D20's per-slot override) rejoin the What-L2 corpus without adopting
 `workspace_root`'s single-root shape.
+
+**How-L1 (`how_l1`):** when `enabled: true`, `path` points at a directory of
+`.md` files (default `org/process-standards/`) that Step 2.1 indexes with the
+same `scripts/md_index.py` mechanism as What-L1, at `index_path` (default
+`specs-out/how_l1_index.json` — distinct from What-L1's and What-L2's index
+paths so all three can coexist), once per run via `--stale-check`.
+`md_index_profile` (default `generic`) selects the clause-numbering and
+cross-reference conventions for this corpus's house style, same as What-L1.
+`graphify_budget` (default `20`) is a soft cap on how many section
+line-ranges Step 2.1 reads. Unlike What-L1, Step 2.1 runs **once per
+package** (gap-triggered off Step 2's How-L2 check, not per aspect) and has
+**no `allow_web_fallback` option** — Step 2's existing D8 prompt already
+gives the human an equivalent decision point when nothing is found. See
+`references/how-l1-fallback-query.md`.
 
 A ready-to-copy template (with these same defaults, annotated) is available at
 `starter_kits/context_engineering/context-config.yaml.template` in this library —
@@ -258,7 +282,23 @@ this task type:
 **If org/ has relevant content:** Read those files. Assemble a How-L2 org convention
 package from them. Save to `org-conventions/<TASK_TYPE>.yaml`. Go to Step 3.
 
-**If org/ has no relevant content (D8 — How dimension complete gap):** Surface to the user:
+**If org/ has no relevant content (D8 — How dimension complete gap):**
+
+#### Step 2.1 — How-L1 fallback query (gap-triggered, task-type-scoped, D13/D14)
+
+Before surfacing the D8 prompt below, read
+`references/how-l1-fallback-query.md` in full and follow it. In short: if
+`how_l1.enabled: true`, it queries an indexed org-wide process-standards
+corpus (CMMI/ISO/IEEE, etc. — same `md_index.py` mechanism as What-L1) once
+for this task type and, if it finds anything, records `how-l1` context items
+(`how_l1_fallback: true`, gated for review at Step 9's
+`[HOW-L1 FALLBACK ITEMS — REVIEW]` block) and sets `how_l1_covered: true`. If
+disabled, or nothing is found, it sets `how_l1_covered: false` and returns
+here with no other side effect — proceed to the D8 prompt below unchanged.
+There is no separate web-search/training-knowledge fallback for How-L1: the
+D8 prompt below already gives the human an equivalent decision point.
+
+Surface to the user:
 
 > "No org conventions found for [TASK_TYPE]. I can suggest a standard format based on
 > best practice for [artifact type], or you can provide your own templates/examples.
@@ -785,6 +825,7 @@ PRODUCT CONTEXT  (contexts/<filename>.yaml)
   LLM knowledge:  <N>  [CONFIRM RELEVANCE BEFORE APPROVAL if > 0 — see below]
   Web fallbacks:  <N>  [CONFIRM RELEVANCE BEFORE APPROVAL if > 0 — see below]
   LLM scaffolds:  <N>
+  How-L1 fallback: <N>  [CONFIRM RELEVANCE BEFORE APPROVAL if > 0 — see below]
 
 ASPECT COVERAGE
   #  | Aspect                        | L3  | L2  | L1  | Notes
@@ -817,6 +858,10 @@ ORG CONVENTION  (org-conventions/<task_type>.yaml)
 <for each what-l1 context item with confidence: SUGGESTED and a source starting
  with "web_search(" (Step 7.1 step 5a / D18 items): its aspect_id/aspect,
  retrieved_at timestamp, source, and summary>
+
+[HOW-L1 FALLBACK ITEMS — REVIEW — if any]
+<for each how-l1 context item (how_l1_fallback: true, Step 2.1): its source
+ citation and summary — these have no aspect_id/aspect, they are task-type-scoped>
 ```
 
 **`L1 fallbacks` line wording:**
@@ -848,6 +893,15 @@ ORG CONVENTION  (org-conventions/<task_type>.yaml)
   summary already carries the unverified-against-project caveat from Step 7.1
   step 5a — surface it as-is, don't soften or drop it).
 
+**`How-L1 fallback` line wording:**
+- `how_l1.enabled: false` (or absent): `0  (How-L1 layer disabled)`
+- `how_l1.enabled: true` but Step 2.1 found nothing: `0  (no How-L1 fallbacks)`
+- `how_l1.enabled: true` and Step 2.1 found items: `<N>  [CONFIRM RELEVANCE
+  BEFORE APPROVAL — see below]`, with the `[HOW-L1 FALLBACK ITEMS — REVIEW]`
+  block listing each item's `source` and `summary`. Items found via
+  citation-following (D14) carry that provenance in their `summary`, same as
+  What-L1's.
+
 Then ask:
 > "Please review the context package above.
 > — If there are conflicts: tell me which interpretation is correct for each.
@@ -861,6 +915,10 @@ Then ask:
 >   relevant — these come from a live web search (retrieval timestamp noted
 >   per item), not this project's own sources, and may not apply to this
 >   product.
+> — If there are How-L1 fallback items: confirm each still applies to this
+>   organization's actual process before I rely on it (these come from an
+>   external process-standard corpus, not this project's own How-L2
+>   conventions).
 > — If anything is missing or wrong: tell me what to fix.
 > — When you are satisfied: say APPROVE to proceed."
 
@@ -891,6 +949,14 @@ has confirmed (or rejected) each item. A rejected item must be removed from
 `false` (the aspect reverts to a gap). Because the web fallback offer (if
 accepted) skipped the Q3 training-knowledge offer for this aspect, offer Q3
 now per step 5a; if Q3 is also declined or empty, apply Step 7.2.
+
+**If there are How-L1 fallback items:** Do NOT accept approval until the user
+has confirmed (or rejected) each item's applicability. A rejected item must
+be removed from `context_items` and `how_l1_fallback_count` decremented
+before saving. If that was the only How-L1 evidence for this package, also
+reset `how_l1_covered` to `false` and re-surface Step 2's D8 prompt — "(a)
+use my best-practice suggestion / (b) I'll provide the template myself" —
+since it has not yet been offered for this task type.
 
 **Do not treat any shorthand ("go ahead", "looks good", "use assumptions") as APPROVE.**
 The user must say the word APPROVE (or a clear explicit equivalent like "approved" or
@@ -940,9 +1006,9 @@ report invented "~N–MK tokens" breakdowns. Instead:
   each run, record that real number in this project's `learnings.md` (or
   equivalent running-notes file), dated, alongside: the feature scope, the
   number of aspects (Step 1.5) and how many were both-layers-gap candidates,
-  whether `what_l1.enabled` was true, and roughly how many `graphify
-  query`/`explain` calls Step 4 made. This is the data the pilot needs — an
-  LLM's self-estimate is not.
+  whether `what_l1.enabled` and `how_l1.enabled` were true, and roughly how
+  many `graphify query`/`explain` calls Step 4 made. This is the data the
+  pilot needs — an LLM's self-estimate is not.
 - **What-L3 (Step 4) cost** is dominated by `graphify query`/`graphify explain`
   call volume. `ult-codegraph` provides `graphify benchmark` (run once per
   pilot codebase — see its SKILL.md "Measuring impact") to measure token
@@ -953,6 +1019,10 @@ report invented "~N–MK tokens" breakdowns. Instead:
   both-layers-gap aspect — see "Zero-LLM extraction" in Step 7.1. If you want a
   concrete number, record the total line-ranges read per aspect in `learnings.md`; do not
   estimate it in tokens.
+- **Step 2.1 (How-L1) cost** is the same shape as Step 7.1's — a one-time
+  index build (amortized via `--stale-check`) plus exactly the
+  `section_bounds` line-ranges `Read`, but once per package rather than per
+  aspect.
 
 **Open Question 4** (`CONTEXT-ENGINEERING-DESIGN.md` §10 — token cost as the
 primary Phase 1 measurement gate) **is not yet measurable** from this skill's
@@ -972,9 +1042,10 @@ cost driver.
 | `graphify-out/graph.json` not found | "Code graph not found. Run `/ult-codegraph` (or `graphify update .`) first, then retry." |
 | `graphify-out/graph.json` exists but stale (Step 4 staleness nudge) | Non-blocking: report the one-line staleness nudge and continue using the existing graph |
 | `what_l2.path` (default `docs/requirements/`) does not exist | Treat What-L2 as empty (D8 path) |
-| `how_l2.path` (default `org/`) does not exist | Treat How-L2 as empty (D8 path) |
+| `how_l2.path` (default `org/`) does not exist | Treat How-L2 as empty — Step 2.1 runs (How-L1 query, if enabled), then Step 2's D8 prompt |
 | Both What-L2 and What-L3 empty for an aspect | Both-layers-gap candidate for that aspect (Step 7) — Step 7.1 runs first: What-L1 query (if enabled), then the optional web fallback (step 5a, D18, if `allow_web_fallback: true`), then the Q3 training-knowledge offer (step 5a) if the above are disabled or return nothing. D8 complete gap (Step 7.2) only if all of these also fail to close it for that aspect |
 | `what_l1.enabled: true` but `path` missing/empty, or `md_index.py index` fails (step 1) | Treat as "What-L1 returns nothing" for every candidate aspect — go to step 5a (web fallback if enabled, then Q3 training-knowledge offer) for each; fall through to Step 7.2 (D8) only if that is also declined/empty — not a hard error |
 | `what_l1.allow_web_fallback: true` but `WebSearch`/`WebFetch` is unavailable, errors, or returns nothing usable (step 5a, D18) | Treat as "web fallback returns nothing" — fall through to the Q3 training-knowledge offer unchanged, not a hard error |
+| `how_l1.enabled: true` but `path` missing/empty, or `md_index.py index` fails, or the query returns nothing (Step 2.1) | Treat as "How-L1 returns nothing" — set `how_l1_covered: false` and go directly to Step 2's existing D8 prompt — not a hard error |
 | A query result's `cross_refs` entry has `resolved: false` (D14) | Drop that reference — do not guess or read an unrelated section |
 | User does not approve after 3 rounds | "Pausing context generation. Resume by running ult-context-generate again — the partial draft is NOT saved." |

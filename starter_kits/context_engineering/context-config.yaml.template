@@ -87,8 +87,18 @@ how_dimension:
     path: <org conventions/templates root, e.g. org/>
     cache_path: org-conventions/
   how_l1:
-    enabled: false     # Org-wide process standards (CMMI/ISO/IEEE) — enable once loaded
+    enabled: false     # Org-wide process standards (CMMI/ISO/IEEE) — enable once loaded.
+                        # Gap-triggered, task-type-scoped (see SKILL.md Step 2): queried
+                        # only when how_l2 has no relevant content for the task type,
+                        # once per package, not per aspect. No web-fallback chain —
+                        # Step 2's existing D8 gap-handling prompt substitutes for one.
     path: <process standards root, e.g. org/process-standards/>
+    md_index_profile: generic  # generic | 3gpp | rfc | ieee | <your-profile>.json
+                        # Same mechanism as what_l1.md_index_profile above.
+    index_path: specs-out/how_l1_index.json  # build artifact (gitignore-able), distinct
+                        # from what_l1.index_path and what_l2.index_path so all three can
+                        # coexist. Rebuilt via `md_index.py index --stale-check`.
+    graphify_budget: 20  # soft cap on section line-ranges Read per query
 
 cache:
   product_context_path: contexts/

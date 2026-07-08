@@ -116,6 +116,17 @@ follow this before doing that work:
    above (informative, not authoritative), and note its `retrieved_at`
    timestamp if relevance depends on recency.
 
+   **How-L1 fallback items:** any `context_items` entry with
+   `how_l1_fallback: true` is an org-wide process-standard suggestion (Step
+   2.1, D13 in `ult-context-generate/SKILL.md`) that already passed the
+   mandatory human review gate at generation time — it describes what the
+   organization's process requires, not what this project's own How-L2
+   conventions say. It carries no `aspect_id`/`aspect` (task-type-scoped, not
+   aspect-scoped). If the work at hand is affected, flag it distinctly (e.g.
+   "this package includes a How-L1 process-standard item sourced from
+   `<source>` — treat as informative, not automatically authoritative, for
+   this project's own conventions").
+
    **Aspect fields (D15/D17):** `context_items[].aspect_id` and
    `gaps_detected[].aspect_id` are the stable integer join key into the
    package's top-level `aspects[]` list (e.g. to check `aspects[].what_l3_covered`
@@ -172,8 +183,9 @@ follow this before doing that work:
        note: >
          <one line — what was being looked up, and why>
        # then the normal context_items shape (id/layer/source/type/
-       # confidence/summary/what_l1_fallback) if kind: context_item,
-       # or the decisions_log shape (topic/decided) if kind: decision
+       # confidence/summary/what_l1_fallback/how_l1_fallback) if
+       # kind: context_item, or the decisions_log shape (topic/decided)
+       # if kind: decision
    ```
 
    If the file doesn't exist yet, create it with this top-level `addenda:`

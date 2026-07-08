@@ -45,7 +45,7 @@ The package that comes out the other side is source-attributed (every claim trac
 file/section) and content-hashed, and requires a human to explicitly approve it before a
 downstream skill consumes it — this is deliberately not a fully autonomous pipeline. See
 [`PROTOCOL.md`](PROTOCOL.md) for the full layer model, the state machine in detail, and how the
-not-yet-built How-L1 layer is meant to slot in.
+piloting How-L1 layer is gap-triggered off How-L2.
 
 That's the difference from Cline's Memory Bank (persistent notes, no conflict/staleness checking),
 Cursor's `.cursorrules` (static convention injection, no code-graph grounding), and generic
@@ -102,7 +102,7 @@ The full formal contract (addenda, multi-package edge cases, tag-discovery rules
 
 ## Roadmap
 
-What's planned next — How-L1 implementation, cross-file citation resolution, and more — is
+What's planned next — cross-file citation resolution, selective install, and more — is
 tracked in [`ROADMAP.md`](ROADMAP.md), roughly prioritized.
 
 ## Runtime support
@@ -155,9 +155,10 @@ against a real Cursor installation — see "What's not yet done" below. Run
 Disclosed plainly rather than glossed over. Full prioritized list with more detail:
 [`ROADMAP.md`](ROADMAP.md).
 
-- **How-L1** (org-wide process-standard ingestion, e.g. CMMI/ISO/IEEE) is not implemented — only
-  How-L2 (compiled project guidelines) exists today. Its intended design is specified in
-  [`PROTOCOL.md`](PROTOCOL.md#5-how-l1--specified-now-built-later-phase-2).
+- **How-L1** (org-wide process-standard ingestion, e.g. CMMI/ISO/IEEE) is piloting, not yet
+  field-validated against a real corpus — gap-triggered off How-L2 and task-type-scoped rather
+  than per-aspect, with no web-search fallback of its own. See
+  [`PROTOCOL.md`](PROTOCOL.md#5-how-l1--gap-triggered-task-type-scoped-piloting).
 - **Cross-file citation resolution is deferred.** The corroboration/citation-following mechanism
   only resolves single-hop, same-file references; multi-hop or cross-file citation chains aren't
   followed.

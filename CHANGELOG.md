@@ -15,6 +15,12 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   `context-config.yaml` from the template and `starter_kit/project_guidelines/.pointer.md`, each
   only if not already present. Supports `--dry-run`/`-DryRun` and requires an explicit, existing
   `--target`/`-TargetPath`. Re-running is idempotent and never clobbers project-owned files.
+- **How-L1 (piloting)**: deterministic, zero-LLM structural indexing of external org-wide
+  process-standard `.md` references (CMMI/ISO 9001/IEEE, etc. — reuses `md_index.py`, the same
+  mechanism as What-L1), gap-triggered off Step 2's existing How-L2 org-convention check and
+  scoped once per package/task-type rather than per aspect, with no web-search fallback chain of
+  its own — Step 2's existing best-practice-template prompt substitutes for one. Gated for human
+  review at Step 9 like every other fallback layer.
 
 ## [0.1.0]
 
