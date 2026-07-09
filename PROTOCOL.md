@@ -130,6 +130,10 @@ for the full consumption contract, or
 [`user_guides/topics/consuming-a-context-package.md`](user_guides/topics/consuming-a-context-package.md)
 for a shorter, friendlier on-ramp.
 
+A human's correction at this gate can optionally be persisted forward, opt-in and one question
+at a time, into compiled project guidelines so future packages start from it too — see
+`ult-context-generate/SKILL.md` Step 9.5.
+
 ## 4. What makes this a protocol, not a tool
 
 A few properties are deliberately non-negotiable across every skill in this repo, because

@@ -970,6 +970,57 @@ Once user says APPROVE (and all conflicts addressed):
 
 ---
 
+### Step 9.5 — Optional: persist corrections to project guidelines
+
+Everything the human decided at Step 9 is saved into this one feature's
+`contexts/<id>.yaml` and stops there by default — the next `ult-context-generate`
+run for a different feature won't see it. This step closes that loop for the
+narrow subset of Step 9 decisions that are actually general, reusable project
+guidance rather than judgments specific to this feature.
+
+**Only run this step if this approved package had at least one of:**
+
+1. A resolved `constraint-lateral` conflict (Step 5.5/Step 6, D7) — two
+   `COMPILED-GUIDELINES.md` scoped sections disagreeing at an interaction point
+   this feature touches, now resolved by the human's answer at Step 9.
+2. A rejected fallback item (What-L1 / LLM-knowledge / web / How-L1) whose
+   stated rejection reason reads as **general, reusable project guidance**
+   rather than "not relevant to this feature."
+
+If neither applies, skip this step silently — most runs end at Step 9.
+
+**Judging whether a fallback-item rejection is general guidance:** ask whether
+the human's reason would still hold for a *different* feature touching the same
+area, or whether it's specific to this one. For example:
+- *"We don't do gRPC health checks that way here — we use the shared
+  `/healthz` middleware in `pkg/health`"* → general: reword as guidance and
+  offer to persist it.
+- *"This particular endpoint doesn't need rate limiting because it's
+  admin-only and already behind VPN"* → feature-specific: do not offer to
+  persist it.
+
+**For each qualifying item, ask one explicit question (never write silently):**
+> "This run resolved `<topic>` — you said `<resolution and reason>`. Should I
+> note this in `COMPILED-GUIDELINES.md` for future runs and
+> `/ult-compile-guidelines` to pick up? (y/n)"
+
+- **On yes:** append one line to the `## Recent Observations (pending compile)`
+  section of `COMPILED-GUIDELINES.md` (creating the section if it's absent),
+  following the write-back contract in
+  `compiling-project-guidelines/CONSUMING-COMPILED-GUIDELINES.md` step 5
+  exactly — same file, same section, same dated/attributed line shape, just
+  attributed `[ult-context-generate]` and citing this package's `id` (from
+  Step 8's `contexts/<id>.yaml`) for traceability back to the full resolution.
+  Resolve `COMPILED-GUIDELINES.md`'s location the same way that write-back
+  contract does — do not re-derive the `compiled_guidelines` path-slot logic
+  here.
+- **On no:** do nothing and move on. No retry, no nagging.
+
+This is purely persisting a decision the human already made at Step 9 — it
+never infers a guideline from agent behavior on its own.
+
+---
+
 ### Step 10 — Save, signal, and STOP
 
 Both files are now saved and approved. Report the file paths:

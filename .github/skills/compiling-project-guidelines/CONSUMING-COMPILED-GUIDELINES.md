@@ -32,6 +32,9 @@ before doing that work:
    want to know — append one dated, attributed line to `## Recent Observations (pending
    compile)` in `COMPILED-GUIDELINES.md` (creating the section if it's absent). Non-blocking, no
    user prompt: it's an inbox for the next `/ult-compile-guidelines` run to triage.
+   `ult-context-generate/SKILL.md` Step 9.5 is a structured instance of this same contract — it
+   persists a human's already-made decision at its Step 9 approval gate, rather than an
+   incidental observation.
 
 ---
 

@@ -324,6 +324,14 @@ the path-resolution note above) already exists:
    conflict flow below and let the outcome land in `## Noted Tensions`. Either way, remove the
    entry from `## Recent Observations` once triaged — the section should be empty (or omitted
    entirely) by the time this compile finishes.
+
+   **Entries attributed `[ult-context-generate]` are a special case**: these describe a
+   conflict a human already resolved once, at that skill's Step 9 human-approval gate (see
+   `ult-context-generate/SKILL.md` Step 9.5) — not a fresh observation awaiting a decision. Fold
+   these in as a **pre-resolved** `## Noted Tensions` entry directly, citing the source context
+   package's `id` for traceability. Do not re-run them through the step 4/5 Q&A — re-asking a
+   question the human already answered violates the "don't re-litigate" principle in step 3
+   below.
 2. **Read it first.** Its `## Noted Tensions` log tells you which conflicts were already raised,
    how they were resolved, and why.
 3. **Carry forward resolved tensions** whose underlying sources haven't changed since — don't

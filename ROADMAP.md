@@ -97,15 +97,30 @@ runtimes.
 
 ## 6. Project memory feedback loop
 
-**Status: not started, needs design.** Today `compiling-project-guidelines` compiles How-L2 once
-from existing docs (`CONTRIBUTING.md`, style guides, etc.) — nothing feeds decisions made during
-the human-approval gate (§3.4) back into it. When a human corrects or rejects a context-package
-item, there's no mechanism to persist that lesson for next time. Proposal: an opt-in step where a
-human-made correction can be appended, source-attributed, to a project-memory file that the next
-`compiling-project-guidelines` run picks up as an input. This must stay inside the existing
-human-gate philosophy — persisting an *already-human-made* decision, not auto-inferring one from
-agent behavior. Deliberately excludes any keyword-triggered auto-reflection hook that would
-persist a lesson without a human already having made the call — see "Not on this roadmap."
+**Status: implemented (2026-07-09).** `ult-context-generate/SKILL.md` now has a
+`### Step 9.5 — Optional: persist corrections to project guidelines`, running right after the
+Step 9 human-approval gate. It reuses the mechanism `compiling-project-guidelines` already had —
+the `## Recent Observations (pending compile)` inbox in `COMPILED-GUIDELINES.md`, previously
+written only by consuming skills per `CONSUMING-COMPILED-GUIDELINES.md` step 5 — rather than
+inventing a second state store. Two triggers, both asked as one explicit opt-in question per
+item, never written silently:
+
+1. A resolved `constraint-lateral` conflict (two `COMPILED-GUIDELINES.md` scoped sections
+   disagreeing at an interaction point this feature touched).
+2. A rejected fallback item (What-L1/LLM-knowledge/web/How-L1) whose stated rejection reason
+   reads as general, reusable project guidance rather than feature-specific judgment.
+
+`compiling-project-guidelines/SKILL.md`'s "On re-run" step 1 now folds entries attributed
+`[ult-context-generate]` in as pre-resolved `## Noted Tensions`, rather than re-running them
+through the conflict Q&A — the human already made that call once.
+
+**Deliberately out of scope for v1** (revisit only if a real need surfaces): L2-vs-L3
+contradictions (code vs. requirements — wrong artifact, not a How-L2 convention) and
+`constraint-vertical` conflicts (already `compiling-project-guidelines`'s own turf via its Step
+4/5; `ult-context-generate` only ever carries forward an already-existing unresolved one, it
+never mints a new one). Still stays inside the human-gate philosophy — this persists an
+*already-human-made* decision, never auto-infers one from agent behavior; no keyword-triggered
+auto-reflection hook was added.
 
 ## 7. Context-package usage telemetry
 
