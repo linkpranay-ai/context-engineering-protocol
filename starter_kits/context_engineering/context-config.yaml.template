@@ -77,6 +77,28 @@ layers:
     allow_web_fallback: false  # if true, Step 7.1 step 5a may attempt one
                         # scoped WebSearch/WebFetch before offering
                         # training-knowledge (Q3); off by default (D18)
+    mcp_source: []      # Optional list of MCP fetch specs to mirror into `path`
+                        # before Step 7.1 step 0's index build. Absent or empty
+                        # (the default) = zero behavior change — Step 7.1 reads
+                        # only hand-dropped .md files under `path`, exactly as
+                        # without this key. Each entry:
+                        #   - id: <stable id — mirror-manifest key, unique per list>
+                        #     server: <MCP server name, e.g. confluence-dc>
+                        #     tool: <MCP tool name, e.g. confluence_getContent>
+                        #     identifier: <tool-specific identifier/query passed to the tool>
+                        #     mirror_filename: <filename written under mcp_mirror_path>
+    mcp_mirror_path: <what_l1.path>/.mcp-mirror/  # SUBDIRECTORY of `path` that
+                        # mcp_source entries are mirrored into — md_index.py
+                        # indexes `path` recursively, so mirrored files are
+                        # picked up automatically with no command change.
+                        # Regenerated on every run from mcp_source: add this
+                        # path to your project's own .gitignore, same reasoning
+                        # as specs-out/ below. Mirrored content may be
+                        # licensed/proprietary even though it lives under a
+                        # normally-committed `path` — don't commit it by accident.
+    mcp_manifest_path: specs-out/what_l1_mcp_manifest.json  # gitignore-able,
+                        # like index_path above — tracks content_hash8/fetched_at
+                        # per mcp_source id across runs.
     # A full multi-spec corpus (e.g. an entire 3GPP series) indexes the same way —
     # one index.json across all files. Cross-FILE citation following ("see TS
     # 38.214 clause 5.2.2") is future work; see ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md R9.
@@ -99,6 +121,16 @@ how_dimension:
                         # from what_l1.index_path and what_l2.index_path so all three can
                         # coexist. Rebuilt via `md_index.py index --stale-check`.
     graphify_budget: 20  # soft cap on section line-ranges Read per query
+    mcp_source: []      # Optional list of MCP fetch specs to mirror into `path`
+                        # before Step 2.1 step 0's index build. Absent or empty
+                        # (the default) = zero behavior change — same shape and
+                        # mechanism as what_l1.mcp_source above (id/server/tool/
+                        # identifier/mirror_filename per entry).
+    mcp_mirror_path: <how_l1.path>/.mcp-mirror/  # SUBDIRECTORY of `path`, same
+                        # reasoning as what_l1.mcp_mirror_path above — gitignore
+                        # this path in your own project.
+    mcp_manifest_path: specs-out/how_l1_mcp_manifest.json  # gitignore-able,
+                        # distinct from what_l1.mcp_manifest_path so both can coexist.
 
 cache:
   product_context_path: contexts/

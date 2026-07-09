@@ -15,6 +15,40 @@ results.
 
 **Otherwise (`how_l1.enabled: true`):**
 
+0. **Mirror configured MCP sources (only if `how_l1.mcp_source` is set and non-empty) — once per
+   run, before the index build below.** Same mechanism as What-L1's Step 7.1 step 0. If
+   `how_l1.mcp_source` is absent or an empty list (the default), skip this step entirely and go
+   straight to step 1 — How-L1 behaves exactly as it does today, reading only hand-dropped `.md`
+   files under `how_l1.path`.
+
+   Otherwise, for each entry in `how_l1.mcp_source` (`id`, `server`, `tool`, `identifier`,
+   `mirror_filename`):
+   1. Call the entry's MCP tool (`<entry.server>`'s `<entry.tool>`) with `<entry.identifier>`,
+      exactly like any other in-session MCP tool call.
+   2. Write the fetched text to a scratchpad JSON file shaped `{"body": "<fetched text>"}`.
+   3. If the tool call errors or returns nothing usable: skip mirroring this one entry (note it),
+      and continue with the rest — do not fail this step. `md_index.py` will index whatever mirror
+      files already exist from a prior successful run for that entry (or none, if this is the
+      first run and it failed) — same as if the entry weren't configured this run.
+
+   Once every entry has been attempted, build one combined spec file — a JSON array, each entry
+   shaped `{"id", "source": {"server", "tool", "identifier"}, "mirror_filename", "content_file"}`,
+   with `content_file` pointing at that entry's scratchpad JSON from step 2 above — and run:
+   ```
+   python scripts/mcp_mirror.py mirror --spec-file <scratchpad spec file> \
+       --mirror-dir <how_l1.mcp_mirror_path> --manifest <how_l1.mcp_manifest_path>
+   ```
+   One subprocess call mirrors/hashes/manifests every entry. `how_l1.mcp_mirror_path` is a
+   subdirectory of `how_l1.path` (default `<how_l1.path>/.mcp-mirror/`), so step 1's index build
+   below picks up mirrored files automatically — `md_index.py` indexes `how_l1.path` recursively,
+   no command change needed. Content is only rewritten (and only then does its mtime advance) when
+   its `content_hash8` differs from the last run's recorded hash for that entry — this treats a
+   frequently-revised internal org QMS source and an infrequently-revised external standards body
+   identically (the mirror simply rewrites more or less often); no separate staleness/attribution
+   treatment is needed for the two kinds of source. See `scripts/README.md`'s `mcp_mirror.py`
+   section and `examples/mcp-what-l1-demo/WALKTHROUGH.md` for the mechanism and a validated round
+   trip (What-L1 example; How-L1 uses the identical mechanism against `how_l1.path`).
+
 1. **Build (or refresh) the structural index — once per run.**
    Run:
    ```

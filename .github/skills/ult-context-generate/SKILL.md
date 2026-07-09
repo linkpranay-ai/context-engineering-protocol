@@ -150,6 +150,17 @@ the Q3 training-knowledge offer — trading the "free and instant, training-data
 only" default for "one web lookup, possibly more current." See Step 7.1 step
 5a and D18 (`CONTEXT-ENGINEERING-DESIGN.md`).
 
+`mcp_source` (default `[]`) is another separate opt-in (ROADMAP item 9): an
+optional list of MCP fetch specs (`id`/`server`/`tool`/`identifier`/
+`mirror_filename` per entry) that Step 7.1 step 0 mirrors into
+`mcp_mirror_path` (default `<path>/.mcp-mirror/`, a subdirectory of `path`)
+before the index build, using `scripts/mcp_mirror.py` and
+`mcp_manifest_path` (default `specs-out/what_l1_mcp_manifest.json`) to track
+per-entry content hashes across runs. Absent or empty (the default): step 0
+is a no-op and What-L1 behaves exactly as it does with only hand-dropped
+`.md` files under `path`. See Step 7.1 step 0 and
+`examples/mcp-what-l1-demo/WALKTHROUGH.md`.
+
 **What-L2 (`what_l2`):** `path` points at the project's own requirements docs
 (default `docs/requirements/`; D21 §16.5 — if `layout.workspace_root` is set
 and `path` is left unset, the default widens to `{workspace_root}/`, the whole
@@ -191,8 +202,12 @@ cross-reference conventions for this corpus's house style, same as What-L1.
 line-ranges Step 2.1 reads. Unlike What-L1, Step 2.1 runs **once per
 package** (gap-triggered off Step 2's How-L2 check, not per aspect) and has
 **no `allow_web_fallback` option** — Step 2's existing D8 prompt already
-gives the human an equivalent decision point when nothing is found. See
-`references/how-l1-fallback-query.md`.
+gives the human an equivalent decision point when nothing is found. `mcp_source`
+(default `[]`, ROADMAP item 11) works identically to What-L1's — an optional
+list Step 2.1 step 0 mirrors into `mcp_mirror_path` (default
+`<path>/.mcp-mirror/`) before the index build, tracked via `mcp_manifest_path`
+(default `specs-out/how_l1_mcp_manifest.json`); absent or empty (the default)
+means step 0 is a no-op. See `references/how-l1-fallback-query.md`.
 
 A ready-to-copy template (with these same defaults, annotated) is available at
 `starter_kits/context_engineering/context-config.yaml.template` in this library —
@@ -1074,6 +1089,10 @@ report invented "~N–MK tokens" breakdowns. Instead:
   index build (amortized via `--stale-check`) plus exactly the
   `section_bounds` line-ranges `Read`, but once per package rather than per
   aspect.
+- **`mcp_source` cost (Step 7.1/Step 2.1 step 0, ROADMAP items 9/11).** One MCP
+  tool call per configured `mcp_source` entry, once per run (not per aspect) —
+  the same cost category as Step 7.1 step 5a's web fallback. Absent/empty
+  `mcp_source` (the default): zero additional cost, step 0 doesn't run.
 - **Semi-automated aggregation (ROADMAP item 7).** Once you have a real,
   harness-reported number for a consuming run, you can record it in the
   optional `tokens_used` field on that run's `kind: reference` addendum
@@ -1106,5 +1125,6 @@ cost driver.
 | `what_l1.enabled: true` but `path` missing/empty, or `md_index.py index` fails (step 1) | Treat as "What-L1 returns nothing" for every candidate aspect — go to step 5a (web fallback if enabled, then Q3 training-knowledge offer) for each; fall through to Step 7.2 (D8) only if that is also declined/empty — not a hard error |
 | `what_l1.allow_web_fallback: true` but `WebSearch`/`WebFetch` is unavailable, errors, or returns nothing usable (step 5a, D18) | Treat as "web fallback returns nothing" — fall through to the Q3 training-knowledge offer unchanged, not a hard error |
 | `how_l1.enabled: true` but `path` missing/empty, or `md_index.py index` fails, or the query returns nothing (Step 2.1) | Treat as "How-L1 returns nothing" — set `how_l1_covered: false` and go directly to Step 2's existing D8 prompt — not a hard error |
+| `what_l1.mcp_source` or `how_l1.mcp_source` set but one entry's MCP tool call fails, errors, or returns nothing usable (step 0) | Skip mirroring that one entry, note it, and continue with the rest — not a hard error. The index build indexes whatever mirror files already exist for that entry from a prior successful run (or none, if this is the first run) |
 | A query result's `cross_refs` entry has `resolved: false` (D14) | Drop that reference — do not guess or read an unrelated section |
 | User does not approve after 3 rounds | "Pausing context generation. Resume by running ult-context-generate again — the partial draft is NOT saved." |

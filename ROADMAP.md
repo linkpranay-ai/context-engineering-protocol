@@ -140,9 +140,9 @@ real per-run token counts can start being collected the same way citations alrea
 
 - **OpenTelemetry GenAI semantic-convention export.** Grepped repo-wide: zero existing OTel
   infrastructure or demand. Building an exporter with no consumer is the speculative-infrastructure
-  trap this project otherwise avoids (same reasoning already applied to items 9/11's MCP-backed
-  sources) — a plain markdown report is the right v1 shape until an actual observability pipeline
-  wants to ingest this.
+  trap this project otherwise avoids by doing a design pass before committing (the same discipline
+  items 9/11's MCP-backed sources went through before shipping) — a plain markdown report is the
+  right v1 shape until an actual observability pipeline wants to ingest this.
 - **An independently-measured token-cost/savings number.** `README.md` already discloses this is
   "partly self-reported... not yet independently measured against a real, large repo," and that
   remains true — a real number needs real harness-level session data collected across pilot runs,
@@ -162,15 +162,37 @@ own real corpus" section for the exact steps, which already work today with no c
 
 ## 9. MCP-backed What-L1 source
 
-**Status: speculative, needs design before it's a committed item.** Today What-L1 (external
-references) is static `.md` files under a local directory, indexed once by `md_index.py`.
-[MCP](https://modelcontextprotocol.io) is increasingly treated as a first-class context source in
-comparable tooling — the Awesome-Context-Engineering survey lists MCP/A2A under "Open Agent
-Protocols". Letting `context-config.yaml`'s `what_l1` section point at an MCP resource URI, in
-addition to a local directory, would make external references live instead of a manual drop-zone.
-The open design question: every MCP call would need the same source-attribution/content-hash
-discipline as every other source, or it breaks staleness detection's entire premise (§3.3) — that
-has to be solved before this becomes a real backlog item, not just bolted on.
+**Status: implemented (2026-07-09).** Resolves the open design question below with a
+mirror-then-index design: MCP becomes a way to *populate* `what_l1.path`, not a new content-item
+type reaching `md_index.py`. `references/what-l1-fallback-query.md` Step 0 (only runs if
+`what_l1.mcp_source` is set — default `[]`, so an unconfigured project sees zero behavior change)
+has the agent call each configured MCP tool directly, then hands the fetched text to
+`scripts/mcp_mirror.py`, which mirrors it to a local `.md` file under `what_l1.mcp_mirror_path`
+(default `<what_l1.path>/.mcp-mirror/`) and only rewrites that file — bumping its mtime — when its
+content hash (`content_hash8`, reused from `content_hash.py`) differs from the last run's recorded
+hash. Because `md_index.py`'s `gather_md_files()` already recurses (`target.rglob("*.md")`),
+mirrored files are picked up by the existing `md_index.py index <what_l1.path>` call with **zero
+changes to `md_index.py` itself** — content-hash comparison substitutes for mtime as the
+fetch-layer change signal, and composes cleanly with the existing mtime-based `--stale-check` one
+layer down. See [`examples/mcp-what-l1-demo/WALKTHROUGH.md`](examples/mcp-what-l1-demo/WALKTHROUGH.md)
+for a real, run command sequence validating this end-to-end (mirror → index → query →
+citation-following, then a simulated upstream change triggering a correct rebuild), and
+`scripts/README.md`'s `mcp_mirror.py` section for the CLI reference.
+
+<details>
+<summary>Original open design question (resolved above)</summary>
+
+Today What-L1 (external references) is static `.md` files under a local directory, indexed once by
+`md_index.py`. [MCP](https://modelcontextprotocol.io) is increasingly treated as a first-class
+context source in comparable tooling — the Awesome-Context-Engineering survey lists MCP/A2A under
+"Open Agent Protocols". Letting `context-config.yaml`'s `what_l1` section point at an MCP resource
+URI, in addition to a local directory, would make external references live instead of a manual
+drop-zone. The open design question: every MCP call would need the same
+source-attribution/content-hash discipline as every other source, or it breaks staleness
+detection's entire premise (§3.3) — that has to be solved before this becomes a real backlog item,
+not just bolted on.
+
+</details>
 
 ## 10. Runtime scope-filtering at consumption time
 
@@ -184,8 +206,23 @@ if/when a real consuming skill needs it.
 
 ## 11. MCP-backed How-L1 source
 
-**Status: speculative.** The same MCP-as-source question raised in item 9 for What-L1 applies to
-How-L1 (now shipped in its gap-triggered, file-based form — see
+**Status: implemented (2026-07-09).** Same mechanism as item 9, applied to How-L1
+(`references/how-l1-fallback-query.md` Step 0, `how_l1.mcp_source`/`how_l1.mcp_mirror_path`/
+`how_l1.mcp_manifest_path`, default `mcp_source: []` — zero behavior change when unset). The
+sharper-edged open question below turned out not to need two treatments: content-hash comparison
+is agnostic to how often the underlying source revises — an org's QMS document-management system
+(frequently-revised) just means its mirror file rewrites more often, and a published
+industry-standards body (CMMI, ISO, SAFe; infrequently-revised) means its mirror file rewrites
+less often. One mechanism correctly handles both with no special-casing. See
+[`examples/mcp-what-l1-demo/WALKTHROUGH.md`](examples/mcp-what-l1-demo/WALKTHROUGH.md)'s closing
+"How-L1 works identically" section — no separate demo directory, since the only difference from
+What-L1's demo is which `context-config.yaml` block and fallback-query doc supplies the paths.
+
+<details>
+<summary>Original open design question (resolved above)</summary>
+
+The same MCP-as-source question raised in item 9 for What-L1 applies to How-L1 (now shipped in its
+gap-triggered, file-based form — see
 [`PROTOCOL.md §5`](PROTOCOL.md#5-how-l1--gap-triggered-task-type-scoped-piloting)): an org's QMS
 document-management system and published industry-standards bodies (CMMI, ISO, SAFe) are natural
 candidates for a live MCP resource rather than a static local directory of `.md` files. The open
@@ -193,6 +230,8 @@ question from item 9 likely has sharper edges here: an org QMS system and a stan
 very different kinds of source (internal, frequently-revised policy vs. externally-versioned,
 infrequently-revised standard), so this may need two different staleness/attribution treatments
 rather than one. Needs a design pass before it's a committed item.
+
+</details>
 
 ## 12. Three-tier How dimension (mirroring What-L1/L2/L3)
 
