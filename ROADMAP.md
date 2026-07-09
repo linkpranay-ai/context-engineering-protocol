@@ -124,14 +124,31 @@ auto-reflection hook was added.
 
 ## 7. Context-package usage telemetry
 
-**Status: not started.** Supersedes and folds in the earlier "independent token-cost measurement"
-item. The consume/tag loop already records whether each approved context item was actually used
-downstream — the missing piece is aggregating that across runs into a report (which items go
-unused across many features, suggesting the assembly is over-including) and, optionally,
-exporting it in [OpenTelemetry GenAI semantic-convention](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
-format for teams that already have an observability pipeline. This is also the natural place to
-finally get an independently-measured token-cost/savings number against a large real-world repo,
-instead of the current partly-self-reported figures.
+**Status: implemented (2026-07-09) — aggregation-report slice only.** Supersedes and folds in
+the earlier "independent token-cost measurement" item. The consume/tag loop
+(`CONSUMING-CONTEXT-PACKAGE.md` step 9) already records, per addendum, exactly which
+`context_items` a downstream artifact actually cited — that write side was already shipping, but
+nothing read it back. `scripts/usage_report.py` is the missing read/aggregate side: it scans
+every `contexts/<id>.yaml` package and its sibling `<id>_*.addenda.yaml` files and writes
+`contexts/USAGE_REPORT.md` with overall cited/never-cited totals, a by-layer never-cited
+breakdown (the "which layers go unused, suggesting over-inclusion" signal), a
+fallback-items-specifically breakdown, and a per-package table. The addendum schema also gained
+two optional fields, `session_id` and `tokens_used` (`CONSUMING-CONTEXT-PACKAGE.md` step 9), so
+real per-run token counts can start being collected the same way citations already are.
+
+**Deliberately out of scope for v1** (revisit only if a real need surfaces):
+
+- **OpenTelemetry GenAI semantic-convention export.** Grepped repo-wide: zero existing OTel
+  infrastructure or demand. Building an exporter with no consumer is the speculative-infrastructure
+  trap this project otherwise avoids (same reasoning already applied to items 9/11's MCP-backed
+  sources) — a plain markdown report is the right v1 shape until an actual observability pipeline
+  wants to ingest this.
+- **An independently-measured token-cost/savings number.** `README.md` already discloses this is
+  "partly self-reported... not yet independently measured against a real, large repo," and that
+  remains true — a real number needs real harness-level session data collected across pilot runs,
+  which doesn't exist yet. This pass adds the `tokens_used` field needed to *start* collecting
+  that data for real; `usage_report.py` reports "no measured runs yet" rather than fabricate a
+  figure, and will keep saying so until an operator actually records one.
 
 ## 8. Real-corpus telecom example
 

@@ -417,3 +417,33 @@ to `\n` (so a Windows CRLF checkout doesn't produce false drift) and with the
 file's own top-level `content_hash:` line excluded (so the field is a fixed
 point — hashing a file that already carries its correct `content_hash` value
 reproduces that same value). See `tests/test_content_hash.py`.
+
+---
+
+## `usage_report.py` — context-package usage aggregation report
+
+A third small, **Python-3-stdlib-only** CLI (ROADMAP item 7): reads back the
+citation data `CONSUMING-CONTEXT-PACKAGE.md` step 9 already writes on every
+consuming run — each `kind: reference` addendum's `cites.ctx_ids` — and
+aggregates it across every package under `contexts/`, so you can see which
+`context_items` never get cited by any downstream artifact.
+
+```
+python usage_report.py [--dir contexts/]
+```
+
+Writes `<dir>/USAGE_REPORT.md` with: overall cited/never-cited totals, a
+by-layer never-cited breakdown, a fallback-items-specifically breakdown
+(`what_l1_fallback`/`how_l1_fallback` items — the lower-confidence,
+human-reviewed ones where "generated but then ignored" is most actionable), a
+per-package table, and a token-data section reporting count/min/max/avg of
+any `tokens_used` values found on addenda — explicitly labeled as measured,
+never estimated; it prints "no measured runs yet" if none exist. Handles zero
+packages found gracefully (exit 0 — a repo that hasn't run
+`ult-context-generate` yet is a normal state, not an error).
+
+Like `content_hash.py`, this hand-parses the fixed, documented package/addenda
+shapes (`references/context-package-schema.md`,
+`CONSUMING-CONTEXT-PACKAGE.md` step 9) with a targeted line-scanner rather
+than a general YAML parser — this repo has zero third-party Python
+dependencies by design. See `tests/test_usage_report.py`.

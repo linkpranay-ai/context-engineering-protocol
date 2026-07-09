@@ -1074,6 +1074,14 @@ report invented "~N–MK tokens" breakdowns. Instead:
   index build (amortized via `--stale-check`) plus exactly the
   `section_bounds` line-ranges `Read`, but once per package rather than per
   aspect.
+- **Semi-automated aggregation (ROADMAP item 7).** Once you have a real,
+  harness-reported number for a consuming run, you can record it in the
+  optional `tokens_used` field on that run's `kind: reference` addendum
+  (`CONSUMING-CONTEXT-PACKAGE.md` step 9) instead of only pasting it into
+  `learnings.md`. `scripts/usage_report.py` aggregates `tokens_used` across
+  every addendum it finds under `contexts/` and reports count/min/max/avg,
+  explicitly labeled as measured — it never estimates a number itself, and
+  reports "no measured runs yet" until real ones exist.
 
 **Open Question 4** (`CONTEXT-ENGINEERING-DESIGN.md` §10 — token cost as the
 primary Phase 1 measurement gate) **is not yet measurable** from this skill's

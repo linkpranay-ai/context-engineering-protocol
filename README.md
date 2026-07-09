@@ -166,7 +166,9 @@ Disclosed plainly rather than glossed over. Full prioritized list with more deta
 - **Codegraph validation is general-purpose, not domain-specific.** The C/C++ validation examples
   cover general constructs (e.g. `re2`, `protobuf`), not any particular embedded or telecom domain.
 - **Token-cost claims for `ult-context-generate` are partly self-reported** and have not yet been
-  independently measured against a real, large repo.
+  independently measured against a real, large repo. `scripts/usage_report.py` (ROADMAP item 7)
+  can aggregate real per-run token counts once they're recorded via the optional `tokens_used`
+  addenda field — but no measured figure exists yet.
 - **No capability-profile / tool-restriction field** (e.g. an `allowed-tools`-style frontmatter key)
   exists yet on any skill.
 - **Cursor is not installed and its adapter is not live-install-tested.** `catalog/export_adapters.py`

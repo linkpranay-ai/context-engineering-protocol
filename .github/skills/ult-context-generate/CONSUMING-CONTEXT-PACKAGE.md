@@ -227,7 +227,17 @@ follow this before doing that work:
        added_at: <ISO timestamp>
        artifact: <path-to-output, or "chat response">
        cites: { ctx_ids: [...], aspect_ids: [...] }
+       session_id: <optional — correlates addenda written by the same
+         consuming run, if your harness exposes one>
+       tokens_used: <optional int — only if a real harness-reported session
+         token count is known for this run; omit if unknown, never estimate>
    ```
+
+   `session_id` and `tokens_used` are both optional and additive — omit
+   either (or both) when unknown; nothing downstream treats their absence as
+   an error. They exist so `scripts/usage_report.py` (ROADMAP item 7) can
+   aggregate real, measured token data across runs once operators start
+   filling `tokens_used` in — see `SKILL.md`'s "Token cost tracking" section.
 
    This lets a future reader of `contexts/<package-id>.yaml` discover every
    downstream artifact that consulted it — the reverse of the forward tags
