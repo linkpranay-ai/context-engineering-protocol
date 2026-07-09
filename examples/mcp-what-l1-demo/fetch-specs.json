@@ -1,0 +1,12 @@
+[
+  {
+    "id": "kb-204-sync-config",
+    "source": {
+      "server": "confluence-dc",
+      "tool": "confluence_getContent",
+      "identifier": "mock:KB-204"
+    },
+    "mirror_filename": "kb-204-sync-config.md",
+    "content_file": "mock-source/page_kb-204.json"
+  }
+]

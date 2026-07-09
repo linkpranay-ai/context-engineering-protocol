@@ -447,3 +447,37 @@ shapes (`references/context-package-schema.md`,
 `CONSUMING-CONTEXT-PACKAGE.md` step 9) with a targeted line-scanner rather
 than a general YAML parser — this repo has zero third-party Python
 dependencies by design. See `tests/test_usage_report.py`.
+
+---
+
+## `mcp_mirror.py` — MCP-backed What-L1/How-L1 sourcing (ROADMAP items 9/11)
+
+A fourth **Python-3-stdlib-only** CLI, called from `references/what-l1-fallback-query.md` and
+`references/how-l1-fallback-query.md` Step 0, gated on `what_l1.mcp_source`/`how_l1.mcp_source`
+being set and non-empty in `context-config.yaml` (see `context-config.yaml.template`). If
+`mcp_source` is absent/empty (the default), Step 0 is a no-op and this script is never invoked —
+What-L1/How-L1 behave exactly as they do with only hand-dropped `.md` files.
+
+```
+python mcp_mirror.py mirror --spec-file <fetch-specs.json> \
+    --mirror-dir <dir> --manifest <manifest.json> [--content-dir <dir>]
+```
+
+The design: an MCP-fetched source has no file and no mtime, so it can't satisfy `md_index.py`'s
+existing mtime-based `--stale-check` the way a local `.md` file does. Rather than teaching
+`md_index.py` a second staleness model, `mcp_mirror.py` mirrors fetched content to local `.md`
+files under `<layer>.mcp_mirror_path` (a subdirectory of `<layer>.path`, so `md_index.py`'s
+existing recursive `index <layer.path>` call picks mirrored files up automatically — no
+index-command change) and lets `md_index.py` index that directory completely unmodified. A mirror
+file is only rewritten (and so only picks up a fresh mtime) when its `content_hash8` — reused
+directly from `content_hash.py`, not reimplemented — differs from what the last run recorded for
+that source; unchanged upstream content leaves the mirror file's mtime untouched, so
+`--stale-check` correctly no-ops downstream with zero code changes.
+
+This script never calls an MCP tool itself — that would need an MCP client dependency this repo
+deliberately doesn't take on. Instead, the calling procedure (the agent, following Step 0) makes
+the MCP tool call directly (it already has that capability in-session) and writes the result to a
+scratchpad JSON file (`{"body": "<fetched text>"}`) per `mcp_source` entry; `mcp_mirror.py` only
+reads those files (`read_content_file()`), hashes, mirrors, and manifests. See
+`examples/mcp-what-l1-demo/WALKTHROUGH.md` for a validated, real-command round trip against
+synthetic fixtures standing in for that fetched content, and `tests/test_mcp_mirror.py`.
