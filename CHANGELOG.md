@@ -21,6 +21,13 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   scoped once per package/task-type rather than per aspect, with no web-search fallback chain of
   its own — Step 2's existing best-practice-template prompt substitutes for one. Gated for human
   review at Step 9 like every other fallback layer.
+- **MCP-backed What-L1/How-L1 sourcing (ROADMAP items 9/11)**: `scripts/mcp_mirror.py` mirrors
+  MCP-fetched content into local `.md` files gated by content-hash comparison instead of mtime, so
+  `md_index.py`'s existing `--stale-check` picks up upstream changes with zero changes to
+  `md_index.py` itself. Wired in as a new Step 0 in both `references/what-l1-fallback-query.md`
+  and `references/how-l1-fallback-query.md`, gated on `what_l1.mcp_source`/`how_l1.mcp_source`
+  (default `[]`) — a project that never configures an MCP source sees zero behavior change. See
+  `examples/mcp-what-l1-demo/WALKTHROUGH.md` for a validated, real-command round trip.
 
 ### Fixed
 

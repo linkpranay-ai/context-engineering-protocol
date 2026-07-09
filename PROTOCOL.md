@@ -38,9 +38,9 @@ importance.
 |---|---|---|---|
 | **What-L3** | The code itself — a generated knowledge graph of cross-file relationships | Implemented | `ult-codegraph` (`graphify`) |
 | **What-L2** | This product's own requirements/spec documents | Implemented | `docs/requirements/` (path configurable) |
-| **What-L1** | External references — industry standards, competitor docs, architecture whitepapers (e.g. 3GPP, ISO, IEEE) | **Piloting** | `specs/external/` (path configurable), indexed by `md_index.py` |
+| **What-L1** | External references — industry standards, competitor docs, architecture whitepapers (e.g. 3GPP, ISO, IEEE) | **Piloting** | `specs/external/` (path configurable), indexed by `md_index.py` — hand-dropped `.md` files, or MCP-mirrored (optional, opt-in — ROADMAP item 9) |
 | **How-L2** | Your org's compiled, scope-aware conventions (style guides, templates, examples) | Implemented | `compiling-project-guidelines`, cached as `COMPILED-GUIDELINES.md` |
-| **How-L1** | Org-wide **process** standards (CMMI, ISO 9001, IEEE process standards, etc.) | **Piloting** — see §5 | `org/process-standards/` (path configurable), indexed by `md_index.py` |
+| **How-L1** | Org-wide **process** standards (CMMI, ISO 9001, IEEE process standards, etc.) | **Piloting** — see §5 | `org/process-standards/` (path configurable), indexed by `md_index.py` — hand-dropped `.md` files, or MCP-mirrored (optional, opt-in — ROADMAP item 11) |
 
 **Why external specs (What-L1) rank below your own docs (What-L2/L3):** an external standard
 describes what the *industry* does, not what *this product* does or requires. When a What-L1
