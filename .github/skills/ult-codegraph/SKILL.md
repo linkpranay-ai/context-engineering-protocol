@@ -14,7 +14,7 @@ bundle: utilities
 tier: read
 dependencies:
   runtime: [python >= 3.10, "uv or pipx"]
-  external_tool: graphifyy
+  external_tool: "graphifyy >= 0.9.11"
 ---
 
 # Codebase Graph (graphify wrapper)
@@ -60,12 +60,26 @@ or bindings for other languages?
   monorepo (google/protobuf): completed in 5m28s, 73K nodes / 254K edges,
   with `affected`/`explain` queries returning in ~3s — an unscoped run on a
   messy repo is workable, just expect occasional cross-language results.
+- **No, but multiple genuinely independent roots** (e.g. sibling repos or
+  workspace directories with no shared parent worth scoping to) — index each
+  root separately, then combine:
 
-**Don't** try to index multiple separate directories and combine them with
-`graphify merge-graphs` — it crashes on real graphs (`NetworkXError: All
-graphs must be graphs or multigraphs`, a `DiGraph`/`MultiDiGraph` mismatch
-because `graph.json` doesn't persist directed/multigraph metadata and
-graphify infers it per-file from edge data). Pick one root instead.
+  ```bash
+  graphify update root-a/ --no-cluster
+  graphify update root-b/ --no-cluster
+  graphify merge-graphs root-a/graphify-out/graph.json \
+    root-b/graphify-out/graph.json --out merged.json
+  ```
+
+  Node IDs are repo-tag-prefixed (`root-a::foo`, `root-b::bar`) so there's no
+  collision risk. `merged.json` isn't under a `graphify-out/` directory, so
+  point every query command at it explicitly with `--graph`:
+  `graphify query "..." --graph merged.json`,
+  `graphify explain "X" --graph merged.json`, same for `path`/`affected`.
+  **Requires `graphifyy >= 0.9.11`** — verified broken on 0.8.35
+  (`NetworkXError: All graphs must be graphs or multigraphs`, because that
+  `graph.json` carried no `directed`/`multigraph` keys at all; 0.9.11's does).
+  Upgrade first (`uv tool install --force graphifyy`) if you hit that error.
 
 ```bash
 # Install (idempotent — safe to run multiple times)
@@ -184,7 +198,7 @@ here's exactly what this costs" shape used for irreversible deletes.
 |-------------|---------|-------|
 | **Python** | 3.10+ | Required runtime for `graphify` |
 | **uv or pipx** | any | Installs `graphifyy` as an isolated tool |
-| **`graphifyy`** | latest | PyPI package providing the `graphify` CLI |
+| **`graphifyy`** | >= 0.9.11 | PyPI package providing the `graphify` CLI — older versions (verified through 0.8.35) crash on `graphify merge-graphs` |
 
 No project dependency changes — `graphify` is installed as a standalone tool
 via `uv tool install` / `pipx install`, not added to the project's own

@@ -72,10 +72,17 @@ cheap to fix at that point since nothing depends on the current shape either way
 
 ## 4. `graphify merge-graphs` multi-root fix
 
-**Status: known broken, documented workaround.** Multi-root repos (more than one independent
-source tree) can't currently merge their per-root graphs into one. Workaround: point
-`ult-codegraph` at one root at a time and treat each as independent for now. Root-caused but not
-yet fixed.
+**Status: resolved via upstream fix, verified empirically (2026-07-09).** The documented crash
+(`NetworkXError: All graphs must be graphs or multigraphs`) reproduced exactly as described on
+the then-installed `graphifyy` 0.8.35: `graph.json` carried no `directed`/`multigraph` keys at
+all. Upgrading to the latest PyPI release, `graphifyy` 0.9.11, fixes it — `graph.json` now
+persists both keys, and `graphify merge-graphs` correctly composed a synthetic two-root repro
+(3 nodes/3 edges per root) into one 6-node/6-edge graph with repo-tag-prefixed node IDs and no
+collisions. The true minimum fixed version between 0.8.35 and 0.9.11 wasn't bisected (not worth
+it for a doc pin); `ult-codegraph/SKILL.md` now requires `>= 0.9.11`. No upstream issue/PR was
+needed — this was purely a stale local install. All references to the old workaround
+(`SKILL.md`, `CONSUMING-CODE-GRAPH.md`, `README.md`, `CHANGELOG.md`) have been updated, and
+`SKILL.md` Step 0 now documents multi-root indexing + merge as a supported path.
 
 ## 5. Cursor live-install validation
 

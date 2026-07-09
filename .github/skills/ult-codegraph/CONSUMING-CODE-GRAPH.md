@@ -233,10 +233,12 @@ an alternative.
 Properties of the *current* backend, not the abstract interface — an
 alternative provider could improve on these without any consumer-side change:
 
-- **`merge-graphs` is broken for multi-root repos** — see
-  `ult-codegraph/SKILL.md` lines 64-68. Consuming skills should not assume a
-  multi-directory project has been merged into one graph; pick one root per
-  `graphify update` run.
+- **Multi-root merges aren't at the default location.** `graphify merge-graphs`
+  works (`graphifyy >= 0.9.11` — see `ult-codegraph/SKILL.md` Step 0), but its
+  output isn't under `graphify-out/`, so it isn't picked up by the "present /
+  not present" check in step 1 above. If a project has been indexed as
+  multiple merged roots, every query command needs an explicit
+  `--graph <path>` pointing at the merge output.
 - **Cross-file edges are `[INFERRED]` (heuristic symbol-matching), not
   `[EXTRACTED]`** — confirmed correct on real C++ (re2, protobuf), including
   through `#ifdef`/`#if defined(...)` blocks (2026-06-11, `learnings.md`), but

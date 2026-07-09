@@ -163,8 +163,6 @@ Disclosed plainly rather than glossed over. Full prioritized list with more deta
 - **Cross-file citation resolution is deferred.** The corroboration/citation-following mechanism
   only resolves single-hop, same-file references; multi-hop or cross-file citation chains aren't
   followed.
-- **`graphify merge-graphs` is broken for multi-root repos.** Documented workaround: point
-  `ult-codegraph` at one root at a time.
 - **Codegraph validation is general-purpose, not domain-specific.** The C/C++ validation examples
   cover general constructs (e.g. `re2`, `protobuf`), not any particular embedded or telecom domain.
 - **Token-cost claims for `ult-context-generate` are partly self-reported** and have not yet been

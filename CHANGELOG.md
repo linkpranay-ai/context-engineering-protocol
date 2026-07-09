@@ -22,6 +22,13 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   its own — Step 2's existing best-practice-template prompt substitutes for one. Gated for human
   review at Step 9 like every other fallback layer.
 
+### Fixed
+
+- **`graphify merge-graphs` multi-root crash**: was a stale local install, not an unfixed upstream
+  bug — `graphifyy >= 0.9.11` persists the `directed`/`multigraph` keys the merge needs and
+  composes correctly. `ult-codegraph/SKILL.md` now documents multi-root indexing + merge as a
+  supported path and requires `>= 0.9.11`. See `ROADMAP.md` item 4.
+
 ## [0.1.0]
 
 Initial public release.
