@@ -41,12 +41,34 @@ actually copy in. Full install (no `--only`/`-Only`) is unchanged. Covered by th
 
 ## 3. `SKILL.md` / agentskills.io compatibility check
 
-**Status: not started, cheap to check.** [agentskills.io](https://agentskills.io) is an emerging
-open spec for skill format, already adopted by other projects in this space. A quick diff of our
-`SKILL.md` frontmatter against that spec would confirm whether we're accidentally diverging in a
-way that hurts cross-tool portability, or whether we're already compatible. This is a spike, not a
-commitment to change anything — do this first since it's cheap and it tells us whether item 3
-becomes a real backlog item or gets closed as "already fine."
+**Status: spike done (2026-07-09), closed as known/accepted divergence.** Diffed all 5 skills'
+frontmatter against [agentskills.io's specification](https://agentskills.io/specification).
+`description` is fully compliant (177-219 chars observed, well under the spec's 1024-char cap and
+inside our own stricter 200-char house rule). Two real divergences found, both judged intentional
+rather than accidental:
+
+- **`name` doesn't always equal the directory name.** The spec requires exact equality; 3 of 5
+  skills (`ult-codegraph` → `name: codegraph`, `ult-context-generate` → `name: context-generate`,
+  `ult-repo-layout` → `name: repo-layout`) drop the namespace prefix. This is this repo's
+  documented convention, not a slip — `CONTRIBUTING.md`'s own frontmatter example shows
+  `name: context-generate`, and the `namespace`/`name` split exists specifically so a short name
+  can be reused across namespaces.
+- **11 custom top-level fields** (`namespace`, `version`, `origin`, `author`, `maintainer`,
+  `adapted_from`, `upstream_version`, `released`, `tags`, `bundle`, `tier`, and one skill's
+  `dependencies`) aren't in the spec's defined set. The spec's own `metadata` field exists for
+  exactly this, but it's strictly flat string→string, and `tags` (a list) / `dependencies` (a
+  nested map) don't fit that shape without lossy flattening.
+
+**Why this is closed, not deferred as a fix-it item:** neither divergence is currently live —
+none of the 4 runtimes this repo supports (Claude Code, GitHub Copilot, Cursor, Codex) read
+`SKILL.md` frontmatter directly per the agentskills.io spec; `catalog/export_adapters.py`
+generates each runtime's actual input from it and keys off the **directory name**, never the
+`name:` field. "Fixing" `name` would mean reversing a documented convention (rewriting
+`CONTRIBUTING.md`'s contract and dropping namespace/name reuse for every future skill) to satisfy
+a compliance need nobody has yet — a bigger, more disruptive change than the divergence itself.
+**Revisit trigger:** if this repo ever adds support for a runtime that reads `SKILL.md` frontmatter
+directly per the agentskills.io spec (none currently planned), re-open this as a real item then —
+cheap to fix at that point since nothing depends on the current shape either way.
 
 ## 4. `graphify merge-graphs` multi-root fix
 
