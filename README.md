@@ -103,7 +103,7 @@ The full formal contract (addenda, multi-package edge cases, tag-discovery rules
 
 ## Roadmap
 
-What's planned next — cross-file citation resolution, selective install, and more — is
+What's planned next — comprehensive How-L1 validation, Cursor live-install testing, and more — is
 tracked in [`ROADMAP.md`](ROADMAP.md), roughly prioritized.
 
 ## Runtime support
@@ -173,13 +173,13 @@ Disclosed plainly rather than glossed over. Full prioritized list with more deta
   the output format was checked against Cursor's currently published docs — but it has not been
   confirmed against a real Cursor install actually picking up and invoking a skill end-to-end.
   Treat it as documentation-verified, not field-verified, until that happens.
-- **Codex VS Code extension's chat panel has an unresolved file-read hang**, separate from this
-  project. `AGENTS.md` pickup itself is now field-validated (via Codex Desktop against the same
-  dogfood clone — see "Runtime support" above), but the VS Code extension's own panel still hangs
+- **Codex VS Code extension has an unresolved file-read hang — a bug in that extension, not in
+  this project's skills or adapters.** Codex itself is field-validated via Codex Desktop (see
+  "Runtime support" above: it found and read the real `AGENTS.md` unprompted and correctly listed
+  every skill). The VS Code extension is a separate integration surface whose chat panel hangs
   indefinitely on any file-read tool call, reproduced twice against a small, isolated,
-  encoding-clean repo. Not a skill/adapter defect; retry the VS Code panel specifically once that
-  extension is fixed/updated. See `dogfood-textual/PHASE9-RUNTIME-SPOTCHECK.md` for both
-  transcripts.
+  encoding-clean repo. Retry the VS Code panel specifically once that extension itself is
+  fixed/updated. See `dogfood-textual/PHASE9-RUNTIME-SPOTCHECK.md` for both transcripts.
 
 ## Contributing
 

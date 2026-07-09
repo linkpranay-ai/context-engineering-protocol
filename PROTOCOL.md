@@ -3,10 +3,11 @@
 > A written spec for how a coding agent should assemble, validate, and get approval for the
 > context it works from — not just another retrieval trick.
 
-This document explains the protocol in depth: the layer model, the gap → conflict → staleness
-state machine, the human-approval gate, and the one layer that's specified but not yet built
-(How-L1). For a shorter overview and a skill-by-skill index, see [`README.md`](README.md). For
-what's planned next, see [`ROADMAP.md`](ROADMAP.md).
+This document explains the protocol in depth: the layer model, the cross-cutting Constraints
+dimension, the gap → conflict → staleness state machine, the human-approval gate, and the newly
+piloted How-L1 layer, not yet field-validated against a real corpus. For a shorter overview and a
+skill-by-skill index, see [`README.md`](README.md). For what's planned next, see
+[`ROADMAP.md`](ROADMAP.md).
 
 ## 1. The problem this protocol addresses
 
@@ -29,7 +30,8 @@ generation starts, not to make retrieval faster.
 
 ## 2. The layer model
 
-Every claim in a context package traces back to one of five layers. Layer names follow a
+Every claim in a context package traces back to one of five layers, plus one cross-cutting
+dimension (**Constraints**, §2.1) that isn't tied to a specific aspect. Layer names follow a
 `<What|How>-L<1|2|3>` convention: **What** layers describe product requirements/specs; **How**
 layers describe process/convention. The number is a maturity/scope tier, not a ranking of
 importance.
@@ -48,6 +50,38 @@ item gets pulled into a context package, it's tagged `what_l1_fallback: true` an
 human reviewer in a dedicated block — informative, never treated as authoritative for this
 product without a human saying so.
 
+### 2.1 The third dimension: Constraints (D11)
+
+What and How layers both describe *content* — what the product should do, or how this
+org/team works — and both fall through a defined gap sequence when coverage is missing (§3.2).
+**Constraints** are orthogonal to that: coding/design conventions, compliance/regulatory
+requirements, and scheduling/dependency constraints that bound the solution space regardless of
+which feature is being built. They don't get a `<What|How>-L<N>` number because they aren't
+tiered by scope/maturity — they're always-apply guardrails, compiled once and checked once per
+context package, not per aspect.
+
+| Dimension | What it is | Status | Where it lives |
+|---|---|---|---|
+| **Constraints** | Coding/design conventions, compliance/regulatory requirements, and scheduling/dependency constraints, each tagged `constraint_class: compliance \| convention \| scheduling` | **Optional infrastructure** | `compiling-project-guidelines`, cached as `COMPILED-GUIDELINES.md` — the same skill and cache file How-L2 above draws on, but read for a different purpose (see below) |
+
+**Optional, not a gap.** Unlike a What-L1/How-L1 gap (§3.2), a project that has never run
+`compiling-project-guidelines` simply proceeds without a Constraints layer —
+`ult-context-generate/SKILL.md` Step 5.5 checks whether `COMPILED-GUIDELINES.md` exists and, if
+not, skips past it. Absence here says nothing about coverage the way a What/How gap does; it just
+means this optional infrastructure hasn't been set up yet.
+
+**A distinct conflict-detection shape**, alongside §3.1's `l2-l3-contradiction`:
+- **`constraint-lateral`** — two scope-glob sections of `COMPILED-GUIDELINES.md` disagree at a
+  shared interaction point (e.g. one path-glob's convention contradicts another's exactly where
+  the two scopes touch).
+- **`constraint-vertical`** — a constraint contradicts a requirement or code-graph finding pulled
+  from the What dimension.
+
+Both block the same way any other conflict does (§3.1) — surfaced to a human, never silently
+resolved. See `ult-context-generate/SKILL.md` Step 5.5 and
+[`references/context-package-schema.md`](.github/skills/ult-context-generate/references/context-package-schema.md)
+for the exact schema.
+
 ## 3. How a context package gets built
 
 A context package isn't retrieved once and cached forever — it's assembled fresh for a specific
@@ -63,6 +97,7 @@ flowchart LR
         L1W["What-L1 (piloting)<br/>external specs"]
         L2H["How-L2<br/>compiled guidelines"]
         L1H["How-L1 (piloting)<br/>org process standards"]
+        Con["Constraints (§2.1, optional)<br/>compiled guidelines, read as guardrails"]
     end
 
     Sources --> Engine["ult-context-generate<br/>gap · conflict · staleness checks"]
@@ -72,14 +107,17 @@ flowchart LR
     Gate -- rejected / edited --> Engine
 
     style L1H stroke-dasharray: 5 5
+    style Con stroke-dasharray: 5 5
 ```
 
 ### 3.1 Conflict detection — blocks
 
 Before anything is assembled, sources are checked against each other: does a requirement
-contradict what the code graph shows? Do two How-L2 convention sources disagree? A genuine
-contradiction is not something the agent resolves on its own — **it stops and asks a human**,
-concretely: "`<decision topic>` was decided as `<X>` here but `<Y>` there — which is right?"
+contradict what the code graph shows (`l2-l3-contradiction`)? Do two Constraints scope-glob
+sections disagree at a shared interaction point, or does a constraint contradict a What-dimension
+requirement (`constraint-lateral`/`constraint-vertical`, §2.1)? A genuine contradiction is not
+something the agent resolves on its own — **it stops and asks a human**, concretely:
+"`<decision topic>` was decided as `<X>` here but `<Y>` there — which is right?"
 Nothing proceeds on the contested point until that's answered.
 
 ### 3.2 Gap detection — falls through layers, never guesses
