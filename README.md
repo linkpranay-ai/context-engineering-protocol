@@ -75,7 +75,7 @@ for the two setup paths:
 - **Path A** (simple) — just compile scattered guideline sources into one conflict-checked
   `COMPILED-GUIDELINES.md` for any AI agent to read. 3 steps.
 - **Path B** (full pipeline) — code graph + requirements + constraints assembled into a full
-  context package, then handed to a downstream generation skill. 8 steps, using
+  context package, then handed to a downstream generation skill. 9 steps, using
   [`demo-consume-context`](.github/skills/demo-consume-context/SKILL.md) as a worked example of
   what "consuming" a context package looks like.
 
@@ -173,13 +173,12 @@ Disclosed plainly rather than glossed over. Full prioritized list with more deta
   the output format was checked against Cursor's currently published docs — but it has not been
   confirmed against a real Cursor install actually picking up and invoking a skill end-to-end.
   Treat it as documentation-verified, not field-verified, until that happens.
-- **Codex VS Code extension has an unresolved file-read hang — a bug in that extension, not in
-  this project's skills or adapters.** Codex itself is field-validated via Codex Desktop (see
-  "Runtime support" above: it found and read the real `AGENTS.md` unprompted and correctly listed
-  every skill). The VS Code extension is a separate integration surface whose chat panel hangs
-  indefinitely on any file-read tool call, reproduced twice against a small, isolated,
-  encoding-clean repo. Retry the VS Code panel specifically once that extension itself is
-  fixed/updated. See `dogfood-textual/PHASE9-RUNTIME-SPOTCHECK.md` for both transcripts.
+- **Codex itself is field-validated via Codex Desktop** (see "Runtime support" above: it found
+  and read the real `AGENTS.md` unprompted and correctly listed every skill). **The Codex VS Code
+  extension was not tested** — its chat panel hangs indefinitely on any file-read tool call, a
+  defect in that extension's own tool-call path, unrelated to this project's skills or adapters
+  (confirmed by Codex Desktop completing the same test cleanly against the same clone). See
+  `dogfood-textual/PHASE9-RUNTIME-SPOTCHECK.md` for both transcripts.
 
 ## Contributing
 

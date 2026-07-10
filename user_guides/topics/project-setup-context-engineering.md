@@ -79,9 +79,11 @@ anything downstream is generated.
    ```
    Either way, fill in `project_name`, `description`, and the layer paths
    (`what_l3.path` = source root, `what_l2.path` = requirements docs root,
-   `how_l2.path` = org conventions root). For `what_l1`, see step 4 below — leave
-   `how_l1` disabled (see
-   [What-L1 (piloting) and How-L1 (not yet implemented)](#what-l1-piloting-and-how-l1-not-yet-implemented)
+   `how_l2.path` = org conventions root). For `what_l1`, see step 4 below; for
+   `how_l1`, see step 7 below — both are implemented but piloting, so the
+   recommended default is to leave them disabled until you've run each once
+   against your own corpus (see
+   [What-L1 and How-L1 (both piloting)](#what-l1-and-how-l1-both-piloting)
    below).
 
 4. **Populate What-L1 (external references) — optional, piloting**: if your
@@ -127,14 +129,38 @@ anything downstream is generated.
    `ult-context-generate` Step 2 reads these and caches the result to
    `org-conventions/<task_type>.yaml`, gated on `human_approved: true`.
 
-7. **Run `/ult-context-generate`**. Walk through the 10-step flow; approve both the
+7. **Populate How-L1 (org-wide process standards) — optional, piloting**: if your
+   org has its own CMMI/ISO/IEEE-style process standards you want incorporated,
+   drop `.md` excerpts under a directory such as `org/process-standards/`, then in
+   `context-config.yaml` set:
+   ```yaml
+   how_dimension:
+     how_l1:
+       enabled: true
+       path: org/process-standards/
+       md_index_profile: generic   # generic | 3gpp | rfc | ieee | <your-profile>.json
+       index_path: specs-out/how_l1_index.json
+       graphify_budget: 20
+   ```
+   `ult-context-generate` Step 2.1 queries this the same way What-L1 is queried
+   (`scripts/md_index.py`, zero-LLM), but **gap-triggered once per package**
+   instead of per aspect — it only fires when Step 2's How-L2 check finds nothing
+   for the task type at hand. Every match becomes a `context_items` entry with
+   `how_l1_fallback: true`, presented in a dedicated
+   `[HOW-L1 FALLBACK ITEMS — REVIEW]` block at Step 9 for human confirm/reject,
+   same as What-L1. There's no web-search/training-knowledge fallback chain for
+   How-L1 — Step 2's existing gap prompt substitutes for one if How-L1 is
+   disabled or comes up empty. Skip this step if `how_l1.enabled: false` (the
+   default).
+
+8. **Run `/ult-context-generate`**. Walk through the 10-step flow; approve both the
    product context package and the org convention package when prompted. Output:
    ```
    contexts/<feature-slug>_<task-type>_<YYYYMMDD>.yaml
    org-conventions/<task-type>.yaml
    ```
 
-8. **Try the worked-example consumer**: run `demo-consume-context` against the
+9. **Try the worked-example consumer**: run `demo-consume-context` against the
    approved package (a bare feature name is enough as input). It follows
    `CONSUMING-CONTEXT-PACKAGE.md`'s discover/load/cite/tag/write-back loop end to end
    and writes:
@@ -158,6 +184,7 @@ anything downstream is generated.
 | `org/templates/`, `org/examples/`, `org/guidelines/` (path configurable) | your team | `ult-context-generate` Step 2 (How-L2) |
 | `org-conventions/<task_type>.yaml` | `ult-context-generate` Step 2, human-approved | `ult-context-generate` (cached How-L2) |
 | `specs/<subfolder>/` (path configurable, e.g. `specs/external/`) | your team — curated `.md` excerpts of external references | `ult-context-generate` Step 7.1 (What-L1 fallback, per-aspect both-layers-gap-triggered, `md_index.py`-indexed) |
+| `org/process-standards/` (path configurable) | your team — curated `.md` excerpts of org-wide process standards (CMMI/ISO/IEEE) | `ult-context-generate` Step 2.1 (How-L1 fallback, once-per-package gap-triggered off How-L2, `md_index.py`-indexed) |
 | `contexts/<feature>_<task>_<date>.yaml` | `ult-context-generate`, human-approved | any skill following `CONSUMING-CONTEXT-PACKAGE.md` (see `demo-consume-context` for a worked example) — optional, non-blocking, "Status: piloting" |
 | `outputs/demo-notes/<feature-slug>.md` | `demo-consume-context` | humans (worked-example output only — see that skill's description) |
 
@@ -181,11 +208,15 @@ own output paths the first time it runs, and you're free to create the input fol
 
 ---
 
-## What-L1 (piloting) and How-L1 (not yet implemented)
+## What-L1 and How-L1 (both piloting)
 
 `context-config.yaml` has `what_l1` (external references — industry standards,
 competitor docs, architecture whitepapers, 3GPP/ISO/IEEE/etc.) and `how_l1` (org-wide
-process standards — CMMI/ISO/IEEE) sections, both `enabled: false` by default.
+process standards — CMMI/ISO/IEEE) sections, both `enabled: false` by default. Both
+are implemented — indexed by the same `scripts/md_index.py` mechanism — but newly
+added and not yet field-validated against a real, large corpus, so the recommended
+default is to leave each disabled until you've run it once against your own project's
+material and confirmed the results look right.
 
 **Per-aspect gap detection**: `ult-context-generate` Step 1.5 breaks `FEATURE_TERM`
 into a small set of **aspects** (e.g., for an enhancement, an existing baseline plus
@@ -223,15 +254,38 @@ through to the complete-gap prompt (Step 7.2).
 profile already indexes plain prose headings.
 
 Cross-file citation-following (e.g. "see TS 38.214 clause 5.2.2" resolving into a
-different indexed file) remains **future work** — today's `cross_refs` resolution is
-single-hop and same-file. Open an issue in this repo if your project's corpus needs
-it — it's a known, disclosed gap, not a bug.
+different indexed file, not just the referencing file) is **implemented** —
+`md_index.py`'s `cross_refs` resolution spans the whole indexed corpus, matched on
+exact string equality against each file's `doc_id` front-matter field (never fuzzy).
+Same-file references are further distinguished as `resolved` /
+`unresolved-not-found` / `unresolved-ambiguous` rather than silently guessed. See
+[`scripts/README.md`](../../.github/skills/ult-context-generate/scripts/README.md)'s
+"Cross-file citation resolution (R9)" section for the mechanism, and
+[`examples/cross-file-resolution-demo/`](../../examples/cross-file-resolution-demo/)
+for a runnable demo. Validated so far against a small synthetic 2-3 file corpus —
+open an issue in this repo if your project's real multi-spec corpus surfaces a gap.
 
-**How-L1 (org-wide process standards — CMMI/ISO/IEEE/etc.)**: still **not yet
-implemented** — `how_l1` in `context-config.yaml` remains `enabled: false`. There is
-currently no query step in `ult-context-generate`'s flow that reads this layer. If
-your project has org-wide process standards you want incorporated today, the
-supported path is the **How-L2 org-conventions layer** (`org/guidelines/`) — drop
-relevant excerpts or summaries there as narrative guidance. Full How-L1 support is a
-larger follow-up — open an issue in this repo if it would unblock your project, since
-it affects `ult-context-generate`'s config schema and Step 2 flow design.
+**How-L1 (org-wide process standards — CMMI/ISO/IEEE/etc. — piloting)**: implemented
+as a **once-per-package gap-triggered fallback**, distinct from What-L1's per-aspect
+trigger. Step 2 checks How-L2 (`org/`) for the task type at hand; if How-L2 has
+nothing, Step 2.1 queries the `how_l1.path` index (e.g. `org/process-standards/`)
+built the same way as What-L1's. There's no per-task-type aspect loop for How-L1 —
+it fires at most once per package. Every match becomes a `context_items` entry with
+`how_l1_fallback: true`, presented in a dedicated `[HOW-L1 FALLBACK ITEMS — REVIEW]`
+block at Step 9 — the human reviewer must confirm (or reject) each item before
+approval, same as What-L1. There is no web-search/training-knowledge fallback chain
+for How-L1: if it's disabled, or its index has nothing, Step 2's existing
+gap-handling prompt substitutes for one. See setup step 7 above to enable it.
+
+**MCP-backed sources for What-L1 and How-L1**: instead of (or alongside) hand-dropped
+`.md` files under `what_l1.path` / `how_l1.path`, both layers accept an optional
+`mcp_source` list (e.g. pointing at a Confluence space or another MCP resource).
+Before the index build, each entry is mirrored into a `.mcp-mirror/` subdirectory of
+the layer's `path`, and the mirror file is only rewritten when the source's content
+hash changes since the last run — so staleness detection works the same whether the
+underlying `.md` file was hand-edited or fetched via MCP. See
+`what_l1.mcp_source`/`what_l1.mcp_mirror_path`/`what_l1.mcp_manifest_path` and their
+`how_l1` equivalents in `context-config.yaml.template` for the exact fields, and
+[`examples/mcp-what-l1-demo/WALKTHROUGH.md`](../../examples/mcp-what-l1-demo/WALKTHROUGH.md)
+for a runnable end-to-end demo (its closing section covers How-L1, since the
+mechanism is identical).
