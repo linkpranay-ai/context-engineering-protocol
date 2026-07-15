@@ -6,7 +6,7 @@
 
 **[Protocol](PROTOCOL.md) · [Glossary](GLOSSARY.md) · [Quickstart](#quickstart) ·
 [Skills](#skills-in-this-repo) · [Runtime support](#runtime-support) · [Roadmap](ROADMAP.md) ·
-[Contributing](CONTRIBUTING.md)**
+[Evidence methodology](EVIDENCE-METHODOLOGY.md) · [Contributing](CONTRIBUTING.md)**
 
 > Don't let the agent guess what's true. Make it prove the context agrees, then get a human to
 > sign off before it writes a line of code.
