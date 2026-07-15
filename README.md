@@ -4,8 +4,9 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/linkpranay-ai/context-engineering-protocol/releases/tag/v0.1.0)
 
-**[Protocol](PROTOCOL.md) · [Quickstart](#quickstart) · [Skills](#skills-in-this-repo) ·
-[Runtime support](#runtime-support) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)**
+**[Protocol](PROTOCOL.md) · [Glossary](GLOSSARY.md) · [Quickstart](#quickstart) ·
+[Skills](#skills-in-this-repo) · [Runtime support](#runtime-support) · [Roadmap](ROADMAP.md) ·
+[Contributing](CONTRIBUTING.md)**
 
 > Don't let the agent guess what's true. Make it prove the context agrees, then get a human to
 > sign off before it writes a line of code.

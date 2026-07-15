@@ -6,8 +6,18 @@
 This document explains the protocol in depth: the layer model, the cross-cutting Constraints
 dimension, the gap → conflict → staleness state machine, the human-approval gate, and the newly
 piloted How-L1 layer, not yet field-validated against a real corpus. For a shorter overview and a
-skill-by-skill index, see [`README.md`](README.md). For what's planned next, see
-[`ROADMAP.md`](ROADMAP.md).
+skill-by-skill index, see [`README.md`](README.md). For term definitions, see
+[`GLOSSARY.md`](GLOSSARY.md). For what's planned next, see [`ROADMAP.md`](ROADMAP.md).
+
+## Interpretation of MUST/SHOULD/MAY
+
+The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**, when they appear in
+capitals in this document, are to be interpreted as described in
+[RFC 2119](https://www.ietf.org/rfc/rfc2119.txt): **MUST**/**MUST NOT** denote an absolute
+requirement or prohibition; **SHOULD**/**SHOULD NOT** denote a strong recommendation that may be
+deviated from only with a documented reason; **MAY** denotes something genuinely optional. Every
+keyword introduced in this document describes behavior this protocol already implements — none
+introduces a new requirement.
 
 ## 1. The problem this protocol addresses
 
@@ -115,16 +125,16 @@ flowchart LR
 Before anything is assembled, sources are checked against each other: does a requirement
 contradict what the code graph shows (`l2-l3-contradiction`)? Do two Constraints scope-glob
 sections disagree at a shared interaction point, or does a constraint contradict a What-dimension
-requirement (`constraint-lateral`/`constraint-vertical`, §2.1)? A genuine contradiction is not
-something the agent resolves on its own — **it stops and asks a human**, concretely:
+requirement (`constraint-lateral`/`constraint-vertical`, §2.1)? On a genuine contradiction, the
+agent **MUST NOT** resolve it on its own — it **MUST** stop and ask a human, concretely:
 "`<decision topic>` was decided as `<X>` here but `<Y>` there — which is right?"
-Nothing proceeds on the contested point until that's answered.
+The contested point **MUST NOT** proceed until that's answered.
 
 ### 3.2 Gap detection — falls through layers, never guesses
 
 For each aspect, coverage is checked top-down: does the code (What-L3) cover it? Do the
-requirements (What-L2) cover it? If **both** come up empty, the protocol doesn't let the agent
-silently fill the hole from its own judgment — it falls through a defined sequence:
+requirements (What-L2) cover it? If **both** come up empty, the agent **MUST NOT** silently fill
+the hole from its own judgment — the protocol **MUST** fall through a defined sequence:
 
 ```mermaid
 flowchart TD
@@ -139,27 +149,27 @@ flowchart TD
 ```
 
 Every fallback item — whether sourced from an external spec or the model's own training data —
-carries an explicit provenance tag and sits in its own reviewer block. Nothing enters an approved
-package without a human confirming it belongs there.
+**MUST** carry an explicit provenance tag and sit in its own reviewer block. An item **MUST NOT**
+enter an approved package without a human confirming it belongs there.
 
 ### 3.3 Staleness detection — non-blocking, but never silent
 
 Two things can go stale between when a source was built and when it's used: the code graph (was
 it built from the current commit?) and the compiled-guidelines cache (has anything it was built
-from changed since?). Staleness is checked but **doesn't block** — the protocol surfaces a
-one-line nudge ("graph built from `<old-commit>`, current is `<head>` — consider re-running
-`ult-codegraph`") and proceeds with what's available. The judgment call — is a slightly stale
-graph good enough right now, or does this feature need a fresh one — stays with the human, not
-the agent.
+from changed since?). Staleness **MUST** be checked, but a stale source **MUST NOT** block
+assembly — the protocol surfaces a one-line nudge ("graph built from `<old-commit>`, current is
+`<head>` — consider re-running `ult-codegraph`") and proceeds with what's available. The judgment
+call — is a slightly stale graph good enough right now, or does this feature need a fresh one —
+stays with the human; the agent **MUST NOT** decide it unilaterally.
 
 ### 3.4 The human-approval gate
 
 Once gaps and conflicts are resolved (or explicitly deferred with the human's sign-off), the
-package is assembled: every item source-attributed to a `file:line-range` or an external
-reference, every decision logged. It is presented for review — **not saved as final until a
-human explicitly approves it.** This is the one property that separates this protocol from
-"the agent read some files and proceeded": nothing downstream trusts a package that hasn't been
-looked at.
+package **MUST** be assembled with every item source-attributed to a `file:line-range` or an
+external reference, and every decision logged. It is presented for review — a package **MUST NOT**
+be treated as final until a human explicitly approves it. This is the one property that separates
+this protocol from "the agent read some files and proceeded": a downstream consumer **MUST NOT**
+trust a package that hasn't been looked at.
 
 Approved packages are content-hashed and tagged (`<package-id>@<hash8>`), so any consumer can
 tell later whether the package it's citing has drifted since approval — see
