@@ -199,6 +199,36 @@ they're what "protocol" means here rather than "product":
   package follows the same numbered steps (discover → confirm → load → spot-check → cite →
   tag) — see §3.4's links.
 
+These four are the entire list. Everything else a specific skill does — YAML as `ult-context-generate`'s
+package format, `graphify` as `ult-codegraph`'s code-graph generator, a particular CLI flag or file
+layout — is an implementation choice that skill made to satisfy the four properties above, not a
+protocol requirement in its own right. A skill MAY be replaced or reimplemented differently as
+long as it still satisfies these four properties; none of the skills in this repository is itself
+what makes this a protocol.
+
+## Roles
+
+The protocol's behavioral contract involves three roles, distinct from any project's own team
+structure or governance model:
+
+- **Context-package author.** The agent (or human) that runs §3's discover → gap-check →
+  conflict-check → assemble sequence. Responsible for correct source attribution and for
+  surfacing — never silently resolving — every gap and conflict found.
+- **Context-package approver.** The human who reviews an assembled package at §3.4's gate.
+  Responsible for confirming source attribution is accurate, fallback items are appropriately
+  scoped, and any deferred gap or conflict is a decision they're knowingly signing off on — not
+  for re-deriving the package from scratch.
+- **Consuming-skill implementer.** Whoever builds a downstream skill that uses an approved
+  package as primary context (§4, "Consumption is a documented contract"). Responsible for
+  following the discover → confirm → load → spot-check → cite → tag contract, and for
+  disclosing package use in any persisted output.
+
+One person or agent can hold more than one role on a given task — the same human who approves a
+package may also be the consuming-skill implementer — but the roles stay distinct: an approval
+is not valid if the approver is also the sole context-package author for that task. These are
+protocol roles, describing what each is responsible for once someone holds it; they say nothing
+about org-chart positions or who is allowed to hold them.
+
 ## 5. How-L1 — gap-triggered, task-type-scoped (piloting)
 
 **How-L1 is implemented, but newly added and not yet field-validated against a real corpus.**
@@ -242,3 +272,47 @@ consumption contract, its config schema) is written once, in Claude Code's nativ
 every other runtime's adapter (`.prompt.md` for Copilot, `.mdc` for Cursor, `AGENTS.md` rows for
 Codex) is **generated from it** by `catalog/export_adapters.py` — never hand-duplicated. See
 [`README.md`](README.md#runtime-support) for current per-runtime validation status.
+
+## Protocol Lifecycle
+
+This document is versioned independently of any package built using it. A **protocol version**
+(this file, `GLOSSARY.md`, and the state machine they describe) changing does not require an
+already-approved context package to be rebuilt — package versioning tracks
+`<package-id>@<hash8>` content hashes (§3.4), not the protocol version that assembled it.
+
+The protocol's own content changes through the same kind of review this hardening pass went
+through:
+
+- **A new layer, section, or normative rule** — such as this document's How-L1 pilot (§5) —
+  starts as a proposal, ships gated behind an explicit opt-in default (`enabled: false` or
+  equivalent), and is only described here once implemented. This document tracks shipped
+  behavior, not intent; see [`ROADMAP.md`](ROADMAP.md) for what's proposed but not yet part of
+  this contract.
+- **Changing an existing normative rule** (a MUST becoming a SHOULD, or the reverse) is a
+  behavioral change, not an editorial one, and needs the same evidence a new rule would: what
+  observed behavior justifies it.
+- **Superseding or retiring a section** — for example if How-L1 piloting concludes and becomes a
+  stable layer, or is dropped — is recorded in this document's own history (`git log
+  PROTOCOL.md`). There is no separate protocol changelog beyond the repository's
+  [`CHANGELOG.md`](CHANGELOG.md).
+
+This lifecycle governs the protocol's own content. It says nothing about how a specific,
+already-approved context package may change — that is governed by the addendum mechanism (see
+"Addendum" in [`GLOSSARY.md`](GLOSSARY.md)), not by editing the approved package itself.
+
+## Open Specification Questions
+
+Two questions about this protocol's scope remain open and unresolved:
+
+- **A three-tier How dimension.** Whether How-L2 (project conventions) and How-L1 (org-wide
+  process standards) should split further — separating an organization's own policy from
+  external process standards (CMMI, ISO 9001, IEEE) it adopts, rather than treating both under a
+  single How-L1 layer. No design has been proposed; this needs an observed pilot need before one
+  is drafted.
+- **An interoperability surface.** This protocol defines skills and generated runtime adapters
+  (§6), but no universal data model, transport, storage format, or cross-implementation
+  interoperability guarantee. Whether one should exist, and what it would standardize if so, is
+  unresolved.
+
+Neither question blocks current behavior; both describe scope this protocol has deliberately not
+yet claimed.
