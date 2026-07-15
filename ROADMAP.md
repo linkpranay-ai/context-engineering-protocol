@@ -150,6 +150,11 @@ real per-run token counts can start being collected the same way citations alrea
   that data for real; `usage_report.py` reports "no measured runs yet" rather than fabricate a
   figure, and will keep saying so until an operator actually records one.
 
+See [`EVIDENCE-METHODOLOGY.md`](EVIDENCE-METHODOLOGY.md) §5 for the measured-vs-self-reported
+distinction this item relies on, and
+[`references/reproducibility-guide.md`](references/reproducibility-guide.md) for the exact command
+to reproduce a `usage_report.py` run.
+
 ## 8. Real-corpus telecom example
 
 **Status: interim synthetic version shipped.** [`examples/telecom-what-l1-demo/`](examples/telecom-what-l1-demo/)

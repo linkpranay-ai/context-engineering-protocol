@@ -135,7 +135,8 @@ measured, regardless of how it is phrased.
   named in this document.
 - [`GLOSSARY.md`](GLOSSARY.md) — definitions for What-L1/L2/L3, How-L1/L2, and other terms used
   above.
-
-A step-by-step guide to reproducing the measurements named in §2 and §5, and a structured template
-for recording a future measurement, are planned as follow-up additions to this repository's
-`references/` directory.
+- [`references/reproducibility-guide.md`](references/reproducibility-guide.md) — exact steps to
+  rerun the measurements named in §2 and §5.
+- [`references/evidence-record-template.md`](references/evidence-record-template.md) — a structured
+  format for recording a measurement, populated with a real (small-scale, non-representative)
+  `graphify benchmark` run as a worked example.
