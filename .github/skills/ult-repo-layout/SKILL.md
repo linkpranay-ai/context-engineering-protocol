@@ -595,6 +595,20 @@ sees messages about slots owned by skills they didn't install. Repos with no
 `.github/skills/` directory at all (including every test fixture in this
 suite) are unaffected — the gate is a no-op there.
 
+11. **Layer path population (D23 §17.8, CEP-DP-001G Stage 2, S28)** — a
+    non-blocking `WARN` if an *enabled* layer's resolved path
+    (`layers.what_l2.path`, `layers.what_l1.path`, `how_dimension.how_l2.path`,
+    `how_dimension.how_l1.path`) doesn't exist or contains no files.
+    What-L2/How-L2 are always checked (no opt-out in the shipped config
+    surface); What-L1/How-L1 are checked only when their own `enabled: true`
+    is set — a disabled opt-in layer left at its placeholder/absent `path`
+    never warns. Closes the silent-fallback risk documented in
+    `ult-context-generate/SKILL.md`'s D8 table (a misconfigured path and a
+    genuinely empty layer previously produced identical, silent behavior).
+    Discovery/auto-proposal of these four paths (D23 §17.2–§17.7) is a
+    separate, deferred mechanism — this check only validates a path that's
+    already configured (or defaulted), it never suggests one.
+
 Exits 0 (`PASS`) or 1 (`FAIL`); prints `INFO`/`NOTE`/`WARN`/`FAIL` lines per
 check. Unit tests in `scripts/tests/test_validate_layout.py`.
 
