@@ -419,6 +419,162 @@ class TestWhatL2ExcludeTypos(unittest.TestCase):
             self.assertIn("cache/", problems[0])
 
 
+class TestHowL2WhatL1HowL1Resolution(unittest.TestCase):
+    """D23 §17.8 (CEP-DP-001G Stage 2): resolve_how_l2_path/resolve_what_l1_*/
+    resolve_how_l1_* - unlike what_l2, none of these widen to workspace_root
+    (§16.5's widening is What-L2-specific)."""
+
+    def test_how_l2_path_default_without_config(self):
+        self.assertEqual(vl.resolve_how_l2_path({}), "org/")
+
+    def test_how_l2_path_explicit_config_value_wins(self):
+        config = {"how_dimension": {"how_l2": {"path": "conventions/"}}}
+        self.assertEqual(vl.resolve_how_l2_path(config), "conventions/")
+
+    def test_what_l1_path_absent_without_config(self):
+        self.assertIsNone(vl.resolve_what_l1_path({}))
+
+    def test_what_l1_path_explicit_config_value(self):
+        config = {"layers": {"what_l1": {"path": "specs/external/"}}}
+        self.assertEqual(vl.resolve_what_l1_path(config), "specs/external/")
+
+    def test_what_l1_enabled_defaults_to_false(self):
+        self.assertFalse(vl.resolve_what_l1_enabled({}))
+
+    def test_what_l1_enabled_explicit_true(self):
+        config = {"layers": {"what_l1": {"enabled": True}}}
+        self.assertTrue(vl.resolve_what_l1_enabled(config))
+
+    def test_how_l1_path_absent_without_config(self):
+        self.assertIsNone(vl.resolve_how_l1_path({}))
+
+    def test_how_l1_path_explicit_config_value(self):
+        config = {"how_dimension": {"how_l1": {"path": "org/process-standards/"}}}
+        self.assertEqual(vl.resolve_how_l1_path(config), "org/process-standards/")
+
+    def test_how_l1_enabled_defaults_to_false(self):
+        self.assertFalse(vl.resolve_how_l1_enabled({}))
+
+    def test_how_l1_enabled_explicit_true(self):
+        config = {"how_dimension": {"how_l1": {"enabled": True}}}
+        self.assertTrue(vl.resolve_how_l1_enabled(config))
+
+
+class TestLayerPathsPopulated(unittest.TestCase):
+    """D23 §17.8 (CEP-DP-001G Stage 2, S28): WARN if an enabled layer's
+    resolved path doesn't exist or contains no files. What-L2/How-L2 are
+    always checked; What-L1/How-L1 only when their own enabled: true is set -
+    a disabled opt-in layer is never checked at all."""
+
+    def test_what_l2_missing_default_path_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            problems = vl.check_layer_paths_populated(root, {})
+            what_l2_problems = [p for p in problems if "what_l2" in p]
+            self.assertEqual(len(what_l2_problems), 1)
+            self.assertIn("S28", what_l2_problems[0])
+
+    def test_how_l2_missing_default_path_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            problems = vl.check_layer_paths_populated(root, {})
+            how_l2_problems = [p for p in problems if "how_l2" in p]
+            self.assertEqual(len(how_l2_problems), 1)
+            self.assertIn("S28", how_l2_problems[0])
+
+    def test_what_l2_and_how_l2_populated_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "docs" / "requirements" / "reqs.md", "# reqs\n")
+            write(root / "org" / "conventions.md", "# conventions\n")
+            self.assertEqual(vl.check_layer_paths_populated(root, {}), [])
+
+    def test_what_l2_empty_directory_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs" / "requirements").mkdir(parents=True)
+            write(root / "org" / "conventions.md", "# conventions\n")
+            problems = vl.check_layer_paths_populated(root, {})
+            self.assertEqual(len(problems), 1)
+            self.assertIn("what_l2", problems[0])
+            self.assertIn("empty", problems[0])
+
+    def test_disabled_what_l1_with_no_path_is_not_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "docs" / "requirements" / "reqs.md", "# reqs\n")
+            write(root / "org" / "conventions.md", "# conventions\n")
+            config = {"layers": {"what_l1": {"enabled": False}}}
+            self.assertEqual(vl.check_layer_paths_populated(root, config), [])
+
+    def test_disabled_what_l1_with_nonexistent_path_is_not_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "docs" / "requirements" / "reqs.md", "# reqs\n")
+            write(root / "org" / "conventions.md", "# conventions\n")
+            config = {
+                "layers": {"what_l1": {"enabled": False, "path": "specs/external/"}},
+            }
+            self.assertEqual(vl.check_layer_paths_populated(root, config), [])
+
+    def test_enabled_what_l1_missing_path_key_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "docs" / "requirements" / "reqs.md", "# reqs\n")
+            write(root / "org" / "conventions.md", "# conventions\n")
+            config = {"layers": {"what_l1": {"enabled": True}}}
+            problems = vl.check_layer_paths_populated(root, config)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("what_l1", problems[0])
+            self.assertIn("no path is configured", problems[0])
+
+    def test_enabled_what_l1_nonexistent_path_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "docs" / "requirements" / "reqs.md", "# reqs\n")
+            write(root / "org" / "conventions.md", "# conventions\n")
+            config = {
+                "layers": {"what_l1": {"enabled": True, "path": "specs/external/"}},
+            }
+            problems = vl.check_layer_paths_populated(root, config)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("what_l1.path", problems[0])
+            self.assertIn("does not exist", problems[0])
+
+    def test_enabled_what_l1_populated_path_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "docs" / "requirements" / "reqs.md", "# reqs\n")
+            write(root / "org" / "conventions.md", "# conventions\n")
+            write(root / "specs" / "external" / "rfc.md", "# rfc\n")
+            config = {
+                "layers": {"what_l1": {"enabled": True, "path": "specs/external/"}},
+            }
+            self.assertEqual(vl.check_layer_paths_populated(root, config), [])
+
+    def test_disabled_how_l1_with_no_path_is_not_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "docs" / "requirements" / "reqs.md", "# reqs\n")
+            write(root / "org" / "conventions.md", "# conventions\n")
+            config = {"how_dimension": {"how_l1": {"enabled": False}}}
+            self.assertEqual(vl.check_layer_paths_populated(root, config), [])
+
+    def test_enabled_how_l1_nonexistent_path_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "docs" / "requirements" / "reqs.md", "# reqs\n")
+            write(root / "org" / "conventions.md", "# conventions\n")
+            config = {
+                "how_dimension": {
+                    "how_l1": {"enabled": True, "path": "org/process-standards/"}
+                },
+            }
+            problems = vl.check_layer_paths_populated(root, config)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("how_l1.path", problems[0])
+
+
 class TestFindMarkers(unittest.TestCase):
     def test_finds_marker_and_slot(self):
         with tempfile.TemporaryDirectory() as tmp:

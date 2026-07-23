@@ -61,6 +61,16 @@ Checks (§15.9, plus §16.2's D21 Phase 3a additions):
       this script. FAIL on drift in either direction. A no-op (the file is
       library-level-only, never copied into consuming projects) for every
       consuming project and every test fixture.
+  11. Layer path population (D23 §17.8, CEP-DP-001G Stage 2, S28) - WARN if an
+      *enabled* layer's resolved path (`layers.what_l2.path`,
+      `layers.what_l1.path`, `how_dimension.how_l2.path`,
+      `how_dimension.how_l1.path`) doesn't exist or contains no files.
+      What-L2/How-L2 are always checked (no opt-out in the shipped config
+      surface); What-L1/How-L1 are checked only when their own `enabled: true`
+      is set - a disabled opt-in layer left at its placeholder/absent `path`
+      never warns. Closes the silent-fallback risk described in
+      `ult-context-generate/SKILL.md:1122-1128` (a misconfigured path and a
+      genuinely empty layer previously produced identical, silent behavior).
 
 Also reports a non-blocking WARN (D21 S18) when an unmarked slot has content
 at both its pre-D21 default and its `workspace_root`-relative default - a
@@ -432,6 +442,69 @@ def resolve_what_l2_index_path(config):
 
 
 # ---------------------------------------------------------------------------
+# What-L1 / How-L2 / How-L1 resolution helpers (D23 §17.8, CEP-DP-001G
+# Stage 2, S28)
+#
+# Unlike what_l2 (above), none of these three get a `workspace_root`-relative
+# default - §16.5's widening is specific to What-L2 (D21). How-L2 has a
+# documented pre-D21 default (`org/`, ult-context-generate/SKILL.md:106);
+# What-L1/How-L1 are opt-in with no documented fallback path - an enabled
+# layer with no `path` set has nothing to resolve, which is itself the S28
+# condition (see check_layer_paths_populated).
+# ---------------------------------------------------------------------------
+
+def resolve_how_l2_path(config):
+    """`how_dimension.how_l2.path`: the explicit config value if set, else the
+    pre-D21 documented default `org/` (ult-context-generate/SKILL.md:106)."""
+    how_l2 = (config.get("how_dimension") or {}).get("how_l2")
+    if isinstance(how_l2, dict):
+        path = how_l2.get("path")
+        if isinstance(path, str) and path:
+            return path
+    return "org/"
+
+
+def resolve_what_l1_path(config):
+    """`layers.what_l1.path`: the explicit config value if set, else None -
+    What-L1 is opt-in with no documented fallback path."""
+    what_l1 = (config.get("layers") or {}).get("what_l1")
+    if isinstance(what_l1, dict):
+        path = what_l1.get("path")
+        if isinstance(path, str) and path:
+            return path
+    return None
+
+
+def resolve_what_l1_enabled(config):
+    """`layers.what_l1.enabled`: defaults to False (opt-in, per the starter
+    kit template) if absent or not a dict."""
+    what_l1 = (config.get("layers") or {}).get("what_l1")
+    if isinstance(what_l1, dict):
+        return bool(what_l1.get("enabled", False))
+    return False
+
+
+def resolve_how_l1_path(config):
+    """`how_dimension.how_l1.path`: the explicit config value if set, else
+    None - How-L1 is opt-in with no documented fallback path."""
+    how_l1 = (config.get("how_dimension") or {}).get("how_l1")
+    if isinstance(how_l1, dict):
+        path = how_l1.get("path")
+        if isinstance(path, str) and path:
+            return path
+    return None
+
+
+def resolve_how_l1_enabled(config):
+    """`how_dimension.how_l1.enabled`: defaults to False (opt-in, per the
+    starter kit template) if absent or not a dict."""
+    how_l1 = (config.get("how_dimension") or {}).get("how_l1")
+    if isinstance(how_l1, dict):
+        return bool(how_l1.get("enabled", False))
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Path well-formedness (§15.9 #4, S14)
 # ---------------------------------------------------------------------------
 
@@ -544,6 +617,63 @@ def check_what_l2_exclude_typos(repo_root, config):
                 f"subtree under '{resolve_what_l2_path(config)}' (S21) - check "
                 f"spelling and case; if the directory simply doesn't exist yet, "
                 f"this entry is harmless (S19)."
+            )
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# Layer path population check (D23 §17.8, CEP-DP-001G Stage 2, S28)
+# ---------------------------------------------------------------------------
+
+def check_layer_paths_populated(repo_root, config):
+    """§17.8/S28: WARN if an *enabled* layer's resolved path doesn't exist or
+    contains no files. What-L2 and How-L2 are always checked (no opt-out in
+    the shipped config surface - both default to `enabled: true` and neither
+    template exposes a documented way to disable them); What-L1 and How-L1
+    are checked only when their own `enabled: true` is set. A disabled
+    What-L1/How-L1 - the starter kit's default - is never checked, so leaving
+    an opt-in layer at its placeholder or absent `path` never warns.
+
+    Before this check, a misconfigured path and a project that genuinely has
+    no such content produced identical, silent behavior (D8 fallback,
+    `ult-context-generate/SKILL.md:1122-1128`). This does not fix that
+    fallback - it only surfaces, non-blockingly, that the fallback is about
+    to be taken for a layer the project declared it wants."""
+    problems = []
+
+    layer_checks = [
+        ("layers.what_l2", resolve_what_l2_path(config), True),
+        ("how_dimension.how_l2", resolve_how_l2_path(config), True),
+        ("layers.what_l1", resolve_what_l1_path(config), resolve_what_l1_enabled(config)),
+        ("how_dimension.how_l1", resolve_how_l1_path(config), resolve_how_l1_enabled(config)),
+    ]
+
+    for label, path, enabled in layer_checks:
+        if not enabled:
+            continue
+        if not path:
+            problems.append(
+                f"{label} is enabled but no path is configured (S28) - this "
+                f"layer will silently resolve as empty. Set {label}.path, or "
+                f"set {label}.enabled: false if this layer is intentionally "
+                f"unused."
+            )
+            continue
+        target = Path(repo_root) / path.rstrip("/")
+        if not target.exists():
+            problems.append(
+                f"{label}.path = '{path}' is enabled but does not exist "
+                f"(S28) - this layer will silently resolve as empty rather "
+                f"than surfacing a configuration mistake. Create the "
+                f"directory, fix the path, or set {label}.enabled: false if "
+                f"this layer is intentionally unused."
+            )
+        elif target.is_dir() and not any(target.rglob("*")):
+            problems.append(
+                f"{label}.path = '{path}' is enabled and exists but is "
+                f"empty (S28) - this layer will silently resolve as empty. "
+                f"Add content, fix the path, or set {label}.enabled: false "
+                f"if this layer is intentionally unused."
             )
     return problems
 
@@ -778,6 +908,10 @@ def validate(repo_root):
 
     # what_l2.exclude typo check (D21 §16.11 S21 / round-2 L2) - non-blocking.
     for problem in check_what_l2_exclude_typos(repo_root, config):
+        report.append(f"WARN: {problem}")
+
+    # Layer path population check (D23 §17.8, S28) - non-blocking.
+    for problem in check_layer_paths_populated(repo_root, config):
         report.append(f"WARN: {problem}")
 
     # layout-slots-registry.yaml consistency (D21 §16.8, Phase 3e) - no-op if
