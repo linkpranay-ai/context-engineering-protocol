@@ -152,6 +152,13 @@ against a real Cursor installation — see "What's not yet done" below. Run
 `python catalog/export_adapters.py --check` (wired into CI) to confirm generated files are current;
 `--write` regenerates them after adding or editing a skill.
 
+## Case studies
+
+Real, reproducible reports of running this protocol against real codebases, including at least one
+deliberate negative control showing where it adds little or no value. See
+[`case-studies/README.md`](case-studies/README.md) for the index and
+[`case-studies/TEMPLATE.md`](case-studies/TEMPLATE.md) for the format every case follows.
+
 ## What's not yet done
 
 Disclosed plainly rather than glossed over. Full prioritized list with more detail:
