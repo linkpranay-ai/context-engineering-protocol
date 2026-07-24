@@ -15,6 +15,7 @@ deliberate negative control, chosen to show a situation where this protocol adds
 | Case | Codebase | Negative control? | Summary |
 | --- | --- | --- | --- |
 | [textual-focus-chain-and-sparkline-baseline](textual/CASE-STUDY.md) | Textualize/textual (MIT) | Yes | Ordinary focus-chain feature-add finds real cross-file structure; a deliberately self-contained `Sparkline` task finds CEP's context-assembly overhead surfaces almost nothing worth reporting. |
+| [open5gs-s6a-error-message-avp](open5gs-ietf-rfc/CASE-STUDY.md) | open5gs/open5gs (AGPL-3.0) | No | First run against a real IETF RFC as a What-L1 source, paired with a genuine AVP-dictionary gap (Error-Message present on Gx, absent on S6a) — correctly surfaces the working exemplar, the confirmed gap, and the real error-answer integration point. |
 
 ## Synthesis
 
