@@ -1,6 +1,6 @@
 {
   "name": "3gpp",
-  "description": "3GPP / ETSI house style. Clause ids look like 7.2.9.2, E.2.7, 5.3.4a, A.5 (optional single leading capital for annex letter, optional trailing lowercase letter for amendments). Cross-refs use 'clause(s)/subclause(s)/section(s) <id>', 'Annex <Letter>(.<id>)*', and '(see <id>)'.",
+  "description": "3GPP / ETSI house style. Clause ids look like 7.2.9.2, E.2.7, 5.3.4a, A.5 (optional single leading capital for annex letter, optional trailing lowercase letter for amendments). Cross-refs use 'clause(s)/subclause(s)/section(s) <id>', 'Annex <Letter>(.<id>)*', and '(see <id>)'. Requires markdown-ified input: this profile only parses clause IDs and cross-refs out of headings already written as real ATX ('#') or Setext ('===='/'----') Markdown syntax -- it does not detect raw flush-left plaintext headings. Markdown-ify plaintext sources first.",
   "clause_id_regex": "^([A-Z](?:\\.\\d+)+|[A-Z]?\\d+(?:\\.\\d+)*[a-z]?)\\s+(.+)$",
   "cross_ref_patterns": [
     {"regex": "\\b(?:clause|clauses|subclause|subclauses|section|sections)\\s+([A-Z](?:\\.\\d+)+|[A-Z]?\\d+(?:\\.\\d+)*[a-z]?)\\b", "kind": "clause"},

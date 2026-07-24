@@ -31,6 +31,23 @@ SCHEMA_VERSION = "1.2"
 # Directory holding the bundled profile pattern-packs.
 PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
 
+# Profiles whose clause_id_regex describes a plaintext house style
+# (RFC-editor .txt, 3GPP, IEEE) that detect_headings() cannot itself detect --
+# it only recognizes ATX (`#`) and Setext (===/---) Markdown syntax, then
+# applies clause_id_regex to titles of headings already found that way. If
+# the real input is raw plaintext with no markdown-ified headings, indexing
+# silently produces near-zero real headings instead of failing loudly.
+_PLAINTEXT_HOUSE_STYLE_PROFILES = ("rfc", "3gpp", "ieee")
+# Below this many lines per detected heading, warn that the input may be
+# unconverted plaintext. Calibrated against the real RFC 6733 case: ~43
+# lines/heading once correctly markdown-ified vs. ~1062 lines/heading when
+# fed as raw RFC-editor .txt (one heading found for the whole document).
+_LOW_HEADING_DENSITY_THRESHOLD = 150
+# Minimum total lines before the density check applies, so small,
+# legitimately sparse files (e.g. a short single-section doc) don't
+# false-trigger.
+_LOW_HEADING_DENSITY_MIN_LINES = 200
+
 
 # --------------------------------------------------------------------------- #
 # Profiles                                                                     #
@@ -638,9 +655,11 @@ def query_index(index_path, terms, top):
     """Search section *content* for any of the OR'd terms; rank by match count.
 
     The index does not store section text -- we re-open each source file and
-    scan only the already-known section_bounds line range (zero-LLM, file I/O
-    only). Source files are resolved relative to the index file's directory,
-    matching how the index recorded their (relative) paths.
+    scan only each heading's own direct content (up to the next heading of
+    any level, not the full nested section_bounds -- see the inline comment
+    below on why) (zero-LLM, file I/O only). Source files are resolved
+    relative to the index file's directory, matching how the index recorded
+    their (relative) paths.
     """
     index_path = Path(index_path)
     with index_path.open(encoding="utf-8") as fh:
@@ -673,14 +692,28 @@ def query_index(index_path, terms, top):
             _data, file_cache[src] = read_lines(src)
         lines = file_cache[src]
 
-        for h in fentry["headings"]:
+        headings = fentry["headings"]
+        for idx, h in enumerate(headings):
             if h.get("is_toc"):
                 continue
             start, end = h["section_bounds"]
-            if end < start:
+            # Score against this heading's OWN direct content only, not its
+            # full section_bounds. section_bounds (by the documented
+            # convention) extends through every nested child section's text
+            # too, so scoring the raw match count over section_bounds always
+            # makes an ancestor heading accumulate all of its descendants'
+            # matches and outrank the specific subsection a query is actually
+            # looking for. Children remain separately queryable/rankable as
+            # their own results, so narrowing to own content here loses no
+            # coverage - it only stops double-counting. section_bounds itself
+            # is left untouched in the reported result below.
+            own_end = end
+            if idx + 1 < len(headings):
+                own_end = min(own_end, headings[idx + 1]["line"] - 1)
+            if own_end < start:
                 body = ""
             else:
-                body = "\n".join(lines[start - 1:end])
+                body = "\n".join(lines[start - 1:own_end])
             # Also let the heading title match (helps short sections).
             haystack = h["title"] + "\n" + body
             count = sum(len(r.findall(haystack)) for r in term_res)
@@ -724,9 +757,50 @@ def cmd_index(args):
     with out_path.open("w", encoding="utf-8") as fh:
         json.dump(index, fh, indent=2, ensure_ascii=False)
     n_headings = sum(len(f["headings"]) for f in index["files"])
+    if args.profile in _PLAINTEXT_HOUSE_STYLE_PROFILES:
+        _warn_on_low_heading_density(index, args.profile)
     print("Indexed {} file(s), {} heading(s) -> {} (profile={})".format(
         len(index["files"]), n_headings, args.output, args.profile))
     return 0
+
+
+def _warn_on_low_heading_density(index, profile_name):
+    """Warn when a plaintext-house-style profile found very few headings.
+
+    A `rfc`/`3gpp`/`ieee` profile only tunes clause-id parsing and cross-ref
+    patterns for that house style once real ATX/Setext headings exist -- it
+    does not detect raw flush-left plaintext headings. Feeding it unconverted
+    plaintext silently produces near-zero real headings instead of failing
+    loudly, so this flags that situation for the operator to markdown-ify the
+    source first.
+    """
+    root = Path(index["root"])
+    for fentry in index["files"]:
+        n_head = len(fentry["headings"])
+        if n_head == 0:
+            continue
+        src = root / fentry["path"]
+        try:
+            _data, flines = read_lines(src)
+        except OSError:
+            continue
+        total = len(flines)
+        if total < _LOW_HEADING_DENSITY_MIN_LINES:
+            continue
+        lines_per_heading = total / n_head
+        if lines_per_heading > _LOW_HEADING_DENSITY_THRESHOLD:
+            print(
+                "Warning: '{}' has only {} heading(s) over {} lines "
+                "(~{:.0f} lines/heading) under profile '{}'. This profile "
+                "does not detect raw flush-left plaintext headings -- if "
+                "this source is plaintext (e.g. RFC-editor .txt house "
+                "style), markdown-ify it first (convert real headings to "
+                "'#'/Setext syntax) before indexing.".format(
+                    fentry["path"], n_head, total, lines_per_heading,
+                    profile_name,
+                ),
+                file=sys.stderr,
+            )
 
 
 def cmd_query(args):

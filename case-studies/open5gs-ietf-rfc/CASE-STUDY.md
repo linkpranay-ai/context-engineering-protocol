@@ -85,12 +85,20 @@ Two real tooling observations surfaced during What-L1 setup, logged separately p
 instruction rather than duplicated here in full: (1) `md_index.py`'s heading detector requires
 markdown ATX/Setext syntax and produced only 8 false-positive headings against real,
 unmodified RFC-editor plaintext — self-remediated by markdown-ifying the real numbered headings
-before indexing (196 real headings, clean afterward); logged as `DEF-002` (Medium, deferred). (2)
-`md_index.py query`'s ranking structurally favors ancestor headings over their more specific
-descendants (querying "Error-Message AVP" never surfaced the actual §7.3 in the top 12 results) —
-worked around by looking up the target `clause_id` directly in the index rather than trusting the
-ranked query; logged as `DEF-003` (Medium, deferred). Neither blocked this run or changed its
-conclusions.
+before indexing (196 real headings, clean afterward); logged as `DEF-002` (Medium, **partially
+fixed** — the tool now warns when a plaintext-house-style profile's heading count is anomalously
+low, so this class of silent failure no longer goes unflagged, though the full plain-line detector
+remains open). (2) `md_index.py query`'s ranking structurally favored ancestor headings over their
+more specific descendants (querying "Error-Message AVP" never surfaced the actual §7.3 in the top
+12 results) — worked around by looking up the target `clause_id` directly in the index rather than
+trusting the ranked query; logged as `DEF-003` (Medium, **fixed** — re-running the identical query
+against the rebuilt index confirms the ancestor-inflation mechanism is gone: the previously-dominant
+top-level chapters no longer accumulate their descendants' matches, and §7.3's own rank improved
+from 44th of 156 to 26th of 148). §7.3 still didn't crack the top 12, though — re-verifying surfaced
+a distinct, separate limitation (raw term counts with no per-term specificity, logged fresh as
+`DEF-004`, Low, deferred) that the direct `clause_id` lookup workaround below still fully covers.
+Neither DEF-002 nor DEF-003 blocked this run or changed its conclusions, and the fixes did not
+require re-running or altering this case's own package generation.
 
 ## 6. Approval decision
 
@@ -125,18 +133,23 @@ pilot capability, not just about this task.
 
 Single-task, single-codebase, no-live-reviewer dogfood run, same caveats as the Textual case. This
 is also the first real exercise of What-L1 against a genuine external plaintext spec rather than a
-pre-formatted markdown source — the two defects found (DEF-002, DEF-003) may be specific to
-plaintext RFC-editor house style, or may generalize to any nested-heading document; this single
-case cannot distinguish the two without a second What-L1 corpus to compare against.
+pre-formatted markdown source — the two defects originally found here (DEF-002, DEF-003) turned out
+to generalize rather than being RFC-house-style-specific, confirmed once a second What-L1 corpus
+(the FastAPI case's OpenAPI Spec) was available to compare against, and DEF-003 has since been fixed
+at the tool level (see §5). A further, distinct ranking limitation (DEF-004) was found only while
+verifying that fix, and remains open.
 
 ## 10. Lessons learned
 
 CEP's gap/conflict checks and `graphify affected` blast-radius check behaved correctly and honestly
 for a genuinely mixed-source-and-vendored codebase, once scoped away from the generated
 `lib/sbi/`/`lib/asn1c/` subtrees per the reproducibility guide's own advice. The What-L1 pilot
-surfaced two real, generalizable defects in `md_index.py` (`DEF-002`, `DEF-003`) — both non-blocking
-via workaround, both deferred per the governance-side defect log rather than fixed inline, since
-neither invalidated this run's findings or blocked forward progress.
+surfaced two real, generalizable defects in `md_index.py` (`DEF-002`, `DEF-003`), both non-blocking
+via workaround at the time. `DEF-003` has since been fixed (own-content-only ranking, verified by
+re-running this case's exact query against the rebuilt index) and `DEF-002` partially fixed (a
+low-heading-density warning); `DEF-004`, a distinct raw-term-specificity ranking limitation, was
+found during that verification and remains open. None of the four invalidated this run's findings
+or blocked forward progress.
 
 ## Reproduction steps
 
@@ -162,9 +175,10 @@ neither invalidated this run's findings or blocked forward progress.
 7. Confirm the task's gap and exemplar directly: `grep -n "Error-Message"
    lib/diameter/gx/dict.c lib/diameter/s6a/dict.c lib/diameter/common/dict.c` — expect exactly one
    match, in `gx/dict.c`.
-8. Look up RFC 6733 §7.3 directly by `clause_id` in `specs-out/index.json` (not via `query`, per
-   `DEF-003`) to confirm its `section_bounds` and read the Error-Message AVP definition at that
-   line range.
+8. Look up RFC 6733 §7.3 directly by `clause_id` in `specs-out/index.json` (not via `query` — `DEF-003`
+   itself is fixed, but `DEF-004`'s residual raw-term-specificity limitation still keeps §7.3 out of
+   `query`'s top ranks) to confirm its `section_bounds` and read the Error-Message AVP definition at
+   that line range.
 9. Compare your package's `content_hash` against this case's recorded value
    (`s6a-error-message-avp_feature-add_20260724.yaml`: `9673f988`) by running
    `python .github/skills/ult-context-generate/scripts/content_hash.py contexts/<id>.yaml`.
