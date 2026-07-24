@@ -66,6 +66,16 @@ step 9 (`contexts/<package-id>.yaml` plus one or more sibling
    samples, it says so plainly ("No measured runs yet") rather than
    substituting a number.
 
+## Case studies
+
+Each published case study under [`case-studies/`](../case-studies/) is self-contained and includes
+its own numbered reproduction steps and pinned ref — this guide does not restate them. Pointer:
+
+- [`case-studies/textual/CASE-STUDY.md`](../case-studies/textual/CASE-STUDY.md) — Textualize/textual
+  (MIT), tag `v8.2.8`. Two runs against the same clone: an ordinary focus-chain feature-add, and a
+  deliberate negative-control task (`Sparkline` baseline marker) — reproduction steps §"Reproduction
+  steps" in that file, generated-package artifacts and MIT `NOTICE.md` committed alongside it.
+
 ## What this guide does not cover
 
 Fallback-relevance measurement (`EVIDENCE-METHODOLOGY.md` §1, surface 2) has

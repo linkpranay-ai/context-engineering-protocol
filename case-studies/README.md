@@ -14,7 +14,7 @@ deliberate negative control, chosen to show a situation where this protocol adds
 
 | Case | Codebase | Negative control? | Summary |
 | --- | --- | --- | --- |
-| _(none published yet)_ | | | |
+| [textual-focus-chain-and-sparkline-baseline](textual/CASE-STUDY.md) | Textualize/textual (MIT) | Yes | Ordinary focus-chain feature-add finds real cross-file structure; a deliberately self-contained `Sparkline` task finds CEP's context-assembly overhead surfaces almost nothing worth reporting. |
 
 ## Synthesis
 
