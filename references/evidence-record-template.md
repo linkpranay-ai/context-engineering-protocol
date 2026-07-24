@@ -77,8 +77,56 @@ and its "no packages found" behavior. When a real run does produce a report,
 fill this section from `USAGE_REPORT.md`'s actual output rather than from
 this template's placeholder shape.
 
-## Fallback-relevance record
+## Fallback-relevance record (naive-keyword-search baseline)
 
-No template section exists here yet. `EVIDENCE-METHODOLOGY.md` §1 (surface 2)
-and §4 name this as a measurement with no defined baseline — a record format
-can't be usefully templated until that gap closes.
+```yaml
+kind: fallback-relevance
+tool: naive keyword search (grep), compared against a CEP context package
+measurement_type: measured   # naive search actually run; package citation actually checked
+task: <one line, from the case's own §2>
+naive_query: <the exact grep/keyword search a developer would try first>
+date_run: <YYYY-MM-DD>
+result:
+  found_integration_point: <yes / no / partial — did the naive search's result
+    set contain the specific site CEP's package cited?>
+  naive_read_cost: <word count of what had to be read to get there, converted
+    to tokens at the same ~4/3 tokens/word ratio graphify benchmark reports>
+  cep_lookup_cost: <word/token count of the specific item CEP's package cited
+    directly, for the same target>
+  notes: <what the naive search found instead, and why it missed or hit>
+limitation: >
+  Retrospective, not blind — the naive query is being chosen after the task's
+  real answer is already known, since true blindness isn't achievable after
+  the fact (EVIDENCE-METHODOLOGY.md §7). Reused here from the case's own
+  reproduction steps rather than reverse-engineered from CEP's citations.
+```
+
+**Worked example — a real run, not a hypothetical.** From the Open5GS+RFC 6733
+case study (`case-studies/open5gs-ietf-rfc/CASE-STUDY.md`), the RFC-lookup half
+of the task:
+
+```yaml
+kind: fallback-relevance
+tool: naive keyword search (grep), compared against a CEP context package
+measurement_type: measured
+task: Add Error-Message AVP (RFC 6733 §7.3) support to the S6a interface.
+naive_query: "read RFC 6733 end to end looking for the Error-Message AVP definition (no keyword hit is possible — the AVP name is not yet in any local file)"
+date_run: 2026-07-24
+result:
+  found_integration_point: "partial — the RFC text exists locally (specs/external/rfc6733.md) but nothing short of reading through it locates §7.3; there is no in-codebase keyword to grep for"
+  naive_read_cost: "43,599 words (~58,132 tokens) to read the whole RFC to find it"
+  cep_lookup_cost: "55 words (~73 tokens) — What-L1's direct clause_id lookup returns exactly RFC 6733 §7.3's section_bounds, lines 5333-5339"
+  notes: >
+    ~797x fewer tokens for this specific lookup. This is the sharpest result
+    across the three cases precisely because the target text is external to
+    the codebase — grep cannot help at all, so the naive baseline is "read the
+    whole external document," not "grep and miss." Contrast with the code-side
+    half of the same case (Gx AVP exemplar), where a one-line grep finds the
+    answer for free and CEP has no comparable edge — see the case's own
+    "Results at a glance" table for the full, mixed picture across both halves.
+limitation: >
+  Retrospective — RFC 6733 §7.3 is cited by the case study's own reproduction
+  steps as the target section, so this replays a known answer rather than a
+  blind search. The naive_read_cost is real (the RFC file's real word count),
+  not estimated.
+```

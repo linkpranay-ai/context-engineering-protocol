@@ -21,9 +21,11 @@ Three surfaces produce evaluable claims:
 3. **Context-package usage** — whether the context items a package assembles are actually cited by
    the downstream artifacts that consume them, or sit unused (over-inclusion).
 
-Only (3) currently has a real, running measurement mechanism (`scripts/usage_report.py`, ROADMAP
-item 7). (1) has a defined tool and baseline but no recorded run (§2). (2) has no defined
-measurement at all yet — flagged as a gap, not filled by this document (see §7).
+(3) has a real, running measurement mechanism (`scripts/usage_report.py`, ROADMAP item 7). (1) now
+has real recorded runs against three real corpora (§2) — no longer an unfilled gap, though still
+only three data points. (2) now has a defined baseline (§4) and a first retrospective application
+across the same three corpora — a real start, but not yet a general-purpose measurement mechanism
+(see §7 for what's still limited about it).
 
 ## 2. Benchmark methodology
 
@@ -40,10 +42,16 @@ Procedure:
 3. Record the result: codebase identity (name, approximate size, language), the reported
    percentage, and the date run.
 
-**Current status: the tool exists and is documented; no run has been recorded in this repo yet.**
-`README.md`'s "What's not yet done" and `ROADMAP.md` item 7 both disclose this plainly rather than
-imply a number that hasn't been measured — this document does the same. The first real run against
-a pilot codebase is future work, not something this document reports.
+**Current status: run for real, for the first time, against the three CEP-DP-001D dogfood
+corpora** (2026-07-24): Open5GS (`src/`+`lib/diameter/`, 3,830 nodes / 10,236 edges) — 36.8x
+reduction, 191,500 words → ~255,333 naive tokens, ~6,934 tokens/query average; FastAPI (`fastapi/`,
+911 nodes / 2,568 edges) — 5.6x reduction, 45,550 words → ~60,733 naive tokens, ~10,925
+tokens/query average; Textual (`src/`, 20,116 nodes / 59,448 edges) — 39.6x reduction, 1,005,800
+words → ~1,341,066 naive tokens, ~33,877 tokens/query average. Full per-question breakdowns and the
+naive-keyword-search comparison (§4) are recorded in each case's own `CASE-STUDY.md` "Results at a
+glance" table. This closes the gap for these three corpora specifically — the four synthetic demos
+in §3 still have no recorded run, and three real-repo data points is not yet a claim about
+`graphify benchmark`'s behavior in general.
 
 ## 3. Representative-corpus selection criteria
 
@@ -76,11 +84,17 @@ representative for a given claim when it is:
 ## 4. Baseline definitions
 
 - **Naive full-corpus read** (token efficiency, §2): reading every file in the target codebase as
-  context, with no code-graph query scoping. This is the only baseline currently defined in this
-  repo, used by `graphify benchmark`.
-- **No baseline is currently defined for fallback relevance (§1, surface 2).** There is no
-  reference ranking or human-agreement baseline to compare a How-L1/What-L1 result against — a
-  gap this document names but does not fill (see §7, "No relevance baseline").
+  context, with no code-graph query scoping. Used by `graphify benchmark`.
+- **Naive keyword search** (fallback relevance / correctness, §1 surface 2): given only the task's
+  own wording, the plausible grep/read a developer would try first — no context package, no
+  `graphify query`/`affected`, no `md_index.py` lookup. Measured as: (a) whether the search's
+  result set contains the specific integration point CEP's package actually cited (yes / no /
+  partial, with how many extra files a developer would have had to read to disambiguate), and
+  (b) the word count of what had to be read to get there, converted to tokens at the same
+  ≈4/3 tokens-per-word ratio `graphify benchmark` itself already reports in its own output (§2).
+  First applied retrospectively across the three CEP-DP-001D case studies (2026-07-24) — see each
+  case's "Results at a glance" table. This is a real baseline with real numbers, but see §7 for its
+  disclosed limitation (retrospective, not blind) and its current single-round-of-cases scope.
 
 ## 5. Measurement definitions
 
@@ -116,10 +130,14 @@ measured, regardless of how it is phrased.
 - **Single-task-type testing.** ROADMAP item 13 names this directly for How-L1: only one task type
   has been queried against the smoke-test corpus, so relevance-ranking claims cannot yet be said to
   hold across task types.
-- **No relevance baseline (§4).** Without a reference ranking or human-agreement baseline, a future
-  fallback-relevance number would have nothing to be compared against — a result could look good in
-  isolation while still being no better than chance. This methodology flags the gap; closing it
-  (defining what a relevance baseline should look like) is future work, not resolved here.
+- **Relevance baseline is real but retrospective, not blind (§4).** The naive-keyword-search
+  baseline now defined and applied across the three CEP-DP-001D cases reuses grep queries drawn
+  from each case's own reproduction steps — a genuine first-attempt search a developer would try,
+  but reconstructed after the task's answer was already known, since true blindness isn't
+  achievable after the fact. Each case study states this plainly rather than presenting the
+  comparison as a controlled trial. It is also currently three data points from one round of
+  dogfooding, not a repeatable measurement mechanism a future case can just plug into without
+  re-deriving its own naive query by hand.
 - **Self-reported/measured conflation.** Before this document, no explicit rule distinguished a
   measured number from a self-reported estimate (§5) — a future contributor could unintentionally
   present an estimate as measured. The §5 rule is the mitigation.
@@ -139,4 +157,5 @@ measured, regardless of how it is phrased.
   rerun the measurements named in §2 and §5.
 - [`references/evidence-record-template.md`](references/evidence-record-template.md) — a structured
   format for recording a measurement, populated with a real (small-scale, non-representative)
-  `graphify benchmark` run as a worked example.
+  `graphify benchmark` run and a real naive-keyword-search fallback-relevance run as worked
+  examples.

@@ -16,6 +16,25 @@ generated context package are committed alongside this write-up — every artifa
 described narratively, with exact file/line/section pointers a reader can follow against their own
 clone.
 
+## Results at a glance
+
+| Metric | Without CEP (naive keyword search) | With CEP | Kind |
+| --- | --- | --- | --- |
+| Found the Gx exemplar (`gx/dict.c:273`)? | Yes — one grep, one unambiguous hit | Yes | Measured |
+| Found the S6a integration point (`hss-s6a-path.c`'s `air_cb`)? | No — `grep "Error-Message"` returns zero hits in that file; the correct callback must be found by reading among 6 candidate callbacks in a 2,343-line file | Yes — cited directly | Measured |
+| Cost to locate that integration point via reading | ~2,555 words / ~3,407 tokens (the one right function, best case) to ~7,211 words / ~9,615 tokens (whole file) | Direct citation | Measured |
+| Found RFC 6733 §7.3 (Error-Message AVP)? | No keyword search possible — the term isn't in the codebase at all; only a whole-document read finds it | Yes — direct `clause_id` lookup | Measured |
+| Cost to locate RFC §7.3 by reading the spec | 43,599 words / ~58,132 tokens (the whole RFC) | 55 words / ~73 tokens (the section itself) — **~797x fewer tokens** | Measured |
+| `graphify benchmark` reduction (whole scoped graph) | naive full-corpus-read baseline | 36.8x fewer tokens/query (191,500 words → ~255,333 naive tokens; 3,830 nodes / 10,236 edges; avg ~6,934 tokens/query) | Measured |
+
+**Retrospective, not blind:** the naive queries above are the same ones this case's own
+reproduction steps (§"Reproduction steps") already used to confirm the gap and exemplar — chosen
+because the task's answer is already known, not reverse-engineered from CEP's own citations. This
+is a real limitation, not hidden: see `EVIDENCE-METHODOLOGY.md` §7. The mixed result is the honest
+finding — naive grep is genuinely competitive for the same-repo exemplar (a plain keyword hit), and
+genuinely helpless for the external-spec lookup (no keyword exists to search for), and for the
+in-repo integration point itself (absent, not misnamed — grep has nothing to match).
+
 ## 1. Environment
 
 Open5GS was cloned to a sibling directory (`dogfood-open5gs/`), pinned to tag `v2.8.0` (commit
@@ -116,13 +135,17 @@ context-assembly step in isolation.
 
 ## 8. Outcome
 
-**Inference, not measured:** the package correctly surfaced the exact working exemplar (Gx's
-registration), the exact confirmed gap (S6a and common dictionaries), the exact integration point
-in real, already-centralized error-handling code (`hss-s6a-path.c`'s `out:` label), and the exact
-RFC section that bounds the fix's scope (§7.3's "not intended for automated processing" language,
-which directly justified the §6 design decision). Whether this is faster than a developer reading
-`lib/diameter/*/dict.c` and `hss-s6a-path.c` directly and independently locating RFC 6733 §7.3 is a
-judgment call, not a controlled comparison — reported as inference, not measured.
+**Partially measured, partially inference:** the package correctly surfaced the exact working
+exemplar (Gx's registration), the exact confirmed gap (S6a and common dictionaries), the exact
+integration point in real, already-centralized error-handling code (`hss-s6a-path.c`'s `out:`
+label), and the exact RFC section that bounds the fix's scope (§7.3's "not intended for automated
+processing" language, which directly justified the §6 design decision). The token-cost side of this
+is now measured, not inferred (see "Results at a glance" above): a naive keyword search finds the
+Gx exemplar for free but finds nothing at all for the S6a integration point or the RFC section, and
+reading to find those two costs real, counted tokens — ~9,615 for the integration point (worst
+case) and ~58,132 for the RFC section, against CEP's ~73-token direct lookup for the latter.
+Whether this token difference translates to less *developer* time is still a judgment call, not a
+controlled user study — that narrower claim remains inference.
 
 This case study is also CEP's first evidence that What-L1 (external spec ingestion) can genuinely
 work end-to-end against a real, un-modified external document — RFC 6733's plaintext required a
@@ -131,9 +154,11 @@ pilot capability, not just about this task.
 
 ## 9. Limitations
 
-Single-task, single-codebase, no-live-reviewer dogfood run, same caveats as the Textual case. This
-is also the first real exercise of What-L1 against a genuine external plaintext spec rather than a
-pre-formatted markdown source — the two defects originally found here (DEF-002, DEF-003) turned out
+Single-task, single-codebase, no-live-reviewer dogfood run, same caveats as the Textual case. The
+naive-keyword-search baseline in "Results at a glance" is real but retrospective, not blind — the
+queries reuse this case's own reproduction steps, run after the task's answer was already known
+(`EVIDENCE-METHODOLOGY.md` §7). This is also the first real exercise of What-L1 against a genuine
+external plaintext spec rather than a pre-formatted markdown source — the two defects originally found here (DEF-002, DEF-003) turned out
 to generalize rather than being RFC-house-style-specific, confirmed once a second What-L1 corpus
 (the FastAPI case's OpenAPI Spec) was available to compare against, and DEF-003 has since been fixed
 at the tool level (see §5). A further, distinct ranking limitation (DEF-004) was found only while

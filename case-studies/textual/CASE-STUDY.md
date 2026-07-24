@@ -15,6 +15,24 @@ established real, deep familiarity with its structure — making it possible to 
 genuinely self-contained task with confidence rather than guess one cold. Sections below cover
 each run in turn; §5–§8 are split A/B where the two runs diverge, and merged where they don't.
 
+## Results at a glance
+
+| Metric | Without CEP (naive keyword search) | With CEP | Kind |
+| --- | --- | --- | --- |
+| Run A: `focus_chain` exemplar (`screen.py:772`) | Found — `focus_chain` greps clean to the real definition | Found (What-L3) | Measured |
+| Run A: `_check_disabled()` integration point (`widget.py:832`) | Not found by keyword — the task's own wording ("disabled widgets shouldn't be focusable") has no term bridging to `_check_disabled`; broadening to `grep "disabled"` matches 10 files, not disambiguating which one | Found (What-L3) | Measured |
+| Run A: naive read cost to confirm both real sites | `screen.py`+`widget.py` in full, 23,751 words (~31,668 tokens) | 1,346 words (~1,795 tokens) — the generated context package, ~17.6x fewer tokens | Measured |
+| Run B: naive read cost (negative control) | `sparkline.py` alone, 551 words (~735 tokens) | 902 words (~1,203 tokens) — the generated context package | Measured |
+| Run B: cheaper path | **Naive wins** — reading the file directly costs ~1.6x fewer tokens than the full CEP package for this self-contained target | — | Measured |
+| `graphify benchmark` reduction (whole `src/` corpus) | naive-full-corpus-read baseline | 39.6x fewer tokens/query (20,116 nodes / 59,448 edges) | Measured |
+
+**Retrospective, not blind** (`EVIDENCE-METHODOLOGY.md` §7): the `focus_chain`/`disabled` queries
+above are the natural first greps a developer would try from the task's own wording, run after
+both runs' real answers were already known — not reverse-engineered from CEP's citations, but not
+a controlled blind trial either. Run B's row is the sharpest honest result across all three cases:
+this is the one place in the whole program where the naive baseline is cheaper than CEP, not just
+competitive — exactly what a negative control is supposed to be able to show.
+
 ## 1. Environment
 
 Both runs used the same disposable clone: `Textualize/textual`, tag `v8.2.8`, commit
@@ -114,26 +132,35 @@ context-assembly step in isolation, not an end-to-end task completion.
 
 ## 8. Outcome
 
-**Run A — inference, not measured:** the package correctly surfaced the two real code sites that
-gate focus, and the one real documentation contract that would need updating, for a task that
-does have genuine cross-file structure (a DOM-traversal-level implementation detail, a public
-widget-level flag, and a documented behavior contract, in three different files). Whether this
-would have saved a developer time versus reading the code directly is a judgment call, not a
-controlled comparison — reported as inference.
+**Run A — partially measured, partially inference:** the package correctly surfaced the two real
+code sites that gate focus, and the one real documentation contract that would need updating, for
+a task that does have genuine cross-file structure (a DOM-traversal-level implementation detail, a
+public widget-level flag, and a documented behavior contract, in three different files). The naive
+baseline in "Results at a glance" is now measured: a `focus_chain` grep finds the `screen.py` site
+for free but has zero hits in `widget.py`, and the task's own wording gives no keyword bridging to
+`_check_disabled()` — confirming both real sites naively costs 23,751 words (~31,668 tokens) versus
+the package's 1,346 words (~1,795 tokens), ~17.6x fewer tokens. What remains inference is narrower:
+whether that token/precision gap translates into less developer time, which is a judgment call,
+not a controlled comparison.
 
 **Run B — measured:** the tool's own outputs are the evidence. `graphify explain` correctly
 reported a low-degree, self-contained node; `graphify affected`'s fallback path correctly reported
 a single generic (non-feature-specific) dependent after the low-degree pivot; the What-L2 gap
 check correctly reported zero documentation coverage. All three are real tool outputs pointing to
 the same conclusion: for this task, CEP's context-assembly overhead does not surface anything a
-developer opening `sparkline.py` directly wouldn't see in under a minute. This is the case's
-deliberate negative-control finding, reported plainly rather than reframed as a success.
+developer opening `sparkline.py` directly wouldn't see in under a minute. Now backed by a real
+number, not just the assertion: `sparkline.py` alone is 551 words (~735 tokens) versus the
+generated package's 902 words (~1,203 tokens) — reading the file directly is cheaper. This is the
+case's deliberate negative-control finding, reported plainly rather than reframed as a success.
 
 ## 9. Limitations
 
 Both runs are single-task, single-codebase, no-live-reviewer dogfood runs — they say nothing about
 CEP's behavior on a larger or more tangled corpus, on a task type other than feature-add, or with a
-real human making the Step 1/7.5/9 decisions instead of an operator self-answering them. Run B's
+real human making the Step 1/7.5/9 decisions instead of an operator self-answering them. The
+naive-keyword-search baseline in "Results at a glance" is real but retrospective, not blind — the
+`focus_chain`/`disabled`/`sparkline.py` queries reuse this case's own reproduction steps, run after
+both runs' answers were already known (`EVIDENCE-METHODOLOGY.md` §7). Run B's
 "self-contained" finding is specific to one renderable class chosen for low external connectivity;
 it should not be read as "CEP adds nothing for small modules in general" without more negative-
 control cases across different codebases.

@@ -14,6 +14,24 @@ standard. Because FastAPI is MIT-licensed, this case follows the permissive-lice
 committing generated artifacts (see `EVIDENCE-METHODOLOGY.md`): the generated context package and
 its `NOTICE.md` attribution are committed alongside this write-up.
 
+## Results at a glance
+
+| Metric | Without CEP (naive keyword search) | With CEP | Kind |
+| --- | --- | --- | --- |
+| Found the `callbacks=` exemplar? | Yes — `grep "callbacks"` hits 4 files, including the right ones | Yes | Measured |
+| Found the real integration point (`openapi/utils.py:410-453`, `deep_dict_update` responses merge)? | No — that block contains zero occurrences of "callbacks"; the two real hits `grep` returns in that file (lines 323-339, 512-513) are the *callbacks*-specific code, not the shared merge point a `links=` fix should hook into | Yes — cited directly | Measured |
+| Disambiguate `get_openapi_path()`'s real callers? | Partial — `grep "get_openapi_path"` returns 4 raw hits in one file, mixing the definition, an internal recursive self-call, and the real external call sites; the other real caller chain (`FastAPI.openapi()` → `get_openapi()`) lives in a different file (`applications.py:1086`) that this grep never finds | Yes — `graphify affected` reports exactly two disambiguated real callers | Measured |
+| Found the OpenAPI spec's "Link Object" section? | Only by reading the whole spec | Yes — direct section lookup | Measured |
+| Cost to locate "Link Object" by reading the spec | 15,767 words / ~21,023 tokens (the whole spec) | 1,030 words / ~1,373 tokens (the section itself) — **~15.3x fewer tokens** | Measured |
+| `graphify benchmark` reduction (whole scoped graph) | naive full-corpus-read baseline | 5.6x fewer tokens/query (45,550 words → ~60,733 naive tokens; 911 nodes / 2,568 edges; avg ~10,925 tokens/query) | Measured |
+
+**Retrospective, not blind:** the naive queries above reuse this case's own reproduction steps
+(§"Reproduction steps"), chosen because the task's answer is already known — a disclosed limitation,
+not a controlled trial (`EVIDENCE-METHODOLOGY.md` §7). Note the smaller `graphify benchmark`
+reduction here (5.6x) than in the Open5GS or Textual cases — a real, honest data point, not
+smoothed over: FastAPI's scoped graph is denser relative to its query cost than the other two
+corpora.
+
 ## 1. Environment
 
 FastAPI was cloned to a sibling directory (`dogfood-fastapi/`), pinned to tag `0.139.2` (commit
@@ -116,14 +134,17 @@ measures the context-assembly step in isolation.
 
 ## 8. Outcome
 
-**Inference, not measured:** the package correctly surfaced the exact working exemplar
-(`callbacks=`'s full build path), the exact confirmed gap (`links` has no parameter, only a schema
-type), the exact integration point in already-centralized response-building code
+**Partially measured, partially inference:** the package correctly surfaced the exact working
+exemplar (`callbacks=`'s full build path), the exact confirmed gap (`links` has no parameter, only a
+schema type), the exact integration point in already-centralized response-building code
 (`get_openapi_path()`'s `deep_dict_update` block), and the exact spec sections that bound the fix's
-scope (the Link Object's design-time-only framing). Whether this is faster than a developer reading
-`fastapi/openapi/utils.py` and `fastapi/openapi/models.py` directly and independently locating the
-OpenAPI spec's Link Object section is a judgment call, not a controlled comparison — reported as
-inference, not measured.
+scope (the Link Object's design-time-only framing). The token-cost side of this is now measured, not
+inferred (see "Results at a glance" above): a naive grep for "callbacks" finds the exemplar but
+misses the actual `links=` integration point entirely (that block never mentions "callbacks"), and
+disambiguating `get_openapi_path()`'s real callers from grep's raw text hits takes real, avoidable
+manual work that `graphify affected` skips. Whether this token/precision difference translates to
+less *developer* time is still a judgment call, not a controlled user study — that narrower claim
+remains inference.
 
 This case also strengthens the Open5GS case's own tentative conclusion about `DEF-002`/`DEF-003`
 (§5): running the same What-L1 pipeline against a second, structurally different external
@@ -134,7 +155,10 @@ Open5GS case study's own §9 flagged as missing.
 ## 9. Limitations
 
 Single-task, single-codebase, no-live-reviewer dogfood run, same caveats as the Open5GS and Textual
-cases. No negative-control task was run for FastAPI in this pass (Stage 2 Plan requires at least one
+cases. The naive-keyword-search baseline in "Results at a glance" is real but retrospective, not
+blind — the queries reuse this case's own reproduction steps, run after the task's answer was
+already known (`EVIDENCE-METHODOLOGY.md` §7). No negative-control task was run for FastAPI in this
+pass (Stage 2 Plan requires at least one
 ordinary task for this case; the negative control lives in the Textual case per its own
 Success Criteria).
 
