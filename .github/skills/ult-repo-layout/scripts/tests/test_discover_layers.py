@@ -541,5 +541,98 @@ class TestDriftTracking(TempRepoTestCase):
         self.assertNotIn("Re-discovery", second)
 
 
+class TestPerCandidateDriftTracking(TempRepoTestCase):
+    """S40 (§17.6 per-candidate extension, PR 3): a confirmed
+    include_roots/exclude candidate that's since disappeared gets its own
+    narrowly-scoped, dated Re-discovery section naming only that candidate -
+    not a re-review of every other already-confirmed candidate in the
+    layer, and not a full section re-review when the primary path is still
+    fine."""
+
+    def _make_fixture(self):
+        for i in range(12):
+            write(self.repo_root / "specification" / f"doc-{i}.md", "# spec")
+        write(self.repo_root / "architecture" / "decisions.md", "# adr")
+        write(self.repo_root / "api-spec" / "openapi.yaml", "openapi: 3.0.0\n")
+
+    def _resolve_pending(self, artifact):
+        text = artifact.replace(
+            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
+            "decision: CONFIRM   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
+            1,
+        )
+        text = text.replace(
+            "include_roots_decision: PENDING   # ADD: architecture/ | SKIP",
+            "include_roots_decision: ADD   # ADD: architecture/ | SKIP",
+            1,
+        )
+        text = text.replace(
+            "include_roots_decision: PENDING   # ADD: api-spec/ | SKIP",
+            "include_roots_decision: ADD   # ADD: api-spec/ | SKIP",
+            1,
+        )
+        return text.replace(
+            "decision: PENDING   # CUSTOM: <path> | ACKNOWLEDGE",
+            "decision: ACKNOWLEDGE   # CUSTOM: <path> | ACKNOWLEDGE",
+            1,
+        )
+
+    def _run_discover_then_confirm(self):
+        _out_path, artifact = dl.run_discovery(self.repo_root)
+        artifact_path = self.repo_root / "context-layout-discovery.md"
+        artifact_path.write_text(self._resolve_pending(artifact), encoding="utf-8")
+        return cl.run_confirm(self.repo_root)
+
+    def test_single_drifted_candidate_gets_its_own_narrow_section(self):
+        self._make_fixture()
+        code, msgs = self._run_discover_then_confirm()
+        self.assertEqual(code, 0, msgs)
+        config = vl.load_yaml_file(self.repo_root / "context-config.yaml") or {}
+        self.assertIn("architecture/", config["layers"]["what_l2"]["include_roots"])
+        self.assertIn("api-spec/", config["layers"]["what_l2"]["include_roots"])
+
+        _out_path, stable = dl.run_discovery(self.repo_root)
+        self.assertNotIn("Re-discovery", stable)
+
+        shutil.rmtree(self.repo_root / "architecture")
+        _out_path, artifact = dl.run_discovery(self.repo_root)
+
+        self.assertIn("already confirmed - carried forward unchanged", artifact)
+        self.assertIn("include_roots_decision: ADD: architecture/   # CONFIRMED", artifact)
+        self.assertIn("include_roots_decision: ADD: api-spec/   # CONFIRMED", artifact)
+        self.assertIn(f"Re-discovery - {dl.WHAT_L2_TITLE} - candidates -", artifact)
+        self.assertNotIn(f"Re-discovery - {dl.WHAT_L2_TITLE} - 20", artifact)
+        self.assertEqual(artifact.count("Re-discovery"), 1)
+        self.assertIn("architecture/", artifact.split("Re-discovery")[1])
+        self.assertNotIn("api-spec/", artifact.split("Re-discovery")[1])
+        self.assertIn(
+            "include_roots_decision: PENDING   # ADD: architecture/ | SKIP", artifact
+        )
+
+    def test_primary_path_drift_takes_precedence_over_candidate_drift(self):
+        self._make_fixture()
+        code, msgs = self._run_discover_then_confirm()
+        self.assertEqual(code, 0, msgs)
+
+        shutil.rmtree(self.repo_root / "specification")
+        shutil.rmtree(self.repo_root / "architecture")
+        _out_path, artifact = dl.run_discovery(self.repo_root)
+
+        self.assertEqual(artifact.count("Re-discovery"), 1)
+        self.assertNotIn(f"Re-discovery - {dl.WHAT_L2_TITLE} - candidates -", artifact)
+        self.assertIn("previously confirmed path(s) no longer exist or are empty", artifact)
+
+    def test_no_drifted_candidates_produces_no_new_sections(self):
+        self._make_fixture()
+        code, msgs = self._run_discover_then_confirm()
+        self.assertEqual(code, 0, msgs)
+
+        _out_path, first = dl.run_discovery(self.repo_root)
+        _out_path, second = dl.run_discovery(self.repo_root)
+
+        self.assertNotIn("Re-discovery", first)
+        self.assertEqual(first, second)
+
+
 if __name__ == "__main__":
     unittest.main()

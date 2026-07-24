@@ -980,16 +980,21 @@ def _apply_drift_tracking(repo_root, sections, prior_confirmed, today):
     - Confirmed last time and a confirmed CONFIRM/CUSTOM path no longer has
       content -> real drift. Keep the old confirmed section (audit trail)
       and append a dated `Re-discovery` section with the fresh proposal.
+    - Confirmed last time, the main path still fine, but one or more
+      individually-confirmed `include_roots`/`exclude` candidates no longer
+      have content -> S40. Carry the settled section forward unchanged, and
+      append a narrower dated `Re-discovery - ... - candidates - <date>`
+      section naming only the drifted candidate(s), never re-opening any
+      other already-confirmed candidate in that layer.
 
     Scope note (flagged, same posture as other implementation-shape
     choices this package made): this does not detect "a materially better
-    candidate now exists" for a still-valid confirmed path, nor per-item
-    drift for individually-confirmed `include_roots`/`exclude` entries when
-    the section's main decision is itself still settled - both would
+    candidate now exists" for a still-valid confirmed path - that would
     require persisting the full historical candidate set, which the
     stamped-artifact model (by design) does not keep for argument-less
-    verbs like SKIP/ACKNOWLEDGE. Only the cheaply-reverifiable trigger the
-    Decision Package names first ("path gone, empty") is implemented."""
+    verbs like SKIP/ACKNOWLEDGE. Only the cheaply-reverifiable triggers the
+    Decision Package names ("path gone, empty", including per-candidate)
+    are implemented."""
     out = []
     handled_titles = set()
     for section in sections:
@@ -1004,24 +1009,47 @@ def _apply_drift_tracking(repo_root, sections, prior_confirmed, today):
             if f.key == "decision" and f.verb in ("CONFIRM", "CUSTOM") and f.arg
             and not _has_content(repo_root, f.arg)
         })
-        if not drifted_paths:
+        if drifted_paths:
             out.append(_carry_forward_settled_section(section.title, old_fields))
+            redisc = LayerSection(
+                f"Re-discovery - {section.title} - {today}",
+                status_lines=[
+                    f"**Status:** previously confirmed path(s) no longer exist or are "
+                    f"empty: {', '.join(drifted_paths)}. Fresh discovery below - the "
+                    f"original confirmed section above is untouched."
+                ],
+                table_header=section.table_header,
+                table=section.table,
+                decision_lines=section.decision_lines,
+                warning=section.warning,
+            )
+            out.append(redisc)
             continue
 
+        drifted_candidates = sorted({
+            (f.key, f.arg) for f in old_fields
+            if f.key in ("include_roots_decision", "exclude_decision")
+            and f.verb == "ADD" and f.arg
+            and not _has_content(repo_root, f.arg)
+        }, key=lambda kv: kv[1])
         out.append(_carry_forward_settled_section(section.title, old_fields))
-        redisc = LayerSection(
-            f"Re-discovery - {section.title} - {today}",
-            status_lines=[
-                f"**Status:** previously confirmed path(s) no longer exist or are "
-                f"empty: {', '.join(drifted_paths)}. Fresh discovery below - the "
-                f"original confirmed section above is untouched."
-            ],
-            table_header=section.table_header,
-            table=section.table,
-            decision_lines=section.decision_lines,
-            warning=section.warning,
-        )
-        out.append(redisc)
+        if drifted_candidates:
+            redisc = LayerSection(
+                f"Re-discovery - {section.title} - candidates - {today}",
+                status_lines=[
+                    f"**Status:** previously confirmed candidate(s) no longer exist "
+                    f"or are empty: "
+                    f"{', '.join(arg for _key, arg in drifted_candidates)}. Fresh "
+                    f"decision below for just these - every other already-confirmed "
+                    f"include_roots/exclude entry in this layer is untouched (§17.6 "
+                    f"S40)."
+                ],
+                decision_lines=[
+                    f"{key}: PENDING   # ADD: {arg} | SKIP"
+                    for key, arg in drifted_candidates
+                ],
+            )
+            out.append(redisc)
 
     # Preserve prior Re-discovery sections verbatim - discover_layers()
     # never regenerates them itself (they're historical audit trail once

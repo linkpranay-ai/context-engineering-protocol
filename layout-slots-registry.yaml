@@ -23,6 +23,13 @@
 # Mirrors context-engineering/CONTEXT-ENGINEERING-DESIGN.md §16.4's table.
 # "{workspace_root}" below is literal -- substituted at resolution time per
 # §16.2 step 3 (see ult-repo-layout/SKILL.md "Resolved defaults per slot").
+#
+# The four layer paths (layers.what_l2, layers.what_l1, how_dimension.how_l2,
+# how_dimension.how_l1) are deliberately NOT project_layout.slots entries
+# here (§17.1: no content-based marker signature, legitimately absent/
+# opt-in, multi-root by nature). As of CEP-DP-001H, discover_layers.py's
+# `discover`/`confirm-layers` modes cover their discovery and confirmation
+# instead -- see ult-repo-layout/SKILL.md.
 
 schema_version: 1
 
