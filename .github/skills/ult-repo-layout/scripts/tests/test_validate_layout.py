@@ -295,6 +295,31 @@ class TestWhatL2Resolution(unittest.TestCase):
             vl.resolve_what_l2_exclude(config), ["contexts/", "inputs/", "cache/"]
         )
 
+    # -- resolve_what_l2_include_roots --------------------------------------
+
+    def test_include_roots_default_is_empty(self):
+        self.assertEqual(vl.resolve_what_l2_include_roots({}), [])
+        self.assertEqual(
+            vl.resolve_what_l2_include_roots({"layers": {"what_l2": {}}}), []
+        )
+
+    def test_include_roots_non_list_value_is_ignored(self):
+        config = {"layers": {"what_l2": {"include_roots": "specs/legacy/"}}}
+        self.assertEqual(vl.resolve_what_l2_include_roots(config), [])
+
+    def test_include_roots_returns_configured_list(self):
+        config = {
+            "layers": {"what_l2": {"include_roots": ["specs/legacy/", "specs/archive/"]}}
+        }
+        self.assertEqual(
+            vl.resolve_what_l2_include_roots(config),
+            ["specs/legacy/", "specs/archive/"],
+        )
+
+    def test_include_roots_drops_non_string_entries(self):
+        config = {"layers": {"what_l2": {"include_roots": ["specs/legacy/", 3, None]}}}
+        self.assertEqual(vl.resolve_what_l2_include_roots(config), ["specs/legacy/"])
+
     # -- resolve_what_l2_index_path -----------------------------------------
 
     def test_index_path_default_without_config(self):
@@ -573,6 +598,67 @@ class TestLayerPathsPopulated(unittest.TestCase):
             problems = vl.check_layer_paths_populated(root, config)
             self.assertEqual(len(problems), 1)
             self.assertIn("how_l1.path", problems[0])
+
+
+class TestLayerCandidatePathsPopulated(unittest.TestCase):
+    """D23 §17.8 C-2 addendum (per-candidate extension, second adversarial
+    review): once `include_roots` entries exist, WARN if any of them
+    individually doesn't exist or is empty - the primary-path check above
+    never inspects them. `exclude` entries are out of scope for this
+    function (covered solely by check_what_l2_exclude_typos)."""
+
+    def test_no_include_roots_configured_is_a_no_op(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(vl.check_layer_candidate_paths_populated(root, {}), [])
+
+    def test_single_populated_entry_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "specs" / "legacy" / "old.md", "# old\n")
+            config = {"layers": {"what_l2": {"include_roots": ["specs/legacy/"]}}}
+            self.assertEqual(vl.check_layer_candidate_paths_populated(root, config), [])
+
+    def test_missing_entry_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {"layers": {"what_l2": {"include_roots": ["specs/legacy/"]}}}
+            problems = vl.check_layer_candidate_paths_populated(root, config)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("include_roots[0]", problems[0])
+            self.assertIn("does not exist", problems[0])
+
+    def test_empty_entry_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "specs" / "legacy").mkdir(parents=True)
+            config = {"layers": {"what_l2": {"include_roots": ["specs/legacy/"]}}}
+            problems = vl.check_layer_candidate_paths_populated(root, config)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("include_roots[0]", problems[0])
+            self.assertIn("empty", problems[0])
+
+    def test_multiple_entries_only_bad_one_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "specs" / "legacy" / "old.md", "# old\n")
+            config = {
+                "layers": {
+                    "what_l2": {
+                        "include_roots": ["specs/legacy/", "specs/archive/"]
+                    }
+                }
+            }
+            problems = vl.check_layer_candidate_paths_populated(root, config)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("include_roots[1]", problems[0])
+            self.assertIn("specs/archive/", problems[0])
+
+    def test_exclude_entries_never_flagged_by_this_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {"layers": {"what_l2": {"exclude": ["nonexistent/"]}}}
+            self.assertEqual(vl.check_layer_candidate_paths_populated(root, config), [])
 
 
 class TestFindMarkers(unittest.TestCase):

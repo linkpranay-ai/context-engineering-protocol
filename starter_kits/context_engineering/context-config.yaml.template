@@ -17,6 +17,11 @@ layers:
   what_l2:
     enabled: true
     path: <requirements docs root, e.g. docs/requirements/>
+                          # This path, and exclude/include_roots below, can be
+                          # discovered and confirmed for you instead of hand-
+                          # editing: run ult-repo-layout's discover_layers.py
+                          # then confirm_layers.py (D23 §17.2-§17.6; see
+                          # ult-repo-layout/SKILL.md).
                           # D21 §16.5: if layout.workspace_root is set and this
                           # key is left absent/unset, the default becomes
                           # {workspace_root}/ (the whole workspace subtree)
@@ -64,6 +69,10 @@ layers:
                         # (scripts/md_index.py — zero-LLM extraction, the
                         # "graphify for markdown") on both-layers-gap topics.
     path: <external reference root, e.g. specs/external/>
+                        # Once enabled: true above, this path can be discovered
+                        # and confirmed for you instead of hand-editing — run
+                        # discover_layers.py then confirm_layers.py (D23
+                        # §17.2-§17.6; see ult-repo-layout/SKILL.md).
     md_index_profile: generic  # generic | 3gpp | rfc | ieee | <your-profile>.json
                         # Selects scripts/profiles/<name>.json, which governs
                         # clause-id parsing and cross-reference patterns for this
@@ -115,6 +124,10 @@ how_dimension:
                         # once per package, not per aspect. No web-fallback chain —
                         # Step 2's existing D8 gap-handling prompt substitutes for one.
     path: <process standards root, e.g. org/process-standards/>
+                        # Once enabled: true above, this path can be discovered
+                        # and confirmed for you instead of hand-editing — run
+                        # discover_layers.py then confirm_layers.py (D23
+                        # §17.2-§17.6; see ult-repo-layout/SKILL.md).
     md_index_profile: generic  # generic | 3gpp | rfc | ieee | <your-profile>.json
                         # Same mechanism as what_l1.md_index_profile above.
     index_path: specs-out/how_l1_index.json  # build artifact (gitignore-able), distinct

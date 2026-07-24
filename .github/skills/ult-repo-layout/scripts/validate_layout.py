@@ -425,6 +425,18 @@ def resolve_what_l2_exclude(config):
     return []
 
 
+def resolve_what_l2_include_roots(config):
+    """`layers.what_l2.include_roots` (§16.7): list of additional directory
+    paths, relative to the repo root, indexed wholesale alongside
+    `what_l2.path`. Defaults to `[]`."""
+    what_l2 = (config.get("layers") or {}).get("what_l2")
+    if isinstance(what_l2, dict):
+        include_roots = what_l2.get("include_roots")
+        if isinstance(include_roots, list):
+            return [r for r in include_roots if isinstance(r, str)]
+    return []
+
+
 def resolve_what_l2_index_path(config):
     """`layers.what_l2.index_path` (§16.4): the explicit config value if set,
     else `{workspace_root}/cache/specs-out/l2_index.json` if
@@ -679,6 +691,42 @@ def check_layer_paths_populated(repo_root, config):
 
 
 # ---------------------------------------------------------------------------
+# Layer candidate path population check (D23 §17.8 per-candidate extension,
+# second adversarial review C-2)
+# ---------------------------------------------------------------------------
+
+def check_layer_candidate_paths_populated(repo_root, config):
+    """§17.8 C-2 addendum (per-candidate extension, D23 second adversarial
+    review): once `include_roots` entries exist, the shipped primary-path
+    check above never inspects them - only `what_l2.path` itself. WARN if any
+    confirmed `include_roots[i]` entry doesn't exist or is empty, exactly the
+    same silent-empty-layer risk §17.8 exists to catch for the primary path.
+    `exclude` entries are deliberately not duplicated here:
+    `check_what_l2_exclude_typos` already WARNs when an exclude entry matches
+    nothing existing, and an empty-but-existing excluded directory is a
+    harmless no-op with no actionable claim behind a WARN."""
+    problems = []
+    target_base = Path(repo_root)
+    for i, rel in enumerate(resolve_what_l2_include_roots(config)):
+        label = f"layers.what_l2.include_roots[{i}]"
+        target = target_base / rel.rstrip("/")
+        if not target.exists():
+            problems.append(
+                f"{label} = '{rel}' does not exist (§17.8 per-candidate "
+                f"extension) - this content root will silently resolve as "
+                f"empty. Fix the path, remove the entry, or restore the "
+                f"directory."
+            )
+        elif target.is_dir() and not any(target.rglob("*")):
+            problems.append(
+                f"{label} = '{rel}' exists but is empty (§17.8 per-candidate "
+                f"extension) - this content root will silently resolve as "
+                f"empty. Add content or remove the entry."
+            )
+    return problems
+
+
+# ---------------------------------------------------------------------------
 # Config-vanished git-history check (§15.9 #6, S4)
 # ---------------------------------------------------------------------------
 
@@ -912,6 +960,11 @@ def validate(repo_root):
 
     # Layer path population check (D23 §17.8, S28) - non-blocking.
     for problem in check_layer_paths_populated(repo_root, config):
+        report.append(f"WARN: {problem}")
+
+    # Layer candidate path population check (D23 §17.8 per-candidate
+    # extension, S40) - non-blocking.
+    for problem in check_layer_candidate_paths_populated(repo_root, config):
         report.append(f"WARN: {problem}")
 
     # layout-slots-registry.yaml consistency (D21 §16.8, Phase 3e) - no-op if
