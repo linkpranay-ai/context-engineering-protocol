@@ -1,0 +1,136 @@
+context_package:
+  id: response-links-openapi_feature-add_20260724
+  task: >
+    Add a first-class `links` parameter to the path-operation decorators
+    (`@app.get`, `@app.post`, `APIRouter` methods, etc.), so a developer can
+    declare OpenAPI Link Objects (RFC 6733-style design-time links between a
+    response and a follow-up operation) the same direct way they already
+    declare OpenAPI callbacks via the existing `callbacks=` parameter —
+    instead of only being reachable through the generic `responses=` raw-dict
+    override or `openapi_extra`.
+  scope:
+    feature: OpenAPI response Link Object support on path operations
+    task_type: feature-add
+    new_or_existing: existing
+    out_of_scope: >
+      Any change to the already-shipped `callbacks=` parameter or its build
+      path; Starlette's routing layer; the `openapi_extra` escape hatch
+      itself (stays available regardless); adding runtime link-following
+      behavior (OpenAPI Link Objects are design-time/documentation metadata
+      only, per the spec — see aspect a4).
+  aspects:
+    - aspect_id: a1
+      name: Baseline — Callback Object already has full first-class parameter support (working exemplar)
+      what_l3_covered: true
+      what_l2_covered: true
+      what_l1_covered: true
+    - aspect_id: a2
+      name: Gap — Link Object has no dedicated parameter, only reachable via responses=/openapi_extra
+      what_l3_covered: true
+      what_l2_covered: false
+      what_l1_covered: false
+    - aspect_id: a3
+      name: Integration point — get_openapi_path()'s per-status-code response-merge block
+      what_l3_covered: true
+      what_l2_covered: false
+      what_l1_covered: false
+    - aspect_id: a4
+      name: External spec — OpenAPI 3.1.0 Link Object, Callback Object, and Response Object definitions
+      what_l3_covered: false
+      what_l2_covered: false
+      what_l1_covered: true
+    - aspect_id: a5
+      name: Docs — dedicated callbacks tutorial page exists; no equivalent for links
+      what_l3_covered: false
+      what_l2_covered: true
+      what_l1_covered: false
+  generated_at: "2026-07-24T00:00:00Z"
+  human_approved: true
+  content_hash: 255b3b82
+  what_l1_fallback_count: 0
+  llm_knowledge_count: 0
+  web_fallback_count: 0
+  conflicts_count: 0
+  llm_scaffold_count: 0
+  org_convention_ref: org-conventions/feature-add.yaml
+  summary:
+    - "What-L3: `callbacks=` is a fully-wired first-class parameter — declared on every path-operation decorator (fastapi/routing.py, fastapi/applications.py), threaded onto `APIRoute.callbacks` (fastapi/routing.py:2517), and expanded into nested OpenAPI Path/Operation objects inside `get_openapi_path()` (fastapi/openapi/utils.py:323-339)."
+    - "What-L3: `links` (an OpenAPI Response Object field, same family as `callbacks`) has zero dedicated parameter anywhere in fastapi/routing.py or fastapi/applications.py — the only way to set it today is the generic `responses={200: {\"links\": {...}}}` raw-dict override, merged via `deep_dict_update()` at fastapi/openapi/utils.py:410-453, or `openapi_extra`."
+    - "What-L3: the real integration point for a first-class `links=` parameter is that same block (fastapi/openapi/utils.py:410-453) — a built links dict would need to `deep_dict_update()` into `openapi_response` before the user's own `responses=` override is applied, so a manual override can still take precedence, mirroring how `callbacks=` already composes with `openapi_extra`."
+    - "What-L1: OpenAPI 3.1.0's Link Object (`specs/external/openapi-3.1.0.md` §\"Link Object\", line 2026) is explicitly a design-time/documentation construct with no runtime-invocation guarantee — bounding the fix to declarative metadata generation, not runtime link-following behavior."
+    - "What-L2: `docs/en/docs/advanced/openapi-callbacks.md` is a full dedicated tutorial page (186 lines) with a matching `docs_src/openapi_callbacks/` example; no equivalent page or example exists for links — confirmed by grep, a complete and expected What-L2 gap for this feature."
+    - "No conflicts detected — What-L1 (Link Object is optional, additive metadata) and What-L3 (the existing `responses=`/`deep_dict_update` merge point already accepts arbitrary additional per-status-code fields) agree on scope and shape."
+    - "Decision (self-resolved, no live user available in this dogfood run): mirror the `callbacks=` parameter's existing shape and call site exactly — a typed `links: dict[int | str, dict] | None` parameter merged into the same per-status-code response dict `callbacks=` already flows through — rather than inventing a new mechanism."
+  context_items:
+    - ctx_id: ctx_001
+      layer: what_l3
+      source: fastapi/routing.py (callbacks= parameter declarations, e.g. L2296, L3142, L3561; APIRoute.callbacks assignment L2517)
+      aspect: a1
+      content: "`callbacks:` is declared as a typed parameter (`list[BaseRoute] | None`) on every path-operation registration method and threaded straight onto `APIRoute.callbacks`."
+      confidence: EXTRACTED
+    - ctx_id: ctx_002
+      layer: what_l3
+      source: fastapi/openapi/utils.py:323-339 (get_openapi_path)
+      aspect: a1
+      content: "`if route.callbacks:` recursively calls `get_openapi_path()` on each callback route and nests the result under `operation[\"callbacks\"]` — the full first-class build path for the exemplar."
+      confidence: EXTRACTED
+    - ctx_id: ctx_003
+      layer: what_l3
+      source: fastapi/openapi/models.py:273, 282, 289, 299 (Link, Response.links, Operation.callbacks)
+      aspect: a2
+      content: "`Link` and `Response.links` exist in the pydantic OpenAPI schema/validation layer, but grep across fastapi/*.py and fastapi/openapi/*.py finds zero other reference to `links` anywhere outside models.py — confirmed via `grep -rn \"Link(\\|\\.links\\b\" fastapi/`."
+      confidence: EXTRACTED
+    - ctx_id: ctx_004
+      layer: what_l3
+      source: fastapi/openapi/utils.py:410-453 (the `if route.responses:` block)
+      aspect: a3
+      content: "The exact merge point where a per-status-code raw-dict override is `deep_dict_update()`'d into the generated `openapi_response` — the real integration point for a first-class `links=` parameter."
+      confidence: EXTRACTED
+    - ctx_id: ctx_005
+      layer: what_l3
+      source: "graphify affected get_openapi_path (depth 2)"
+      aspect: a3
+      content: "Blast radius of `get_openapi_path()`: exactly two callers in the graphed scope — `get_openapi()` (fastapi/openapi/utils.py:523) and `FastAPI.openapi()` (fastapi/applications.py:1070). No other dependents."
+      confidence: INFERRED
+    - ctx_id: ctx_006
+      layer: what_l1
+      source: specs/external/openapi-3.1.0.md, "Link Object" section, line 2026
+      aspect: a4
+      content: "Full Link Object definition: operationRef/operationId/parameters/requestBody/description/server fixed fields; explicitly a design-time construct with no runtime invocation guarantee."
+      confidence: EXTRACTED
+    - ctx_id: ctx_007
+      layer: what_l1
+      source: specs/external/openapi-3.1.0.md, "Callback Object" section, line 1858
+      aspect: a4
+      content: "Callback Object definition — the exemplar's spec-level counterpart, confirming both objects are peer constructs in the same Components/Response family."
+      confidence: EXTRACTED
+    - ctx_id: ctx_008
+      layer: what_l2
+      source: docs/en/docs/advanced/openapi-callbacks.md (186 lines) + docs_src/openapi_callbacks/
+      aspect: a5
+      content: "A complete dedicated tutorial page and runnable example exist for callbacks; grep for `links=`/`response_links` across docs/en/docs/ and docs_src/ returns zero matches — confirmed complete gap."
+      confidence: EXTRACTED
+    - ctx_id: ctx_009
+      layer: constraints
+      source: pyproject.toml (ruff/mypy config), CONTRIBUTING via docs/en/docs/contributing.md
+      aspect: a3
+      content: "Ruff + mypy strict typing enforced repo-wide; CLA and MIT license apply to all contributions."
+      confidence: EXTRACTED
+  conflicts_detected: []
+  gaps_detected:
+    - a2 (dictionary/parameter gap — the deliberate task target, expected)
+    - a5 (What-L2 complete gap, expected)
+  open_questions: []
+  decisions_log:
+    - topic: new dedicated parameter vs. extending the existing responses= override
+      decided: >
+        mirror callbacks='s existing shape exactly (a new typed parameter,
+        threaded through the same call chain, merged at the same
+        get_openapi_path() site) rather than only documenting the
+        already-possible responses={...: {"links": ...}} workaround, since
+        the task is explicitly to close the ergonomic parity gap between the
+        two OpenAPI response-adjacent constructs.
+  non_regression_risks:
+    - "get_openapi_path()'s only two callers (get_openapi(), FastAPI.openapi()) are both within the graphed scope — no other blast radius (graphify affected, depth 2)."
+    - "The new links= build logic must run before the existing `if route.responses:` deep_dict_update block, so a user's own manual responses= override of \"links\" still wins — matching the existing openapi_extra-overrides-everything precedent."
+    - "callbacks='s own build path (fastapi/openapi/utils.py:323-339) must stay untouched — this fix is additive, not a refactor of the exemplar."

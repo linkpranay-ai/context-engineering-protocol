@@ -80,6 +80,11 @@ its own numbered reproduction steps and pinned ref — this guide does not resta
   external-spec source. One ordinary task (Error-Message AVP gap on the S6a interface) —
   reproduction steps §"Reproduction steps" in that file. AGPL-3.0 no-vendoring rule applies: no
   Open5GS source, no RFC text, and no generated-package artifact are committed alongside it.
+- [`case-studies/fastapi/CASE-STUDY.md`](../case-studies/fastapi/CASE-STUDY.md) — fastapi/fastapi
+  (MIT), tag `0.139.2`, plus the OpenAPI Specification 3.1.0 (Apache-2.0) as a What-L1 external-spec
+  source. One ordinary task (first-class `links=` parameter parity with the existing `callbacks=`
+  parameter) — reproduction steps §"Reproduction steps" in that file. MIT-permits-committing rule
+  applies: generated-package artifact and `NOTICE.md` are committed alongside it.
 
 ## What this guide does not cover
 
