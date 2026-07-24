@@ -50,6 +50,7 @@ CLI:
 """
 
 import argparse
+import datetime
 import os
 import re
 import sys
@@ -108,6 +109,24 @@ MEDIUM_CONFIDENCE_FILE_FLOOR = 3
 # candidates, never suppress a name-matched one (name_match alone still
 # qualifies regardless of file count) or a genuinely well-populated one.
 MIN_DOC_COUNT_FOR_UNNAMED_MATCH = 2
+
+# Section titles - named constants so confirm_layers.py (CEP-DP-001H PR 2)
+# can import them rather than duplicating the literal strings.
+WHAT_L2_TITLE = "What-L2 - project's own requirements/spec docs"
+HOW_L2_TITLE = "How-L2 - this project's own compiled conventions"
+WHAT_L1_TITLE = "What-L1 - external reference material (standards/specs this project didn't author)"
+HOW_L1_TITLE = "How-L1 - org-wide process standards"
+COLLISION_TITLE = "Cross-layer path collisions (S30, D-017/D-018)"
+
+# Maps each primary layer section's title to its dotted context-config.yaml
+# base key - confirm_layers.py (CEP-DP-001H PR 2) uses this to resolve a
+# section's decision fields to config keys without a second lookup table.
+TITLE_TO_BASE_KEY = {
+    WHAT_L2_TITLE: "layers.what_l2",
+    HOW_L2_TITLE: "how_dimension.how_l2",
+    WHAT_L1_TITLE: "layers.what_l1",
+    HOW_L1_TITLE: "how_dimension.how_l1",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +346,7 @@ def discover_what_l2(repo_root, config):
     if configured_path and configured_path.rstrip("/") != unconfigured_default.rstrip("/"):
         if _has_content(repo_root, configured_path):
             return LayerSection(
-                "What-L2 - project's own requirements/spec docs",
+                WHAT_L2_TITLE,
                 status_lines=["**Status:** hand-configured already."],
                 notices=[
                     f"`what_l2.path` is set to `{configured_path}`, which is not the "
@@ -342,7 +361,7 @@ def discover_what_l2(repo_root, config):
 
 
 def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
-    section_title = "What-L2 - project's own requirements/spec docs"
+    section_title = WHAT_L2_TITLE
     exclude = set(e.rstrip("/") for e in vl.resolve_what_l2_exclude(config))
     wr_dir = Path(repo_root) / wr
 
@@ -418,7 +437,7 @@ def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
 
 
 def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
-    section_title = "What-L2 - project's own requirements/spec docs"
+    section_title = WHAT_L2_TITLE
 
     if _has_content(repo_root, default_path):
         section = LayerSection(
@@ -577,7 +596,7 @@ def _render_include_roots(candidates, primary_path):
 
 def discover_how_l2(repo_root, config):
     repo_root = Path(repo_root)
-    section_title = "How-L2 - this project's own compiled conventions"
+    section_title = HOW_L2_TITLE
     configured_path = None
     how_l2 = (config.get("how_dimension") or {}).get("how_l2")
     if isinstance(how_l2, dict) and isinstance(how_l2.get("path"), str) and how_l2["path"]:
@@ -750,7 +769,7 @@ def _discover_opt_in_layer(repo_root, config, *, section_title, config_section_g
 def discover_what_l1(repo_root, config):
     return _discover_opt_in_layer(
         repo_root, config,
-        section_title="What-L1 - external reference material (standards/specs this project didn't author)",
+        section_title=WHAT_L1_TITLE,
         config_section_getter=lambda c: (c.get("layers") or {}).get("what_l1"),
         resolve_path=vl.resolve_what_l1_path,
         resolve_enabled=vl.resolve_what_l1_enabled,
@@ -762,7 +781,7 @@ def discover_what_l1(repo_root, config):
 def discover_how_l1(repo_root, config):
     return _discover_opt_in_layer(
         repo_root, config,
-        section_title="How-L1 - org-wide process standards",
+        section_title=HOW_L1_TITLE,
         config_section_getter=lambda c: (c.get("how_dimension") or {}).get("how_l1"),
         resolve_path=vl.resolve_how_l1_path,
         resolve_enabled=vl.resolve_how_l1_enabled,
@@ -818,7 +837,7 @@ def check_cross_layer_collisions(config, *, what_l2_path=None, what_l2_roots=Non
 def render_collision_section(collisions):
     if not collisions:
         return None
-    section = LayerSection("Cross-layer path collisions (S30, D-017/D-018)")
+    section = LayerSection(COLLISION_TITLE)
     section.status_lines = [
         "Checked every resolved/proposed layer path (including What-L2's "
         "include_roots candidates) pairwise for equality or nesting. This "
@@ -888,16 +907,152 @@ def render_discovery_artifact(repo_name, sections):
     return "\n".join(lines)
 
 
+def _load_prior_confirmed_state(artifact_path):
+    """§17.6 drift tracking's memory of what a human already decided: read
+    an existing context-layout-discovery.md (if any) and return
+    {section_title: [Field, ...]} for every section whose decision-bearing
+    fields are ALL already `# CONFIRMED ...`-stamped. A section with any
+    still-PENDING, unstamped, or invalid field is omitted - nothing was
+    settled there last time, so this run's fresh discovery stands as-is,
+    unchanged from today's (pre-§17.6) behavior.
+
+    Imports confirm_layers locally (not at module level) to avoid a
+    load-order hazard in their mutual, function-body-only circular import -
+    confirm_layers.py imports this module too, and by the time this
+    function is actually called (never at import time), both modules are
+    already fully loaded."""
+    if not artifact_path.exists():
+        return {}
+    import confirm_layers as cl
+
+    _lines, fields = cl.parse_artifact(artifact_path.read_text(encoding="utf-8"))
+    by_section = {}
+    for f in fields:
+        by_section.setdefault(f.section_title, []).append(f)
+
+    confirmed = {}
+    for title, section_fields in by_section.items():
+        all_confirmed = True
+        for f in section_fields:
+            try:
+                f.resolve()
+            except cl.FieldError:
+                all_confirmed = False
+                break
+            if not f.already_confirmed:
+                all_confirmed = False
+                break
+        if all_confirmed and section_fields:
+            confirmed[title] = section_fields
+    return confirmed
+
+
+def _carry_forward_settled_section(title, old_fields):
+    """Rebuild a LayerSection reproducing exactly the stamped decision
+    lines from a prior run, so the artifact keeps recording the confirmed
+    history verbatim (and stays idempotent - re-parsing this rendering
+    finds the same CONFIRMED stamps again next time)."""
+    decision_lines = [f"{f.key}: {f.raw_value}   # {f.comment}" for f in old_fields]
+    return LayerSection(
+        title,
+        status_lines=["**Status:** already confirmed - carried forward unchanged (§17.6)."],
+        decision_lines=decision_lines,
+    )
+
+
+def _apply_drift_tracking(repo_root, sections, prior_confirmed, today):
+    """§17.6: never re-litigate a section that was fully confirmed last
+    time unless a confirmed path has genuinely disappeared. For each fresh
+    section:
+    - Not confirmed last time -> use the fresh result as-is, same as today.
+    - Confirmed last time, every confirmed CONFIRM/CUSTOM path still has
+      content -> carry the old confirmed section forward untouched. This
+      covers two fresh-result shapes identically: a NOTICE-only result
+      (existing precedence check already re-derives the settled state,
+      H4: NOTICE-only is never drift) and a fresh PENDING re-proposal
+      (stale noise from re-scanning with no memory of a
+      SKIP/ACKNOWLEDGE/DISABLE choice, which config can't record). Always
+      re-asserting the carried-forward section - never adopting the fresh
+      NOTICE rendering as-is - is what keeps the CONFIRMED record alive in
+      the artifact indefinitely; without this, a NOTICE-collapsed section
+      loses its stamped decision line after one cycle, and a later drift
+      would go undetected because there is nothing left to compare against.
+    - Confirmed last time and a confirmed CONFIRM/CUSTOM path no longer has
+      content -> real drift. Keep the old confirmed section (audit trail)
+      and append a dated `Re-discovery` section with the fresh proposal.
+
+    Scope note (flagged, same posture as other implementation-shape
+    choices this package made): this does not detect "a materially better
+    candidate now exists" for a still-valid confirmed path, nor per-item
+    drift for individually-confirmed `include_roots`/`exclude` entries when
+    the section's main decision is itself still settled - both would
+    require persisting the full historical candidate set, which the
+    stamped-artifact model (by design) does not keep for argument-less
+    verbs like SKIP/ACKNOWLEDGE. Only the cheaply-reverifiable trigger the
+    Decision Package names first ("path gone, empty") is implemented."""
+    out = []
+    handled_titles = set()
+    for section in sections:
+        handled_titles.add(section.title)
+        old_fields = prior_confirmed.get(section.title)
+        if not old_fields:
+            out.append(section)
+            continue
+
+        drifted_paths = sorted({
+            f.arg for f in old_fields
+            if f.key == "decision" and f.verb in ("CONFIRM", "CUSTOM") and f.arg
+            and not _has_content(repo_root, f.arg)
+        })
+        if not drifted_paths:
+            out.append(_carry_forward_settled_section(section.title, old_fields))
+            continue
+
+        out.append(_carry_forward_settled_section(section.title, old_fields))
+        redisc = LayerSection(
+            f"Re-discovery - {section.title} - {today}",
+            status_lines=[
+                f"**Status:** previously confirmed path(s) no longer exist or are "
+                f"empty: {', '.join(drifted_paths)}. Fresh discovery below - the "
+                f"original confirmed section above is untouched."
+            ],
+            table_header=section.table_header,
+            table=section.table,
+            decision_lines=section.decision_lines,
+            warning=section.warning,
+        )
+        out.append(redisc)
+
+    # Preserve prior Re-discovery sections verbatim - discover_layers()
+    # never regenerates them itself (they're historical audit trail once
+    # confirmed), so without this they would silently vanish the next time
+    # `discover` runs.
+    for title, old_fields in prior_confirmed.items():
+        if title in handled_titles or not title.startswith("Re-discovery - "):
+            continue
+        out.append(_carry_forward_settled_section(title, old_fields))
+
+    return out
+
+
 def run_discovery(repo_root, repo_name=None):
     """Run discovery and write context-layout-discovery.md at
     `{workspace_root}/` if set (well-formed), else repo root (§17.2's
-    placement convention, mirroring context-config.yaml)."""
+    placement convention, mirroring context-config.yaml). Applies §17.6
+    drift tracking against any existing artifact before writing - see
+    `_apply_drift_tracking`."""
     repo_root = Path(repo_root).resolve()
     sections, config = discover_layers(repo_root)
     wr = vl._normalize_workspace_root(config)
     out_dir = (repo_root / wr) if wr and wr != "." else repo_root
-    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "context-layout-discovery.md"
+
+    prior_confirmed = _load_prior_confirmed_state(out_path)
+    if prior_confirmed:
+        today = datetime.date.today().isoformat()
+        sections = _apply_drift_tracking(repo_root, sections, prior_confirmed, today)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
     artifact = render_discovery_artifact(repo_name or repo_root.name, sections)
     out_path.write_text(artifact, encoding="utf-8")
     return out_path, artifact
