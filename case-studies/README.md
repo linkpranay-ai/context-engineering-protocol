@@ -20,5 +20,6 @@ deliberate negative control, chosen to show a situation where this protocol adds
 
 ## Synthesis
 
-Once at least three cases are published, [`SYNTHESIS.md`](SYNTHESIS.md) will compare them —
-what held across cases, what didn't, and what that implies for this protocol's actual claims.
+With all three cases published and evidence-hardened, [`SYNTHESIS.md`](SYNTHESIS.md) compares
+them — what held across cases, what didn't, and what that implies for this protocol's actual
+claims.
