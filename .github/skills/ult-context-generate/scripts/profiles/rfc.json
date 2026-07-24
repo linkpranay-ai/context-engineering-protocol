@@ -1,6 +1,6 @@
 {
   "name": "rfc",
-  "description": "IETF RFC house style. Headings are dotted-numeric, optionally followed by a literal '.' before the title (e.g. '5.2.2.  Title' or '5.2.2 Title'). Cross-refs appear in prose as 'Section N.M' / 'Sections N and M' and '(see Section N.M)'.",
+  "description": "IETF RFC house style. Headings are dotted-numeric, optionally followed by a literal '.' before the title (e.g. '5.2.2.  Title' or '5.2.2 Title'). Cross-refs appear in prose as 'Section N.M' / 'Sections N and M' and '(see Section N.M)'. Requires markdown-ified input: this profile only parses clause IDs and cross-refs out of headings already written as real ATX ('#') or Setext ('===='/'----') Markdown syntax -- it does not detect raw flush-left plaintext headings (e.g. unconverted RFC-editor .txt). Markdown-ify plaintext sources first.",
   "clause_id_regex": "^(\\d+(?:\\.\\d+)*)\\.?\\s+(.+)$",
   "cross_ref_patterns": [
     {"regex": "\\bSections?\\s+(\\d+(?:\\.\\d+)*)\\b", "kind": "section"},

@@ -59,16 +59,34 @@ file is also accepted), parses each, and writes the JSON index to `-o`.
   **and** was built with the same profile, print "up to date" and exit 0 **without
   rewriting**. Otherwise rebuild. Mirrors graphify's build-once / incremental behaviour.
 
+With a plaintext-house-style profile (`rfc`/`3gpp`/`ieee`), `index` also prints a warning
+to stderr for any file whose heading count is anomalously low relative to its line count
+(over 150 lines/heading, on files of 200+ lines). Those profiles only parse clause IDs and
+cross-refs out of headings already written as real ATX (`#`)/Setext Markdown syntax — they
+do not detect raw flush-left plaintext headings (e.g. unconverted RFC-editor `.txt`). A
+warning here usually means the source needs markdown-ifying before indexing, not that the
+profile is broken.
+
 ### `query`
 
 Given a built index and a space-separated list of **OR'd** search terms (the gap topic
 plus curated synonyms — exactly what `ult-context-generate` Step 7.1 does today via
-grep), find sections whose **content** (body text, scoped to each section's known
-`section_bounds`) or title contains any term, ranked by total match count (descending).
+grep), find sections whose **content** or title contains any term, ranked by total
+match count (descending).
+
+Content is scored against each heading's **own direct content only** — up to the next
+heading of any level, not its full `section_bounds`. `section_bounds` (by the documented
+convention below) extends through every nested child section too, so scoring the raw
+match count over the full `section_bounds` range would make an ancestor heading
+accumulate all of its descendants' matches and always outrank the specific subsection a
+query is actually looking for. Since children are separately queryable/rankable as their
+own results, narrowing the *scoring* window to a heading's own content loses no coverage
+— it only stops that double-counting. The `section_bounds` value reported in each result
+is unchanged; only what gets scanned for a match count is narrower.
 
 The index does **not** store section text — `query` re-opens each source file and scans
-only the already-known `section_bounds` line range. Still zero-LLM, just file I/O.
-TOC-flagged headings (`is_toc: true`) are skipped in query results.
+only the relevant line ranges. Still zero-LLM, just file I/O. TOC-flagged headings
+(`is_toc: true`) are skipped in query results.
 
 Each result carries `file`, `clause_id`, `title`, `heading_id`, `line` (the heading
 line), `section_bounds`, `match_count`, and the section's **resolved** `cross_refs` —

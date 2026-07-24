@@ -84,14 +84,21 @@ detector gap) did **not** recur here, because the OpenAPI Specification's canoni
 already real ATX Markdown — no conversion workaround was needed, and heading detection worked
 correctly out of the box (141 real headings, first try). This corroborates PR2's own hypothesis
 that `DEF-002` is specific to raw plaintext house styles (like RFC-editor `.txt`), not a general
-Markdown-indexing defect. `DEF-003` (ranking favoring ancestor headings over descendants), by
-contrast, **did** recur: querying `"Link Object"` against the now-correctly-indexed spec ranked the
-target section 6th, behind four top-level ancestor chapters and one unrelated sibling — the same
-workaround (direct lookup by the target section, bypassing the ranked query) applied. This is
-useful corroborating evidence that `DEF-003` generalizes across both document styles tested so far,
-as its original entry speculated. Neither observation is logged as a new defect; both are recorded
-against the existing `DEF-002`/`DEF-003` entries in the governance-side defect log, not duplicated
-here.
+Markdown-indexing defect; `DEF-002` has since been partially fixed (a low-heading-density warning
+for the plaintext-house-style profiles, since this run confirmed real markdown input triggers no
+false warning). `DEF-003` (ranking favoring ancestor headings over descendants), by contrast,
+**did** recur at the time: querying `"Link Object"` against the now-correctly-indexed spec ranked
+the target section 6th, behind four top-level ancestor chapters and one unrelated sibling — the same
+workaround (direct lookup by the target section, bypassing the ranked query) applied. This was
+useful corroborating evidence that `DEF-003` generalized across both document styles tested, as its
+original entry speculated, and `DEF-003` has since been fixed at the tool level: re-running this
+exact query against the rebuilt index confirms the four dominant ancestor chapters no longer match
+at all (their own direct content never mentioned "Link" or "Object"), though the target section
+still doesn't crack the top ranks — a separate, distinct raw-term-specificity limitation, logged
+fresh as `DEF-004` (Low, deferred) rather than folded into `DEF-003`, since "Object" recurs
+throughout many sibling sections' own legitimate prose. The direct-lookup workaround above still
+fully applies. All four observations are recorded against `DEF-002`/`DEF-003`/`DEF-004` in the
+governance-side defect log, not duplicated here.
 
 ## 6. Approval decision
 
@@ -137,8 +144,12 @@ CEP's gap/conflict checks and `graphify affected` blast-radius check behaved cor
 mixed framework/docs/tests codebase, once scoped to the actual library subtree
 (`fastapi/`). The second What-L1 run against a real external spec — this time genuine Markdown
 rather than converted plaintext — cleanly resolved the open question from the Open5GS case about
-whether `DEF-002` was plaintext-specific (confirmed: yes) while corroborating that `DEF-003` is not
-(confirmed: it recurs against a structurally different, well-formed document too).
+whether `DEF-002` was plaintext-specific (confirmed: yes) while corroborating that `DEF-003` was not
+(confirmed: it recurred against a structurally different, well-formed document too). `DEF-003` has
+since been fixed at the tool level and `DEF-002` partially fixed; re-verifying against this case's
+own rebuilt index confirmed the fix (the four dominant ancestor chapters no longer match this
+query at all) but also surfaced a further, distinct limitation (`DEF-004`) that the fix didn't
+reach — logged separately rather than reopening `DEF-003`.
 
 ## Reproduction steps
 
@@ -164,8 +175,9 @@ whether `DEF-002` was plaintext-specific (confirmed: yes) while corroborating th
    fastapi/graphify-out/graph.json` — expect exactly two callers (`get_openapi()`,
    `FastAPI.openapi()`).
 8. Look up the OpenAPI spec's "Link Object" section directly by heading title in
-   `specs-out/index.json` (not via `query`, per `DEF-003`'s corroborated recurrence) to confirm its
-   `section_bounds` and read the Link Object definition at that line range.
+   `specs-out/index.json` (not via `query` — `DEF-003` itself is fixed, but `DEF-004`'s residual
+   raw-term-specificity limitation still keeps "Link Object" out of `query`'s top ranks) to confirm
+   its `section_bounds` and read the Link Object definition at that line range.
 9. Compare your package's `content_hash` against this case's recorded value
    (`response-links-openapi_feature-add_20260724.yaml`: `255b3b82`) by running
    `python .github/skills/ult-context-generate/scripts/content_hash.py contexts/<id>.yaml`.
