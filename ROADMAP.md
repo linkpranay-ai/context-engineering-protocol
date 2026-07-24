@@ -143,12 +143,14 @@ real per-run token counts can start being collected the same way citations alrea
   trap this project otherwise avoids by doing a design pass before committing (the same discipline
   items 9/11's MCP-backed sources went through before shipping) — a plain markdown report is the
   right v1 shape until an actual observability pipeline wants to ingest this.
-- **An independently-measured token-cost/savings number.** `README.md` already discloses this is
-  "partly self-reported... not yet independently measured against a real, large repo," and that
-  remains true — a real number needs real harness-level session data collected across pilot runs,
-  which doesn't exist yet. This pass adds the `tokens_used` field needed to *start* collecting
-  that data for real; `usage_report.py` reports "no measured runs yet" rather than fabricate a
-  figure, and will keep saying so until an operator actually records one.
+- **Per-session, harness-level token-cost data via `tokens_used`.** `README.md` already discloses
+  this specific number is "partly self-reported... not yet independently measured against a real,
+  large repo," and that remains true for *this* mechanism — `usage_report.py` reports "no measured
+  runs yet" rather than fabricate a figure, and will keep saying so until an operator actually
+  records one via the `tokens_used` field this pass added. Separately, `graphify benchmark`
+  (`EVIDENCE-METHODOLOGY.md` §2) now has real recorded runs (2026-07-24) against all three
+  CEP-DP-001D dogfood corpora — a different, real, measured token-reduction number, just not this
+  mechanism's per-session harness data.
 
 See [`EVIDENCE-METHODOLOGY.md`](EVIDENCE-METHODOLOGY.md) §5 for the measured-vs-self-reported
 distinction this item relies on, and
