@@ -12,6 +12,7 @@ frames the stress scenarios (S23-S27, S29-S40; S28 stays CEP-DP-001G's,
 untouched).
 """
 
+import shutil
 import sys
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import confirm_layers as cl  # noqa: E402
 import discover_layers as dl  # noqa: E402
 import validate_layout as vl  # noqa: E402
 
@@ -420,6 +422,123 @@ class TestArtifactRendering(TempRepoTestCase):
         out_path, artifact = dl.run_discovery(self.repo_root)
         self.assertEqual(out_path, self.repo_root / "docs" / "context-layout-discovery.md")
         self.assertTrue(out_path.is_file())
+
+
+class TestDriftTracking(TempRepoTestCase):
+    """§17.6: a second `discover` run must not re-litigate a section that
+    was fully confirmed last time, unless a confirmed path genuinely
+    disappeared."""
+
+    def _make_what_l2_candidate(self):
+        for i in range(12):
+            write(self.repo_root / "specification" / f"doc-{i}.md", "# spec")
+
+    def _resolve_what_l2_pending(self, artifact, verb):
+        # This fixture never gives How-L2 a candidate, so its own decision
+        # is always the no-candidate-found shape (`CUSTOM: <path> |
+        # ACKNOWLEDGE`) - resolve it too (as ACKNOWLEDGE) so confirm-layers
+        # sees zero remaining PENDING fields, same as a real human editing
+        # every field on the artifact before confirming.
+        text = artifact.replace(
+            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
+            f"decision: {verb}   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
+            1,
+        )
+        return text.replace(
+            "decision: PENDING   # CUSTOM: <path> | ACKNOWLEDGE",
+            "decision: ACKNOWLEDGE   # CUSTOM: <path> | ACKNOWLEDGE",
+            1,
+        )
+
+    def _run_discover_then_confirm(self, verb):
+        _out_path, artifact = dl.run_discovery(self.repo_root)
+        artifact_path = self.repo_root / "context-layout-discovery.md"
+        artifact_path.write_text(self._resolve_what_l2_pending(artifact, verb), encoding="utf-8")
+        return cl.run_confirm(self.repo_root)
+
+    def test_confirmed_path_removed_appends_redisc_section_original_untouched(self):
+        self._make_what_l2_candidate()
+        code, msgs = self._run_discover_then_confirm("CONFIRM")
+        self.assertEqual(code, 0, msgs)
+        config_before = (self.repo_root / "context-config.yaml").read_text(encoding="utf-8")
+        self.assertIn("path: specification/", config_before)
+
+        shutil.rmtree(self.repo_root / "specification")
+        _out_path, artifact = dl.run_discovery(self.repo_root)
+
+        self.assertIn("already confirmed - carried forward unchanged", artifact)
+        self.assertIn("decision: CONFIRM: specification/", artifact)
+        self.assertIn(f"Re-discovery - {dl.WHAT_L2_TITLE}", artifact)
+        self.assertIn("no longer exist or are empty: specification/", artifact)
+
+    def test_drift_detected_even_after_confirmed_section_notice_collapses(self):
+        """A confirmed CONFIRM/CUSTOM decision may render as a plain NOTICE
+        (not a decision line) on the very next `discover` run, once config
+        already holds the confirmed path with content - PR1's own
+        precedence check does that collapse, independent of §17.6. Drift
+        tracking must still detect the path disappearing on a LATER run,
+        not just the one immediately after `confirm-layers` - it must not
+        silently lose the confirmed record the moment PR1 stops rendering
+        a decision line for it."""
+        self._make_what_l2_candidate()
+        code, msgs = self._run_discover_then_confirm("CONFIRM")
+        self.assertEqual(code, 0, msgs)
+
+        _out_path, notice_artifact = dl.run_discovery(self.repo_root)
+        self.assertNotIn("Re-discovery", notice_artifact)
+
+        shutil.rmtree(self.repo_root / "specification")
+        _out_path, artifact = dl.run_discovery(self.repo_root)
+
+        self.assertIn("already confirmed - carried forward unchanged", artifact)
+        self.assertIn("decision: CONFIRM: specification/", artifact)
+        self.assertIn(f"Re-discovery - {dl.WHAT_L2_TITLE}", artifact)
+        self.assertIn("no longer exist or are empty: specification/", artifact)
+
+    def test_confirmed_path_still_valid_produces_no_redisc_section(self):
+        self._make_what_l2_candidate()
+        code, msgs = self._run_discover_then_confirm("CONFIRM")
+        self.assertEqual(code, 0, msgs)
+
+        _out_path, artifact = dl.run_discovery(self.repo_root)
+
+        self.assertNotIn("Re-discovery", artifact)
+
+    def test_settled_via_skip_is_not_relitigated_on_rerun(self):
+        # SKIP writes nothing to context-config.yaml (by design - §17.5),
+        # so unlike CONFIRM/CUSTOM, nothing in config lets a fresh scan
+        # short-circuit on its own; discover_layers.py's own drift-tracking
+        # carry-forward logic is what must suppress the repeat prompt here.
+        self._make_what_l2_candidate()
+        code, msgs = self._run_discover_then_confirm("SKIP")
+        self.assertEqual(code, 0, msgs)
+        self.assertFalse((self.repo_root / "context-config.yaml").exists())
+
+        _out_path, artifact2 = dl.run_discovery(self.repo_root)
+
+        self.assertNotIn(": PENDING", artifact2)
+        self.assertIn("already confirmed - carried forward unchanged", artifact2)
+        self.assertIn("decision: SKIP", artifact2)
+
+    def test_notice_only_section_is_stable_across_repeated_runs(self):
+        write(self.repo_root / "specification" / "a.md", "# spec")
+        write(self.repo_root / "conventions" / "a.md", "# conv")
+        write(
+            self.repo_root / "context-config.yaml",
+            "layers:\n"
+            "  what_l2:\n    path: specification/\n"
+            "  what_l1:\n    enabled: false\n"
+            "how_dimension:\n"
+            "  how_l2:\n    path: conventions/\n"
+            "  how_l1:\n    enabled: false\n",
+        )
+        _out_path, first = dl.run_discovery(self.repo_root)
+        self.assertNotIn(": PENDING", first)
+
+        _out_path, second = dl.run_discovery(self.repo_root)
+
+        self.assertEqual(first, second)
+        self.assertNotIn("Re-discovery", second)
 
 
 if __name__ == "__main__":
