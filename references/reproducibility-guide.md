@@ -75,6 +75,11 @@ its own numbered reproduction steps and pinned ref — this guide does not resta
   (MIT), tag `v8.2.8`. Two runs against the same clone: an ordinary focus-chain feature-add, and a
   deliberate negative-control task (`Sparkline` baseline marker) — reproduction steps §"Reproduction
   steps" in that file, generated-package artifacts and MIT `NOTICE.md` committed alongside it.
+- [`case-studies/open5gs-ietf-rfc/CASE-STUDY.md`](../case-studies/open5gs-ietf-rfc/CASE-STUDY.md) —
+  open5gs/open5gs (AGPL-3.0), tag `v2.8.0`, plus RFC 6733 (Diameter Base Protocol) as a What-L1
+  external-spec source. One ordinary task (Error-Message AVP gap on the S6a interface) —
+  reproduction steps §"Reproduction steps" in that file. AGPL-3.0 no-vendoring rule applies: no
+  Open5GS source, no RFC text, and no generated-package artifact are committed alongside it.
 
 ## What this guide does not cover
 
