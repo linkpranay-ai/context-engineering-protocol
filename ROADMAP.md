@@ -159,13 +159,20 @@ to reproduce a `usage_report.py` run.
 
 ## 8. Real-corpus telecom example
 
-**Status: interim synthetic version shipped.** [`examples/telecom-what-l1-demo/`](examples/telecom-what-l1-demo/)
+**Status: interim synthetic version shipped; real evidence now exists alongside it, for a
+different corpus.** [`examples/telecom-what-l1-demo/`](examples/telecom-what-l1-demo/) still
 demonstrates the What-L1 mechanism against a hand-authored, clearly-labeled synthetic 3GPP-style
 fixture — real 3GPP spec text is gated/copyrighted and isn't freely redistributable into this
-Apache-2.0 repo. If a properly-licensed, redistributable real-spec corpus becomes available (or
-someone wants to run the same commands against their own licensed corpus and contribute a
-sanitized writeup), swapping it in is a documentation-only change — see that demo's "Using your
-own real corpus" section for the exact steps, which already work today with no code changes.
+Apache-2.0 repo. That gap is unchanged. Separately, [`case-studies/`](case-studies/) now has three
+real, measured cases against real open-source codebases and real external specs (IETF RFC 6733,
+OpenAPI 3.1.0) — see [`case-studies/SYNTHESIS.md`](case-studies/SYNTHESIS.md) for what those three
+show in aggregate. These don't replace the synthetic 3GPP demo (none of the three touches 3GPP
+material) and don't close this item; they're additional, real evidence for the same What-L1
+mechanism on a different corpus. If a properly-licensed, redistributable real-spec 3GPP corpus
+becomes available (or someone wants to run the same commands against their own licensed corpus and
+contribute a sanitized writeup), swapping it in is a documentation-only change — see that demo's
+"Using your own real corpus" section for the exact steps, which already work today with no code
+changes.
 
 ## 9. MCP-backed What-L1 source
 
