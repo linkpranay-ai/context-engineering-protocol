@@ -1,60 +1,171 @@
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="340" viewBox="0 0 1200 340"
-     role="img" aria-labelledby="title desc">
-  <title id="title">Context Engineering Protocol</title>
-  <desc id="desc">Repository name and tagline on the left. On the right, a vertical pipeline: Sources, then Gap, Conflict, and Staleness checks, then an emphasized Human approval step, then Downstream skill.</desc>
-
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="375" viewBox="0 0 2048 640" role="img" aria-labelledby="title desc">
+  <title id="title">Context Engineering Protocol light banner</title>
+  <desc id="desc">A light themed GitHub README hero banner for Context Engineering Protocol with a CEP monogram, a dark left hero block, and a clean four-step workflow on the right: Sources, Prove it agrees, Human gate, and Downstream skill.</desc>
   <defs>
-    <clipPath id="cardClip">
-      <rect width="1200" height="340" rx="20"/>
-    </clipPath>
-    <linearGradient id="darkPanel2" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1B1E26"/>
-      <stop offset="100%" stop-color="#10121A"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F7FBFE"/>
+      <stop offset="100%" stop-color="#EEF4F9"/>
     </linearGradient>
+    <linearGradient id="panelDark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0C1930"/>
+      <stop offset="100%" stop-color="#132A49"/>
+    </linearGradient>
+    <linearGradient id="footerDark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#213B5C"/>
+      <stop offset="100%" stop-color="#274669"/>
+    </linearGradient>
+    <linearGradient id="orangeAccent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FF8B44"/>
+      <stop offset="100%" stop-color="#FF5B3F"/>
+    </linearGradient>
+    <linearGradient id="tealAccent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22C4E5"/>
+      <stop offset="100%" stop-color="#5BD9EC"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#10253D" flood-opacity="0.14"/>
+    </filter>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#16314D" flood-opacity="0.12"/>
+    </filter>
+    <filter id="tinyShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#10263f" flood-opacity="0.18"/>
+    </filter>
   </defs>
 
-  <g clip-path="url(#cardClip)">
-    <rect x="0" y="0" width="1200" height="340" fill="url(#darkPanel2)"/>
+  <rect width="2048" height="640" rx="24" fill="url(#bg)"/>
 
-    <!-- eyebrow, title, tagline, metadata -->
-    <g transform="translate(112,0)">
-      <text x="0" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" letter-spacing="1.5" fill="#8B8F99">AI-CODING-AGENT SKILLS &#183; CLAUDE CODE / COPILOT</text>
-
-      <text x="0" y="112" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="44" font-weight="700" fill="#F5F6F8">Context Engineering</text>
-      <text x="0" y="172" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="44" font-weight="700" fill="#F5F6F8">Protocol</text>
-
-      <text x="0" y="214" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18" fill="#B9BDC6">Human-approved, source-attributed context &#8212;</text>
-      <text x="0" y="238" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18" fill="#B9BDC6">code graph + requirements + conventions &#8212; before generation runs.</text>
-
-      <text x="0" y="278" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7A7E88">Apache-2.0 &#183; v0.1.0 &#183; 5 skills &#183; CI passing</text>
-    </g>
-
-    <!-- vertical pipeline, right side -->
-    <g transform="translate(780,40)">
-      <line x1="16" y1="8" x2="16" y2="248" stroke="#3A3D46" stroke-width="2"/>
-
-      <!-- row 1: sources -->
-      <circle cx="16" cy="16" r="9" fill="#14161D" stroke="#8B8F99" stroke-width="2.5"/>
-      <text x="44" y="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#F5F6F8">Sources</text>
-      <text x="44" y="34" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9AA0AC">code graph + requirements + conventions</text>
-
-      <!-- row 2: gap / conflict / staleness -->
-      <circle cx="16" cy="86" r="9" fill="#14161D" stroke="#8B8F99" stroke-width="2.5"/>
-      <text x="44" y="82" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#F5F6F8">Gap &#183; Conflict &#183; Staleness</text>
-      <text x="44" y="104" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9AA0AC">checked before anything is approved</text>
-
-      <!-- row 3: human approval (emphasized, solid diamond) -->
-      <rect x="4" y="144" width="24" height="24" rx="4" transform="rotate(45 16 156)" fill="#F5F6F8"/>
-      <text x="44" y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="22" font-weight="700" fill="#F5F6F8">Human approval</text>
-      <text x="44" y="174" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9AA0AC">the one required, non-automated step</text>
-
-      <!-- row 4: downstream skill -->
-      <circle cx="16" cy="216" r="9" fill="#14161D" stroke="#8B8F99" stroke-width="2.5"/>
-      <text x="44" y="212" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#F5F6F8">Downstream skill</text>
-      <text x="44" y="234" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9AA0AC">consumes the content-hashed package</text>
-    </g>
+  <!-- left panel -->
+  <g filter="url(#shadow)">
+    <rect x="34" y="36" width="884" height="568" rx="26" fill="url(#panelDark)"/>
+    <rect x="34" y="492" width="884" height="112" rx="0" fill="url(#footerDark)"/>
   </g>
 
-  <rect x="1" y="1" width="1198" height="338" rx="19" fill="none" stroke="#3A3D46" stroke-width="1.5"/>
+  <!-- right area surfaces -->
+  <rect x="964" y="72" width="1040" height="496" rx="30" fill="#F3F8FC"/>
+  <rect x="994" y="106" width="980" height="428" rx="24" fill="#F8FBFE"/>
+
+  <!-- left copy -->
+  <text x="94" y="94" fill="#A5B6CA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" letter-spacing="1.1">AI-CODING-AGENT SKILLS • CLAUDE CODE / COPILOT / CODEX</text>
+
+  <g transform="translate(92,132)" filter="url(#softShadow)">
+    <rect width="282" height="224" rx="18" fill="#152238" opacity="0.95"/>
+    <text x="38" y="128" fill="#F7FAFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="110" font-weight="800">CEP</text>
+    <path d="M42 166 C78 186, 120 130, 166 154 C202 172, 228 176, 250 163" fill="none" stroke="url(#orangeAccent)" stroke-width="8" stroke-linecap="round"/>
+  </g>
+
+  <circle cx="420" cy="205" r="4.5" fill="#FF7543"/>
+  <text x="442" y="215" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="28">Context Engineering Protocol</text>
+  <text x="442" y="260" fill="#D5E1EE" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19">Human-approved, source-attributed context package</text>
+  <text x="442" y="289" fill="#D5E1EE" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19">before an AI agent writes a line of code.</text>
+
+  <text x="94" y="436" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="26" font-weight="500">Prove the context.</text>
+  <text x="336" y="436" fill="#93ADC8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="26">•</text>
+  <text x="398" y="436" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="26" font-weight="500">Get sign-off.</text>
+  <text x="598" y="436" fill="#93ADC8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="26">•</text>
+  <text x="660" y="436" fill="#FFFFFF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="26" font-weight="500">Then generate.</text>
+
+  <text x="92" y="565" fill="#D8E2EE" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">Apache-2.0</text>
+  <circle cx="302" cy="558" r="2.2" fill="#90A7C1"/>
+  <text x="337" y="565" fill="#D8E2EE" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">v0.1.0</text>
+  <circle cx="530" cy="558" r="2.2" fill="#90A7C1"/>
+  <text x="566" y="565" fill="#D8E2EE" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">5 skills</text>
+  <circle cx="739" cy="558" r="2.2" fill="#90A7C1"/>
+  <text x="774" y="565" fill="#D8E2EE" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">CI passing</text>
+
+  <!-- right header -->
+  <text x="1026" y="138" fill="#18314E" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="1.15">THE CEP FLOW</text>
+  <text x="1026" y="176" fill="#18314E" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="34" font-weight="800">Ground the task. Verify reality. Require a human gate.</text>
+  <text x="1026" y="212" fill="#5E7085" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22">Source-grounded context for AI coding agents: retrieval is not enough; agreement is required.</text>
+
+  <!-- timeline -->
+  <path d="M1120 270 H1805" fill="none" stroke="url(#tealAccent)" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- timeline nodes -->
+  <g filter="url(#tinyShadow)">
+    <circle cx="1140" cy="270" r="19" fill="#FFFFFF" stroke="#FF6A42" stroke-width="5"/>
+    <circle cx="1368" cy="270" r="19" fill="#FFFFFF" stroke="#FF6A42" stroke-width="5"/>
+    <circle cx="1596" cy="270" r="19" fill="#FFFFFF" stroke="#FF6A42" stroke-width="5"/>
+    <circle cx="1824" cy="270" r="19" fill="#FFFFFF" stroke="#FF6A42" stroke-width="5"/>
+  </g>
+  <g font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" font-weight="800" fill="#FF6A42" text-anchor="middle">
+    <text x="1140" y="276">1</text>
+    <text x="1368" y="276">2</text>
+    <text x="1596" y="276">3</text>
+    <text x="1824" y="276">4</text>
+  </g>
+
+  <!-- cards under nodes -->
+  <g filter="url(#softShadow)">
+    <rect x="1038" y="304" width="204" height="196" rx="22" fill="#FFFFFF" stroke="#DCE7F1"/>
+    <rect x="1266" y="304" width="204" height="196" rx="22" fill="#FFFFFF" stroke="#DCE7F1"/>
+    <rect x="1494" y="304" width="204" height="196" rx="22" fill="#FFFFFF" stroke="#DCE7F1"/>
+    <rect x="1722" y="304" width="204" height="196" rx="22" fill="#FFFFFF" stroke="#DCE7F1"/>
+  </g>
+
+  <!-- icons -->
+  <g transform="translate(1078,338) scale(0.82)">
+    <rect x="0" y="0" width="60" height="72" rx="10" fill="#1A446F"/>
+    <path d="M42 0 L60 18 L60 72 L0 72 L0 0 Z" fill="#224E7E"/>
+    <path d="M42 0 L42 18 L60 18" fill="#DBF3FF"/>
+    <line x1="14" y1="25" x2="42" y2="25" stroke="#8DE7FF" stroke-width="4" stroke-linecap="round"/>
+    <line x1="14" y1="37" x2="44" y2="37" stroke="#8DE7FF" stroke-width="4" stroke-linecap="round"/>
+    <line x1="14" y1="49" x2="35" y2="49" stroke="#8DE7FF" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="88" cy="20" r="12" fill="#F2FAFE" stroke="#BDD6E8"/>
+    <text x="88" y="25" text-anchor="middle" fill="#1A446F" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="800">+</text>
+    <circle cx="114" cy="20" r="12" fill="#F2FAFE" stroke="#BDD6E8"/>
+    <text x="114" y="25" text-anchor="middle" fill="#1A446F" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="800">+</text>
+  </g>
+
+  <g transform="translate(1322,334) scale(0.72)">
+    <path d="M0 34 L34 0 L34 68 L0 102 Z" fill="#214977"/>
+    <path d="M34 0 L72 34 L72 136 L34 102 Z" fill="#2A5A89"/>
+    <rect x="86" y="22" width="44" height="88" rx="12" fill="#ECF7FD" stroke="#B8DEEE"/>
+    <path d="M98 67 L110 79 L128 54" fill="none" stroke="#43B6D4" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(1568,338) scale(0.76)">
+    <rect x="0" y="32" width="70" height="68" rx="13" fill="#CC7A1F"/>
+    <path d="M0 32 L35 10 L70 32 L35 54 Z" fill="#F4C461"/>
+    <rect x="23" y="-6" width="24" height="44" rx="5" fill="#D88F34" stroke="#9C5C16" stroke-width="2"/>
+    <ellipse cx="35" cy="-10" rx="31" ry="22" fill="#EDC159" stroke="#986017" stroke-width="3"/>
+  </g>
+
+  <g transform="translate(1778,340) scale(0.78)">
+    <path d="M0 34 L44 8 L88 34 L44 60 Z" fill="#224A78"/>
+    <path d="M0 34 L0 64 L44 90 L44 60 Z" fill="#173B61"/>
+    <path d="M44 60 L88 34 L88 64 L44 90 Z" fill="#2C5989"/>
+    <circle cx="44" cy="24" r="17" fill="none" stroke="#D9F7FF" stroke-width="3"/>
+    <rect x="37" y="25" width="14" height="10" rx="2.5" fill="none" stroke="#D9F7FF" stroke-width="3"/>
+    <path d="M38 24 C38 16, 50 16, 50 24" fill="none" stroke="#D9F7FF" stroke-width="3"/>
+  </g>
+
+  <!-- card copy -->
+  <g font-family="Inter,Segoe UI,Arial,sans-serif">
+    <text x="1140" y="426" text-anchor="middle" fill="#18314E" font-size="20" font-weight="800">Sources</text>
+    <text x="1140" y="451" text-anchor="middle" fill="#60758A" font-size="15.5">code graph + reqs</text>
+    <text x="1140" y="472" text-anchor="middle" fill="#60758A" font-size="15.5">+ conventions + specs</text>
+
+    <text x="1368" y="426" text-anchor="middle" fill="#18314E" font-size="20" font-weight="800">Prove it agrees</text>
+    <text x="1368" y="451" text-anchor="middle" fill="#60758A" font-size="15.5">gap · conflict · staleness</text>
+    <text x="1368" y="472" text-anchor="middle" fill="#60758A" font-size="15.5">checked before approval</text>
+
+    <text x="1596" y="426" text-anchor="middle" fill="#18314E" font-size="20" font-weight="800">Human gate</text>
+    <text x="1596" y="451" text-anchor="middle" fill="#60758A" font-size="15.5">required gate</text>
+    <text x="1596" y="472" text-anchor="middle" fill="#60758A" font-size="15.5">deliberate, non-automated</text>
+
+    <text x="1824" y="426" text-anchor="middle" fill="#18314E" font-size="20" font-weight="800">Downstream skill</text>
+    <text x="1824" y="451" text-anchor="middle" fill="#60758A" font-size="15.5">consumes approved</text>
+    <text x="1824" y="472" text-anchor="middle" fill="#60758A" font-size="15.5">content-hashed package</text>
+  </g>
+
+  <!-- legend -->
+  <g filter="url(#tinyShadow)">
+    <rect x="1038" y="544" width="888" height="46" rx="23" fill="#FFFFFF" stroke="#DAE5EE"/>
+  </g>
+  <circle cx="1168" cy="567" r="8" fill="#FF6A42"/>
+  <text x="1186" y="574" fill="#44586E" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">human gate is deliberate</text>
+  <circle cx="1512" cy="567" r="8" fill="#22C4E5"/>
+  <text x="1530" y="574" fill="#44586E" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">every claim stays source-attributed</text>
 </svg>
