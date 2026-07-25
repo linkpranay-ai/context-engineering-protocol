@@ -28,5 +28,11 @@ normative keywords in this glossary and in `PROTOCOL.md` should be read.
 | **Delivery** | Making an approved, packaged context available to a consumer through an implementation-specific mechanism. |
 | **Lifecycle** | Creation, review, change, deprecation, and retirement behavior for context or its governing rules. |
 | **Protocol** | A documented behavioral process and consumer contract. This repository does not define a universal data model, transport, storage, or interoperability standard (§4). |
+| **Conformance** | Whether a system's actual behavior satisfies the mandatory requirements this protocol defines, for a specific conformance subject. See [`CONFORMANCE.md`](CONFORMANCE.md). |
+| **Conformance subject** | One of implementation, consumer, runtime adapter, or workflow (below) — the kind of thing a conformance claim is made about. Orthogonal to the Roles below: Roles describe who is accountable during package assembly; conformance subjects describe what kind of artifact can claim conformance. See [`CONFORMANCE.md`](CONFORMANCE.md) §2. |
+| **Implementation (conformance subject)** | A concrete system that implements this protocol's behavioral state machine end-to-end (discovery, gap/conflict/staleness detection, package assembly, human-approval gate). See [`CONFORMANCE.md`](CONFORMANCE.md) §2. |
+| **Consumer (conformance subject)** | A downstream skill, tool, or workflow that uses an approved context package as primary context, following the discover→confirm→load→spot-check→cite→tag contract (§4). See [`CONFORMANCE.md`](CONFORMANCE.md) §2. |
+| **Runtime adapter** | A generated, runtime-specific artifact (e.g. `.cursor/rules/*.mdc`, a merged `AGENTS.md` block) that surfaces this protocol's skills inside a particular agent runtime. A conformance subject in its own right. See [`CONFORMANCE.md`](CONFORMANCE.md) §2. |
+| **Workflow (conformance subject)** | The broader process — design, planning, test generation, review, etc. — that consumes an approved context package as input but is not itself part of context assembly. See [`CONFORMANCE.md`](CONFORMANCE.md) §2. |
 
 Terms here describe the protocol's current, implemented behavior.
