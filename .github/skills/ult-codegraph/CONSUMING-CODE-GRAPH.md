@@ -193,6 +193,15 @@ an alternative.
 - **Consumer expectation:** pick a budget large enough that the truncation
   note doesn't cover symbols you actually care about; re-run higher if it
   does (`CONTEXT-ENGINEERING-DESIGN.md` D16).
+- **Known symptom:** a query for a specific, unambiguous class/symbol name
+  returning a large number of mostly-unrelated nodes can mean the graph's
+  node IDs were built before `graphify` started path-qualifying same-named
+  symbols in different files — two distinct classes sharing one literal
+  name collide onto one ID and their neighborhoods get merged in the BFS.
+  `graphify explain "<exact label>"` is unaffected (it resolves by exact
+  label, not by the shared ID) and stays reliable in the meantime. Fix:
+  re-run `graphify extract --force` on the affected corpus to rebuild with
+  path-qualified IDs.
 
 ### `graphify path "<A>" "<B>"`
 
