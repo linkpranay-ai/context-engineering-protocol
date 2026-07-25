@@ -19,11 +19,10 @@ Build-once → write JSON → skills query the JSON. Same contract graphify uses
   in the parser. Four ship today (`generic`/`3gpp`/`rfc`/`ieee`); adding a profile for
   your own domain's documents needs no code change — see **Profiles** below.
 
-> Scope note: **R1, R2, and R3** (including the `rfc.json`/`ieee.json` profiles) are
-> complete, with a regression suite in `tests/`. The rewrite of
-> `ult-context-generate/SKILL.md` Step 7.1 to shell out to this script (**R4**) is
-> handled by a follow-on session. See `IMPLEMENTATION-NOTES.md` for what that session
-> needs to know.
+> Scope note: **R1, R2, R3, and R4** (including the `rfc.json`/`ieee.json` profiles, and the
+> rewrite of `ult-context-generate/SKILL.md` Step 7.1 to shell out to this script) are all
+> complete, with a regression suite in `tests/`. See `IMPLEMENTATION-NOTES.md` for the
+> implementation history.
 
 ---
 

@@ -2,7 +2,7 @@
 name: codegraph
 description: Generate a codebase knowledge graph with `graphify` at `graphify-out/` so other skills can query cross-file relationships before touching code. Do NOT use for runtime profiling.
 namespace: ult
-version: 0.1.0
+version: 0.2.0
 origin: ground-up
 author: Pranay Mishra
 maintainer: Pranay Mishra

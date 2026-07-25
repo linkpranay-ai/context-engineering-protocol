@@ -52,7 +52,10 @@ result:
     target codebase CEP is built to be queried against) — it exists only to
     show this template populated with real tool output instead of an
     invented number. The representative-corpus benchmark this project
-    actually needs is still open; see the benchmark backlog.
+    actually needs has since been run for real against three external
+    codebases (Open5GS, FastAPI, Textual, 2026-07-24) — see
+    `EVIDENCE-METHODOLOGY.md` §2 and each case's own `CASE-STUDY.md`
+    "Results at a glance" table in `case-studies/`.
 ```
 
 ## Context-package usage record (`usage_report.py`)

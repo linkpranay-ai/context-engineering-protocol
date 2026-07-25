@@ -61,12 +61,12 @@ Real output:
 [
   {
     "file": "spec-802-1x-auth.md",
-    "clause_id": "12",
-    "title": "12 Port-based network access control",
-    "heading_id": "h_0001",
-    "line": 9,
-    "section_bounds": [10, 20],
-    "match_count": 9,
+    "clause_id": "12.4",
+    "title": "12.4 EAPOL frame considerations",
+    "heading_id": "h_0002",
+    "line": 11,
+    "section_bounds": [12, 20],
+    "match_count": 13,
     "cross_refs": [
       {
         "raw": "IEEE 802.11-2020 §9.3.2",

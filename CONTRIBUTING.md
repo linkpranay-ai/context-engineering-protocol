@@ -6,6 +6,18 @@ This is a personal, single-maintainer project — there's no separate access
 token or internal tooling to set up. Fork the repo, make your change on a
 branch, and open a pull request on GitHub.
 
+### A note on internal design-doc citations
+
+Several files in this repo cite `CONTEXT-ENGINEERING-DESIGN.md`,
+`WHAT-L1-AND-CONTEXT-REUSE-ASSESSMENT.md`, and
+`ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md` (e.g. "see `CONTEXT-ENGINEERING-
+DESIGN.md` D16"). These are internal design documents from the maintainer's
+own working notes, not part of this repo — they're deliberately excluded
+from the public release and cited only as provenance breadcrumbs (which
+decision produced a given behavior), not as documents you can open. If a
+citation doesn't make sense standalone, treat the surrounding prose in this
+repo as the authoritative explanation.
+
 ## Frontmatter requirements
 
 Every skill's `SKILL.md` needs valid frontmatter. Full example:
@@ -59,7 +71,7 @@ fine, just make the choice a meaningful one.
 ## Skill quality standards
 
 These aren't CI-enforced yet (porting a full frontmatter/body linter is
-open future work — see the project backlog), so they're reviewed by hand on
+open future work — see `ROADMAP.md` item 14), so they're reviewed by hand on
 every PR rather than blocking a merge. New contributions should meet all of
 them:
 
@@ -113,5 +125,5 @@ claiming — both are worth fixing before merging.
 
 There's one maintainer and no auto-merge tier yet — every PR gets a human
 look before merging. CI must pass: both skills' test suites, the eval
-trigger check, and the `NOTICE` freshness check (see
-`.github/workflows/ci.yml`).
+trigger check, the `NOTICE` freshness check, and the cross-runtime adapter
+freshness check (see `.github/workflows/ci.yml`).

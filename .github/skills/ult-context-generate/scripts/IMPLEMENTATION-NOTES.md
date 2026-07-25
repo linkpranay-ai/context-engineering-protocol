@@ -1,8 +1,8 @@
-# `md_index.py` — Implementation Notes (R1 + R3)
+# `md_index.py` — Implementation Notes (R1-R4)
 
 Companion to `README.md`. Covers: validation results against the acceptance bar, known
-limitations / work explicitly deferred to R2 and R3, and what the follow-on Sonnet
-session needs to rewrite Step 7.1 (R4).
+limitations, work deferred to R2/R3 (both since completed, §2), and how R4 rewrote
+Step 7.1 to shell out to this script (§3, kept as a historical record of that change).
 
 ---
 
@@ -135,10 +135,11 @@ and schema were already final from R1/R3.
 
 ---
 
-## 3. What the R4 session needs (rewriting `ult-context-generate` Step 7.1)
+## 3. How R4 rewrote `ult-context-generate` Step 7.1 (done)
 
-Do **not** modify any existing file for R1/R3 — this deliverable is purely additive under
-`scripts/`. R4 is where Step 7.1 changes. The contract to wire against:
+R1/R3 shipped `scripts/` as a purely additive deliverable, modifying no existing file. R4
+then rewired Step 7.1 against it, per the contract below (kept here as the historical
+record of that change, not a pending task):
 
 1. **Build-once / stale-check.** Before querying, run:
    ```
@@ -156,7 +157,7 @@ Do **not** modify any existing file for R1/R3 — this deliverable is purely add
    The script returns a JSON array of `{file, clause_id, title, heading_id, line,
    section_bounds, match_count, cross_refs}`. The agent then `Read`s **only** each
    match's `section_bounds` line range from `file` — never the whole file. *This* is what
-   makes the "0.5–2K tokens / topic" claim in the SKILL honest (resolves C1): the heavy
+   makes SKILL.md's "zero-LLM extraction" claim honest (resolves C1): the heavy
    heading-tree build and cross-ref resolution happen in the subprocess, not in-context.
 
 3. **Citation-following (D14), now deterministic.** Each query result already carries its
@@ -171,7 +172,7 @@ Do **not** modify any existing file for R1/R3 — this deliverable is purely add
    the "Found via citation-following from `<clause>`" summary note, and the Step 9 human
    gate are all unchanged.
 
-5. **Config (R3 wiring, for the R4 session to add to `context-config.yaml.template`):**
+5. **Config (R3 wiring, added by R4 to `context-config.yaml.template`):**
    ```yaml
    what_l1:
      enabled: false
@@ -179,13 +180,13 @@ Do **not** modify any existing file for R1/R3 — this deliverable is purely add
      md_index_profile: generic   # generic | 3gpp | <your-profile>
    ```
 
-6. **Honesty fix (C1).** When R4 edits the SKILL header / D13 / D14 callouts, replace
+6. **Honesty fix (C1).** R4 edited the SKILL header / D13 / D14 callouts to replace
    "zero-LLM, zero-graphify" with "zero-LLM **extraction** (a stdlib subprocess builds the
-   index; the agent only reads matched line-ranges)" — and drop any implication that the
+   index; the agent only reads matched line-ranges)" — dropping any implication that the
    *agent-simulated* parser was ever zero-token.
 
 ### Generated-output note
 
 `specs-out/ts33401.json` and `specs-out/session.json` are example indexes left in place
 from validation. They are regenerable build artifacts (like `graphify-out/graph.json`),
-not source — R4 may want `specs-out/` gitignored in real projects.
+not source — `specs-out/` is gitignored in real projects (see `.gitignore`).

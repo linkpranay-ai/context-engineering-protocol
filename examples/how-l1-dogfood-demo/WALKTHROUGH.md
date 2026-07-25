@@ -43,7 +43,7 @@ synonyms for the task type. For a "handle a change request" task type:
 ```
 $ python .github/skills/ult-context-generate/scripts/md_index.py query \
     examples/how-l1-dogfood-demo/specs-out/index.json \
-    "change control board disposition approved rejected deferred" --top 2
+    "change control board disposition approved rejected deferred" --top 1
 ```
 
 Real output:
@@ -52,26 +52,14 @@ Real output:
 [
   {
     "file": "sample-process-standard.md",
-    "clause_id": null,
-    "title": "CMS-100: Synthetic Demo Configuration Management Process Standard",
-    "heading_id": "h_0000",
-    "line": 1,
-    "section_bounds": [2, 38],
+    "clause_id": "5.2",
+    "title": "5.2 Change Control",
+    "heading_id": "h_0003",
+    "line": 19,
+    "section_bounds": [20, 25],
     "match_count": 19,
     "cross_refs": [
-      {"raw": "(see 5.1)", "kind": "see", "target_clause": "5.1", "resolved_heading_id": "h_0002", "resolved": true}
-    ]
-  },
-  {
-    "file": "sample-process-standard.md",
-    "clause_id": "5",
-    "title": "5 Configuration Management",
-    "heading_id": "h_0001",
-    "line": 7,
-    "section_bounds": [8, 30],
-    "match_count": 19,
-    "cross_refs": [
-      {"raw": "(see 5.1)", "kind": "see", "target_clause": "5.1", "resolved_heading_id": "h_0002", "resolved": true}
+      {"raw": "(see 5.1)", "kind": "see", "target_doc": null, "target_clause": "5.1", "resolved_file": null, "resolved_heading_id": "h_0002", "resolved": true, "resolution_status": "resolved"}
     ]
   }
 ]
@@ -79,23 +67,24 @@ Real output:
 
 Two things worth noticing:
 
-1. **Ranking works as intended.** `--top 2` returns the whole-document root and clause `5`
-   (parent of the change-control content) — not the unrelated `6 Verification` / `6.1 Peer Review`
-   clauses, which score lower against these terms and are correctly excluded.
-2. **`clause_id` is parsed structurally** (`"5"`, not guessed from prose), matching the `generic`
+1. **Ranking works as intended.** `--top 1` returns `5.2 Change Control` — the clause whose own
+   text contains these terms almost verbatim ("approved, rejected, or deferred") — not its parent
+   `5` or the unrelated `6 Verification` / `6.1 Peer Review` clauses, which score lower and don't
+   make the cut.
+2. **`clause_id` is parsed structurally** (`"5.2"`, not guessed from prose), matching the `generic`
    profile's `^(\d+(?:\.\d+)*)\s+(.+)$` heading regex.
 
 ## Step 3 — citation-following (D14)
 
-Neither returned heading *is* clause `5.1` (`h_0002`) — but both cite it via `(see 5.1)`, and both
-resolve it (`resolved: true`, `resolved_heading_id: "h_0002"`). Per
+The returned heading is *not* clause `5.1` (`h_0002`) — but it cites it via `(see 5.1)`, and that
+citation resolves (`resolved: true`, `resolved_heading_id: "h_0002"`). Per
 `references/how-l1-fallback-query.md` step 4, this is exactly the case that triggers
 citation-following: `h_0002` is looked up in the same file's `headings` array and its
 `section_bounds` are read too, even though it never appeared in the top-K query results itself.
 
-Reading `sample-process-standard.md` lines 8-30 (clause `5`'s `section_bounds`) and 13-18 (clause
-`5.1`'s `section_bounds`, via citation-following) gives the real source text those context items are
-paraphrased from below.
+Reading `sample-process-standard.md` lines 20-25 (clause `5.2`'s `section_bounds`) and 13-18
+(clause `5.1`'s `section_bounds`, via citation-following) gives the real source text those context
+items are paraphrased from below.
 
 ## Step 4 — hand-assembled context items
 
@@ -105,17 +94,15 @@ Per `references/how-l1-fallback-query.md` step 4's template and
 ```yaml
 - id: ctx_001
   layer: how-l1
-  source: "examples/how-l1-dogfood-demo/corpus/sample-process-standard.md (5 Configuration Management)"
+  source: "examples/how-l1-dogfood-demo/corpus/sample-process-standard.md (5.2 Change Control)"
   type: process-standard
   confidence: EXTRACTED
   summary: >
-    The process standard requires a baseline to be established for each work product on
-    completion of its defining review; once baselined, a work product may only be changed
-    through the change control procedure — a change control board reviews each proposed change
-    against the baseline's original acceptance criteria and records its disposition (approved,
-    rejected, or deferred) before the change is merged. Status and change history must be
-    tracked and made available to affected stakeholders. Note that org-QMS applicability has
-    not been confirmed.
+    All changes to a baselined work product must be evaluated, approved, and tracked before
+    being incorporated. A change control board reviews each proposed change against the
+    baseline's original acceptance criteria and records its disposition (approved, rejected, or
+    deferred) before the change is merged. Note that org-QMS applicability has not been
+    confirmed.
   how_l1_fallback: true
 
 - id: ctx_002
@@ -126,8 +113,8 @@ Per `references/how-l1-fallback-query.md` step 4's template and
   summary: >
     A baseline is established for each work product upon completion of its defining review, is
     uniquely identified, and is then placed under configuration control — no further changes are
-    permitted except through the change control procedure. Found via citation-following from "5
-    Configuration Management". Note that org-QMS applicability has not been confirmed.
+    permitted except through the change control procedure. Found via citation-following from "5.2
+    Change Control". Note that org-QMS applicability has not been confirmed.
   how_l1_fallback: true
 ```
 

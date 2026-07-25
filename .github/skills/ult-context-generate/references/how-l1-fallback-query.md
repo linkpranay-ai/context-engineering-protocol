@@ -82,12 +82,16 @@ results.
 
 4. **Citation-following (D14, single-hop, deterministic).** Each result's `cross_refs` are already
    resolved by the indexer. For each cross-ref with `resolved: true` whose `resolved_heading_id`
-   is **not** one of this query's step-2 matched headings: look up that `heading_id` in the same
-   file's `headings` array in `<how_l1.index_path>`, and `Read` its `section_bounds` too. Record it
-   as an additional context item (below), noting in its summary `Found via citation-following from
-   <source clause id or heading title>.` Cross-refs with `resolved: false` are dropped — do not
-   guess or read an unrelated section. Citation-following is single-hop only — do not chase
-   `cross_refs` belonging to a citation-followed heading's own entry.
+   is **not** one of this query's step-2 matched headings: look up that `heading_id` — in
+   `resolved_file`'s `headings` array if `resolved_file` is non-null (a cross-file citation, R9/
+   Phase B — the target lives in a *different* file, joined via its `doc_id` front matter),
+   otherwise in this same result's own `file`'s `headings` array (`resolved_file: null` means
+   same-file, the original single-file behavior) — within `<how_l1.index_path>`, and `Read` its
+   `section_bounds` too. Record it as an additional context item (below), noting in its summary
+   `Found via citation-following from <source clause id or heading title>` (for a cross-file hop,
+   also name the source file). Cross-refs with `resolved: false` are dropped — do not guess or read
+   an unrelated section. Citation-following is single-hop only — do not chase `cross_refs`
+   belonging to a citation-followed heading's own entry, even if that hop crossed files.
 
 5. **If the query returns no results** (or the index build/refresh failed in step 1): set
    `how_l1_covered: false` and go directly to Step 2's existing D8 branch — no separate

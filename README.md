@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/linkpranay-ai/context-engineering-protocol/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/linkpranay-ai/context-engineering-protocol/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/linkpranay-ai/context-engineering-protocol/releases/tag/v0.1.0)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/linkpranay-ai/context-engineering-protocol/releases/tag/v0.2.0)
 
 </p>
 
@@ -132,7 +132,7 @@ against a freshly cloned, unrelated real-world repo (`Textualize/textual`) — n
 correctness.
 
 - `validate_layout.py --validate` passed.
-- `graphify update` produced a real 20,496-node / 59,448-edge graph from 1,353 source files.
+- `graphify update` produced a real 20,116-node / 59,448-edge graph from 1,353 source files.
 - A real `COMPILED-GUIDELINES.md` was compiled from that repo's own `CONTRIBUTING.md`/`AI_POLICY.md`.
 - A full context package was assembled end-to-end for a real, grounded feature scenario using real
   `graphify query/explain/affected` calls and a real `md_index.py`-built index.
@@ -145,7 +145,9 @@ wrapper and follow through into the real `SKILL.md` content — not a generic/ha
   returning a literal `PASS`.
 - `/ult-context-generate` asked the real Step 1 scope-clarification questions (5/5, correct
   substance) and respected a "stop after Step 1" instruction with no files written.
-- Full transcript: `dogfood-textual/PHASE9-RUNTIME-SPOTCHECK.md`.
+- Transcript kept in the local dogfood clone (`dogfood-textual/`, not part of this repo — see
+  "Reproduction steps" in the [Textual case study](case-studies/textual/CASE-STUDY.md) to
+  reproduce the clone and re-run the same check yourself).
 
 **Codex — field-validated via Codex Desktop** (Phase 9), with one known caveat on the VS Code
 extension surface.
@@ -160,7 +162,9 @@ extension surface.
 - Codex Desktop completing the same test cleanly against the same clone confirms the `AGENTS.md`
   adapter itself works; the still-open gap is narrower than "Codex support" — it's the VS Code
   *extension panel's* file-read path.
-- Full transcript: `dogfood-textual/PHASE9-RUNTIME-SPOTCHECK.md`.
+- Transcript kept in the local dogfood clone (`dogfood-textual/`, not part of this repo — see
+  "Reproduction steps" in the [Textual case study](case-studies/textual/CASE-STUDY.md) to
+  reproduce the clone and re-run the same check yourself).
 
 Cursor's adapter is generated deterministically from each skill's `SKILL.md` frontmatter and
 verified against Cursor's currently published docs, but **has not been live-install-tested**
@@ -231,8 +235,8 @@ Disclosed plainly rather than glossed over. Full prioritized list with more deta
   and read the real `AGENTS.md` unprompted and correctly listed every skill). **The Codex VS Code
   extension was not tested** — its chat panel hangs indefinitely on any file-read tool call, a
   defect in that extension's own tool-call path, unrelated to this project's skills or adapters
-  (confirmed by Codex Desktop completing the same test cleanly against the same clone). See
-  `dogfood-textual/PHASE9-RUNTIME-SPOTCHECK.md` for both transcripts.
+  (confirmed by Codex Desktop completing the same test cleanly against the same clone). Transcripts
+  for both runs are kept in the local dogfood clone (`dogfood-textual/`, not part of this repo).
 
 ## Contributing
 

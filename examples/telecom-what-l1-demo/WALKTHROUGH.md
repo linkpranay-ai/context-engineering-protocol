@@ -50,44 +50,47 @@ $ python .github/skills/ult-context-generate/scripts/md_index.py query \
     "drift correction" --top 3
 ```
 
-Real output (trimmed — the full run returns a resolved `cross_refs` list per match; shown in full
-for the second and third ranked results below):
+Real output — every ranked result includes the schema's cross-file-capable `cross_refs` fields
+(`target_doc`, `resolved_file`, `resolution_status`), shown in full for all three results:
 
 ```json
 [
   {
-    "clause_id": null,
-    "title": "TS XX.999: Synthetic Demo Specification for Enhanced Synchronized Beacon Procedure (ESBP)",
-    "line": 15,
-    "match_count": 40,
-    "...": "(whole-document root section — always ranks first; match counts aggregate hierarchically)"
-  },
-  {
-    "clause_id": "7",
-    "title": "7 Detailed procedures",
-    "heading_id": "h_0014",
-    "line": 87,
-    "section_bounds": [88, 146],
-    "match_count": 23,
+    "file": "sample-3gpp-style-spec.md",
+    "clause_id": "7.5.2",
+    "title": "7.5.2 Correction algorithm",
+    "heading_id": "h_0025",
+    "line": 140,
+    "section_bounds": [141, 146],
+    "match_count": 12,
     "cross_refs": [
-      {"raw": "clauses 4", "kind": "clause", "target_clause": "4", "resolved_heading_id": "h_0006", "resolved": true},
-      {"raw": "clause 7.2.9.1", "kind": "clause", "target_clause": "7.2.9.1", "resolved_heading_id": "h_0019", "resolved": true},
-      {"raw": "clause 5.2", "kind": "clause", "target_clause": "5.2", "resolved_heading_id": "h_0010", "resolved": true},
-      {"raw": "clause 7.3", "kind": "clause", "target_clause": "7.3", "resolved_heading_id": "h_0021", "resolved": true},
-      {"raw": "clause 7.4", "kind": "clause", "target_clause": "7.4", "resolved_heading_id": "h_0022", "resolved": true},
-      {"raw": "clause 7.2", "kind": "clause", "target_clause": "7.2", "resolved_heading_id": "h_0016", "resolved": true}
+      {"raw": "clause 7.3", "kind": "clause", "target_doc": null, "target_clause": "7.3", "resolved_file": null, "resolved_heading_id": "h_0021", "resolved": true, "resolution_status": "resolved"},
+      {"raw": "clause 7.4", "kind": "clause", "target_doc": null, "target_clause": "7.4", "resolved_file": null, "resolved_heading_id": "h_0022", "resolved": true, "resolution_status": "resolved"}
     ]
   },
   {
+    "file": "sample-3gpp-style-spec.md",
     "clause_id": "7.5",
     "title": "7.5 Drift correction",
     "heading_id": "h_0023",
     "line": 132,
     "section_bounds": [133, 146],
-    "match_count": 15,
+    "match_count": 8,
     "cross_refs": [
-      {"raw": "clause 7.3", "kind": "clause", "target_clause": "7.3", "resolved_heading_id": "h_0021", "resolved": true},
-      {"raw": "clause 7.4", "kind": "clause", "target_clause": "7.4", "resolved_heading_id": "h_0022", "resolved": true}
+      {"raw": "clause 7.3", "kind": "clause", "target_doc": null, "target_clause": "7.3", "resolved_file": null, "resolved_heading_id": "h_0021", "resolved": true, "resolution_status": "resolved"},
+      {"raw": "clause 7.4", "kind": "clause", "target_doc": null, "target_clause": "7.4", "resolved_file": null, "resolved_heading_id": "h_0022", "resolved": true, "resolution_status": "resolved"}
+    ]
+  },
+  {
+    "file": "sample-3gpp-style-spec.md",
+    "clause_id": "7.3",
+    "title": "7.3 Periodic drift monitoring",
+    "heading_id": "h_0021",
+    "line": 119,
+    "section_bounds": [120, 125],
+    "match_count": 7,
+    "cross_refs": [
+      {"raw": "clause 7.4", "kind": "clause", "target_doc": null, "target_clause": "7.4", "resolved_file": null, "resolved_heading_id": "h_0022", "resolved": true, "resolution_status": "resolved"}
     ]
   }
 ]
@@ -95,13 +98,15 @@ for the second and third ranked results below):
 
 Two things worth noticing in this real output:
 
-1. **`clause_id` is parsed structurally, not guessed.** `"7.5 Drift correction"` becomes
-   `clause_id: "7.5"` with a clean display title — the indexer never touches an LLM to do this.
-2. **Cross-refs resolve to concrete headings.** `"clause 7.3"` inside clause `7.5`'s body text
+1. **`clause_id` is parsed structurally, not guessed.** `"7.5.2 Correction algorithm"` becomes
+   `clause_id: "7.5.2"` with a clean display title — the indexer never touches an LLM to do this.
+2. **Cross-refs resolve to concrete headings.** `"clause 7.3"` inside clause `7.5.2`'s body text
    resolves to `resolved_heading_id: "h_0021"` — the indexer can hop from one clause to another
-   it cites, which is exactly what "clause 7.5 references clause 7.3's drift measurement" means
-   in the source text. (This resolution is single-hop and same-file today — see
-   [`ROADMAP.md`](../../ROADMAP.md) for cross-file/multi-hop resolution status.)
+   it cites, which is exactly what "clause 7.5.2 references clause 7.3's drift measurement" means
+   in the source text. Every hop in this demo is same-file (`resolved_file: null`, `target_doc:
+   null`), but the same fields carry a real value when the citation is cross-file — see
+   [`cross-file-resolution-demo/WALKTHROUGH.md`](../cross-file-resolution-demo/WALKTHROUGH.md)
+   for that case, and [`ROADMAP.md`](../../ROADMAP.md) item 1 for full status.
 
 ## Step 3 — how this feeds `ult-context-generate`
 
