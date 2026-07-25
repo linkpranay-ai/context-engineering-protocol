@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="340" viewBox="0 0 1200 340"
+     role="img" aria-labelledby="title desc">
+  <title id="title">Context Engineering Protocol</title>
+  <desc id="desc">Repository name and tagline on the left. On the right, a vertical pipeline: Sources, then Gap, Conflict, and Staleness checks, then an emphasized Human approval step, then Downstream skill.</desc>
+
+  <defs>
+    <clipPath id="cardClip">
+      <rect width="1200" height="340" rx="20"/>
+    </clipPath>
+    <linearGradient id="darkPanel2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1B1E26"/>
+      <stop offset="100%" stop-color="#10121A"/>
+    </linearGradient>
+  </defs>
+
+  <g clip-path="url(#cardClip)">
+    <rect x="0" y="0" width="1200" height="340" fill="url(#darkPanel2)"/>
+
+    <!-- eyebrow, title, tagline, metadata -->
+    <g transform="translate(112,0)">
+      <text x="0" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" letter-spacing="1.5" fill="#8B8F99">AI-CODING-AGENT SKILLS &#183; CLAUDE CODE / COPILOT</text>
+
+      <text x="0" y="112" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="44" font-weight="700" fill="#F5F6F8">Context Engineering</text>
+      <text x="0" y="172" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="44" font-weight="700" fill="#F5F6F8">Protocol</text>
+
+      <text x="0" y="214" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18" fill="#B9BDC6">Human-approved, source-attributed context &#8212;</text>
+      <text x="0" y="238" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18" fill="#B9BDC6">code graph + requirements + conventions &#8212; before generation runs.</text>
+
+      <text x="0" y="278" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#7A7E88">Apache-2.0 &#183; v0.1.0 &#183; 5 skills &#183; CI passing</text>
+    </g>
+
+    <!-- vertical pipeline, right side -->
+    <g transform="translate(780,40)">
+      <line x1="16" y1="8" x2="16" y2="248" stroke="#3A3D46" stroke-width="2"/>
+
+      <!-- row 1: sources -->
+      <circle cx="16" cy="16" r="9" fill="#14161D" stroke="#8B8F99" stroke-width="2.5"/>
+      <text x="44" y="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#F5F6F8">Sources</text>
+      <text x="44" y="34" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9AA0AC">code graph + requirements + conventions</text>
+
+      <!-- row 2: gap / conflict / staleness -->
+      <circle cx="16" cy="86" r="9" fill="#14161D" stroke="#8B8F99" stroke-width="2.5"/>
+      <text x="44" y="82" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#F5F6F8">Gap &#183; Conflict &#183; Staleness</text>
+      <text x="44" y="104" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9AA0AC">checked before anything is approved</text>
+
+      <!-- row 3: human approval (emphasized, solid diamond) -->
+      <rect x="4" y="144" width="24" height="24" rx="4" transform="rotate(45 16 156)" fill="#F5F6F8"/>
+      <text x="44" y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="22" font-weight="700" fill="#F5F6F8">Human approval</text>
+      <text x="44" y="174" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9AA0AC">the one required, non-automated step</text>
+
+      <!-- row 4: downstream skill -->
+      <circle cx="16" cy="216" r="9" fill="#14161D" stroke="#8B8F99" stroke-width="2.5"/>
+      <text x="44" y="212" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#F5F6F8">Downstream skill</text>
+      <text x="44" y="234" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9AA0AC">consumes the content-hashed package</text>
+    </g>
+  </g>
+
+  <rect x="1" y="1" width="1198" height="338" rx="19" fill="none" stroke="#3A3D46" stroke-width="1.5"/>
+</svg>
