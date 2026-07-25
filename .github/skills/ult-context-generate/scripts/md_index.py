@@ -48,6 +48,21 @@ _LOW_HEADING_DENSITY_THRESHOLD = 150
 # false-trigger.
 _LOW_HEADING_DENSITY_MIN_LINES = 200
 
+# A term appearing in a heading's own title is a much stronger relevance
+# signal than the same term recurring in body prose -- without this, a term
+# that happens to recur across many *sibling* sections' own content (e.g. a
+# name mentioned in passing by several neighboring definitions) can outrank
+# the one section that is actually about it. Counted on top of the plain
+# body+title count below, not as a replacement for it.
+#
+# This only distinguishes a target section from siblings whose own titles
+# DON'T also contain the term -- when every sibling in a family shares the
+# same title vocabulary (e.g. a chapter of same-shaped "X AVP" / "Y AVP"
+# subsections), every title gets an equal boost and relative ranking still
+# falls back to raw body match count. Closing that remaining gap needs
+# corpus-wide term-frequency normalization, a larger change left for later.
+_TITLE_MATCH_WEIGHT = 4
+
 
 # --------------------------------------------------------------------------- #
 # Profiles                                                                     #
@@ -714,9 +729,12 @@ def query_index(index_path, terms, top):
                 body = ""
             else:
                 body = "\n".join(lines[start - 1:own_end])
-            # Also let the heading title match (helps short sections).
+            # Title matches count on their own, weighted more heavily, on
+            # top of the plain title+body count -- see _TITLE_MATCH_WEIGHT.
+            title_count = sum(len(r.findall(h["title"])) for r in term_res)
             haystack = h["title"] + "\n" + body
             count = sum(len(r.findall(haystack)) for r in term_res)
+            count += title_count * (_TITLE_MATCH_WEIGHT - 1)
             if count > 0:
                 results.append({
                     "file": fentry["path"],
