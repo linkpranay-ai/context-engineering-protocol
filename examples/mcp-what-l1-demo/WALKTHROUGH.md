@@ -92,35 +92,37 @@ $ python .github/skills/ult-context-generate/scripts/md_index.py query \
     "drift correction window" --top 1
 ```
 
-Real output (trimmed to the top result). Note `cross_refs` now also carries `target_doc`,
-`resolved_file`, and `resolution_status` — fields added since this demo was first drafted, by
-`md_index.py`'s cross-file citation resolution (ROADMAP item 1 Phase B):
+Real output (the top result). Note `cross_refs` now also carries `target_doc`, `resolved_file`,
+and `resolution_status` — fields added since this demo was first drafted, by `md_index.py`'s
+cross-file citation resolution (ROADMAP item 1 Phase B):
 
 ```json
 [
   {
     "file": "kb-204-sync-config.md",
-    "clause_id": null,
-    "title": "KB-204: Beacon Sync Configuration Reference (Engineering Wiki)",
-    "heading_id": "h_0000",
-    "line": 3,
-    "section_bounds": [4, 28],
-    "match_count": 15,
+    "clause_id": "3.1",
+    "title": "3.1 Drift Correction Window",
+    "heading_id": "h_0002",
+    "line": 12,
+    "section_bounds": [13, 18],
+    "match_count": 16,
     "cross_refs": [
-      {"raw": "clause 3.1", "kind": "clause", "target_clause": "3.1", "target_doc": null,
-       "resolved_heading_id": "h_0002", "resolved_file": "kb-204-sync-config.md",
-       "resolution_status": "resolved_same_file", "resolved": true},
-      {"raw": "clause 3.2", "kind": "clause", "target_clause": "3.2", "target_doc": null,
-       "resolved_heading_id": "h_0003", "resolved_file": "kb-204-sync-config.md",
-       "resolution_status": "resolved_same_file", "resolved": true}
+      {"raw": "clause 3.2", "kind": "clause", "target_doc": null, "target_clause": "3.2",
+       "resolved_file": null, "resolved_heading_id": "h_0003", "resolved": true,
+       "resolution_status": "resolved"}
     ]
   }
 ]
 ```
 
-Cross-reference resolution (D14, citation-following) works identically to a hand-authored local
-corpus — `md_index.py` has no idea (and needs no idea) that `kb-204-sync-config.md` came from an
-MCP fetch instead of a human dropping a file into a directory.
+The query ranks `3.1 Drift Correction Window` directly to the top — its own text contains "drift",
+"correction", and "window" together, ahead of the whole-document root and the sibling `3.2
+Sign-off Requirements` clause. Its one cross-ref (`clause 3.2`, same-file) resolves to
+`resolved_heading_id: "h_0003"` with `target_doc`/`resolved_file` both `null`, exactly as any
+same-file citation would. Cross-reference resolution (D14, citation-following) works identically
+to a hand-authored local corpus — `md_index.py` has no idea (and needs no idea) that
+`kb-204-sync-config.md` came from an MCP fetch instead of a human dropping a file into a
+directory.
 
 ## Step 3 — re-fetch with unchanged upstream content: confirm the no-op
 

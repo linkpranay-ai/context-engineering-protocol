@@ -289,6 +289,9 @@ release checklist.
   `allowed-tools`-style field constraining what it's permitted to call — every skill assumes full
   tool access from its runtime. Worth adding once there's a concrete use case (e.g. a read-only
   variant of a skill) rather than speculatively.
+- **CI-enforced skill quality linter.** `CONTRIBUTING.md`'s skill quality standards (frontmatter
+  completeness, body structure) are currently reviewed by hand on every PR. Porting a full
+  frontmatter/body linter into `.github/workflows/ci.yml` is open future work, not yet started.
 
 ## Not on this roadmap
 

@@ -20,6 +20,22 @@ negative_control: <true|false>   # true if this case is deliberately chosen to s
                                    # where CEP adds little or no value
 ```
 
+## Results at a glance
+
+A short table, placed immediately after the header (before §1), giving a reader the numbers
+without reading the full case. One row per comparison actually measured — no placeholder rows, and
+no row for a comparison you didn't run:
+
+| Metric | Without CEP (naive keyword search) | With CEP | Kind |
+| --- | --- | --- | --- |
+| Did the naive baseline find the real integration point? | Yes / No / Partial | Found (What-Lx) | Measured |
+| Naive read cost to confirm the same finding | `<file>` in full, `<N>` words (~`<M>` tokens) | `<N>` words (~`<M>` tokens) — the generated context package | Measured |
+| `graphify benchmark` reduction (if run) | naive-full-corpus-read baseline | `<N>`x fewer tokens/query (`<node/edge counts>`) | Measured |
+
+Every cell is tagged `Measured` or `Inference` per §5-§6 of `../EVIDENCE-METHODOLOGY.md` — never
+leave a number untagged. If a comparison wasn't run for this case, omit the row rather than
+guessing.
+
 ## 1. Environment
 
 What was installed, which CEP version/commit, which runtime (Claude Code, Copilot, Codex, etc.),

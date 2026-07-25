@@ -66,7 +66,7 @@ was framed, not invented for the case study.
 
 ## 3. Source set
 
-What-L3: `fastapi/` graphed via a single scoped `graphify update fastapi/ --no-cluster` run — 808
+What-L3: `fastapi/` graphed via a single scoped `graphify update fastapi/ --no-cluster` run — 911
 nodes / 2,568 edges. What-L2: `docs/en/docs/` searched directly (grep) — see §5's gap finding.
 What-L1: the OpenAPI Specification (141 real headings, no conversion workaround needed — see §5)
 indexed via `md_index.py index --profile generic` into `specs-out/index.json`. How-L2: repo root
@@ -189,7 +189,7 @@ reach — logged separately rather than reopening `DEF-003`.
 4. Build the What-L1 index: `python .github/skills/ult-context-generate/scripts/md_index.py index
    specs/external/ -o specs-out/index.json --profile generic`. Expect "Indexed 1 file(s), 141
    heading(s)".
-5. Build the What-L3 graph: `graphify update fastapi/ --no-cluster`. Expect 808 nodes / 2,568
+5. Build the What-L3 graph: `graphify update fastapi/ --no-cluster`. Expect 911 nodes / 2,568
    edges.
 6. Confirm the task's gap and exemplar directly:
    `grep -rn "callbacks:" fastapi/routing.py | head -3` (exemplar, many hits) and

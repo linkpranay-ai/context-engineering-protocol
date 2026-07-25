@@ -2,7 +2,7 @@
 
 Compares the three published cases now that all three carry real, measured "Results at a glance"
 tables (not just "inference, not measured"). See [`README.md`](README.md) for the case list and
-[`EVIDENCE-METHODOLOGY.md`](EVIDENCE-METHODOLOGY.md) §5-§6 for the measured-vs-inference
+[`EVIDENCE-METHODOLOGY.md`](../EVIDENCE-METHODOLOGY.md) §5-§6 for the measured-vs-inference
 distinction this document relies on throughout. Three cases is not a large sample — this is a
 first read of a pattern, not a statistically grounded claim.
 
@@ -14,8 +14,8 @@ first read of a pattern, not a statistically grounded claim.
 | [fastapi-response-links-parity](fastapi/CASE-STUDY.md) | fastapi/fastapi, Python, MIT | ~15.3x (15,767 words naive vs. 1,030 words CEP) | 5.6x (45,550 words → ~60,733 naive tokens) — smallest of the three | 911 nodes / 2,568 edges | No |
 | [textual-focus-chain-and-sparkline-baseline](textual/CASE-STUDY.md) | Textualize/textual, Python, MIT | Run A: ~17.6x (23,751 words naive vs. 1,346 words CEP). Run B (negative control): naive **cheaper** — 551 words vs. 902 words CEP | 39.6x (1,005,800 words → ~1,341,066 naive tokens) — largest of the three | 20,116 nodes / 59,448 edges | Yes |
 
-All figures above are Measured, per each case's own §8/§9, using the naive-keyword-search and
-`graphify benchmark` baselines defined in `EVIDENCE-METHODOLOGY.md` §4.
+All figures above are Measured, per each case's own "Results at a glance" table, using the
+naive-keyword-search and `graphify benchmark` baselines defined in `EVIDENCE-METHODOLOGY.md` §4.
 
 ## Where CEP helped
 

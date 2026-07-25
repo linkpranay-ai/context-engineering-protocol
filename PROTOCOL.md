@@ -7,7 +7,9 @@ This document explains the protocol in depth: the layer model, the cross-cutting
 dimension, the gap → conflict → staleness state machine, the human-approval gate, and the newly
 piloted How-L1 layer, not yet field-validated against a real corpus. For a shorter overview and a
 skill-by-skill index, see [`README.md`](README.md). For term definitions, see
-[`GLOSSARY.md`](GLOSSARY.md). For what's planned next, see [`ROADMAP.md`](ROADMAP.md).
+[`GLOSSARY.md`](GLOSSARY.md). For what's planned next, see [`ROADMAP.md`](ROADMAP.md). For how to
+check whether an implementation actually conforms to this spec, see
+[`CONFORMANCE.md`](CONFORMANCE.md).
 
 ## Interpretation of MUST/SHOULD/MAY
 

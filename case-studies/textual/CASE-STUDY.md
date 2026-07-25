@@ -24,7 +24,7 @@ each run in turn; §5–§8 are split A/B where the two runs diverge, and merged
 | Run A: naive read cost to confirm both real sites | `screen.py`+`widget.py` in full, 23,751 words (~31,668 tokens) | 1,346 words (~1,795 tokens) — the generated context package, ~17.6x fewer tokens | Measured |
 | Run B: naive read cost (negative control) | `sparkline.py` alone, 551 words (~735 tokens) | 902 words (~1,203 tokens) — the generated context package | Measured |
 | Run B: cheaper path | **Naive wins** — reading the file directly costs ~1.6x fewer tokens than the full CEP package for this self-contained target | — | Measured |
-| `graphify benchmark` reduction (whole `src/` corpus) | naive-full-corpus-read baseline | 39.6x fewer tokens/query (20,116 nodes / 59,448 edges) | Measured |
+| `graphify benchmark` reduction (whole `src/` corpus) | naive-full-corpus-read baseline | 39.6x fewer tokens/query (1,005,800 words → ~1,341,066 naive tokens; 20,116 nodes / 59,448 edges; avg ~33,877 tokens/query) | Measured |
 
 **Retrospective, not blind** (`EVIDENCE-METHODOLOGY.md` §7): the `focus_chain`/`disabled` queries
 above are the natural first greps a developer would try from the task's own wording, run after
@@ -47,7 +47,7 @@ Setup: `context-config.yaml` hand-edited once for the whole clone —
 What-L3 `path: src/` (budget 50), What-L2 `path: docs/guide/` (budget 30, indexed via
 `md_index.py` into `specs-out/l2_index.json`, `md_index_profile: generic`), What-L1 disabled,
 How-L2 `path: .` cached to `org-conventions/`, `graphify.graph_path: graphify-out/graph.json`.
-The code graph (`graphify update`) was built once and reused for both runs: 20,496 nodes / 59,448
+The code graph (`graphify update`) was built once and reused for both runs: 20,116 nodes / 59,448
 links.
 
 ## 2. Task
@@ -182,7 +182,7 @@ query`'s same-name-collision noise, `DEF-001`) is a graph-build configuration ga
 2. Copy this repo's `context-engineering-oss` starter kit into the clone (`.github/skills/`,
    `starter_kit/`, `context-config.yaml` per §1 above).
 3. Build the code graph: `graphify update . --no-cluster` (from the clone root). Expect roughly
-   20,496 nodes / 59,448 links.
+   20,116 nodes / 59,448 links.
 4. Build the What-L2 index: `python .github/skills/ult-context-generate/scripts/md_index.py
    build --path docs/guide/ --out specs-out/l2_index.json`.
 5. **Run A:** invoke `ult-context-generate` with the task text from §2 (Run A). Expect What-L3

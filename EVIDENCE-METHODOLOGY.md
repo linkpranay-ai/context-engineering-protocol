@@ -98,8 +98,8 @@ representative for a given claim when it is:
 
 ## 5. Measurement definitions
 
-A number in this project's documentation is one of two kinds. Every future evidence record should
-state which kind it is:
+A number or outcome in this project's documentation is one of three kinds. Every future evidence
+record should state which kind it is:
 
 - **Measured** — produced by running code against real data and reading its output directly.
   Example: a citation count from `contexts/USAGE_REPORT.md` (`scripts/usage_report.py`), which
@@ -108,6 +108,12 @@ state which kind it is:
 - **Self-reported** — an estimate not backed by a harness run against real session data.
   `README.md`'s current token-cost claims are explicitly this kind ("partly self-reported... not
   yet independently measured against a real, large repo").
+- **Inference** — a qualitative judgment call, not a number at all — e.g. whether a package
+  "helped" a downstream task, made without a controlled comparison against a no-CEP baseline. This
+  is the category `case-studies/TEMPLATE.md` §8 asks case studies to distinguish from a measured
+  outcome (an artifact you can point to). Inference is not a weaker form of self-reported; it's a
+  different kind of claim (judgment, not estimate) and should be labeled as such, not folded into
+  either of the two above.
 
 The `tokens_used` field added to the addenda schema (ROADMAP item 7) exists specifically to let
 token-cost claims move from self-reported to measured, once operators start recording real per-run
@@ -159,3 +165,5 @@ measured, regardless of how it is phrased.
   format for recording a measurement, populated with a real (small-scale, non-representative)
   `graphify benchmark` run and a real naive-keyword-search fallback-relevance run as worked
   examples.
+- [`CONFORMANCE.md`](CONFORMANCE.md) — how to check whether an implementation actually conforms to
+  the protocol these measurements are evaluating.

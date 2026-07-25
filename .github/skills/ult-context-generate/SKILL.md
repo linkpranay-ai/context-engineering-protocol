@@ -2,7 +2,7 @@
 name: context-generate
 description: Assemble a context package (code graph, requirements, constraints, blast radius) before a downstream generation task runs - human-approved, source-attributed. Do NOT use for simple lookups.
 namespace: ult
-version: 0.1.0
+version: 0.2.0
 origin: ground-up
 author: Pranay Mishra
 maintainer: Pranay Mishra
@@ -135,13 +135,14 @@ cross-references — "the graphify for markdown"; see `scripts/README.md`) at
 cross-reference conventions for this corpus's house style — see
 `scripts/README.md` "Profiles". `graphify_budget` is a soft cap on how many
 section line-ranges Step 7.1 reads per both-layers-gap aspect. The index also carries each
-section's single-hop, same-file cross-references (`clause X`, `Annex Y`, `(see
-Z)`, profile-dependent), already resolved (D14) — Step 7.1 follows these with no
+section's cross-references (`clause X`, `Annex Y`, `(see
+Z)`, profile-dependent), already resolved (D14) — same-file and, since R9 (ROADMAP item 1,
+Phase B), cross-file via each file's `doc_id` front matter — Step 7.1 follows these with no
 further parsing. This is **zero-LLM extraction**: a stdlib subprocess builds the
-index; the agent only reads matched line-ranges (D13/D14). Larger per-spec-family
-corpora (e.g. a full 3GPP series) and cross-FILE citation-following are future
-work (Open Question 1 in `CONTEXT-ENGINEERING-DESIGN.md`; R9), not part of this
-pilot.
+index; the agent only reads matched line-ranges (D13/D14). Validating this against larger
+per-spec-family corpora (e.g. a full 3GPP series) is still future work (Open Question 1 in
+`CONTEXT-ENGINEERING-DESIGN.md`), not part of this pilot — see
+`examples/cross-file-resolution-demo/WALKTHROUGH.md` for a worked cross-file example.
 
 `allow_web_fallback` (default `false`) is a separate opt-in, independent of
 `enabled`/indexing: when `true`, Step 7.1 step 5a may attempt one scoped
@@ -331,10 +332,6 @@ and save to `org-conventions/<TASK_TYPE>.yaml` with `source: user_provided`.
 In both cases, after saving, note whether to commit this file to the repo based on
 `context-config.yaml` `org_conventions.commit_to_repo` (default: true — recommend
 the user `git add org-conventions/` after this session).
-
-For `user-story`, a ready-to-copy starting template is available at
-`starter_kits/context_engineering/user-story.yaml.template` in this library —
-offer it as option (a)'s starting point rather than generating one from scratch.
 
 ---
 
