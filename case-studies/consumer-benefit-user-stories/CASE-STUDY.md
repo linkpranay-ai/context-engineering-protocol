@@ -13,7 +13,7 @@ Every other case in this directory measures CEP's benefit on a **retrieval** tas
 right integration point or clause cheaper than a naive search would. This case measures a different
 kind of benefit: whether an approved context package makes a **downstream consuming skill's
 generated output** better, not just cheaper to produce. The consuming skill is
-`spw-write-user-story` — a real, already-built, ground-up skill from the RadiSys Skills Guild (not
+`spw-write-user-story` — a real, already-built, ground-up skill maintained outside this repo (not
 part of CEP, not built for this case study) that writes user stories for a feature from either a
 loaded context package or a bare ask. A vendored, reference-only copy lives in
 [`vendored-skill/`](vendored-skill/) for reproducibility — see that directory's header note and
@@ -104,7 +104,7 @@ checkable against the real `dogfood-textual` source where possible:
 - **Hallucination** — does it invent APIs/behavior that don't exist?
 - **Actor coverage** — distinct, feature-relevant actors named vs. generic filler.
 - **NFR specificity** — acceptance criteria with a number+unit vs. vague terms (the same gate
-  `spw-write-user-story` Step 4 already self-checks for its own D12 discipline).
+  `spw-write-user-story` Step 4 already self-checks for).
 - **Testability** — could an engineer write a test straight from the acceptance criteria?
 - **Convention adherence** — does the output match the org convention's `required_sections`, or
   invent its own shape?
@@ -214,7 +214,7 @@ header note). A future package-generation pass over this same feature should re-
 `graphify affected`/`explain` on `Widget.focusable` surfaces this second site.
 
 **Gate mechanics check form, not provenance — a real, disclosed gap, not unique to this case.**
-NFR-001's Mode 1 number passes the D12 threshold gate (a number+unit is present) while being
+NFR-001's Mode 1 number passes the threshold gate (a number+unit is present) while being
 self-disclosed as unvalidated. The gate was never designed to verify a number's provenance, only its
 presence — worth naming plainly rather than letting a passing gate read as a stronger guarantee than
 it is.

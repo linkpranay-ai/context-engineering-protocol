@@ -1,9 +1,13 @@
 <!--
 Vendored reference copy, for reproducibility of the consumer-benefit-user-stories
 case study. NOT part of this repo's installable skill set — origin: ground-up,
-maintained by RadiSys Skills Guild in the sibling Experiment_Threat_Modeling repo,
-not context-engineering-oss. See ROADMAP.md "Not on this roadmap" and
-case-studies/consumer-benefit-user-stories/CASE-STUDY.md.
+maintained outside context-engineering-oss, in the same spirit as the
+FastAPI/Textual/Open5GS corpora this repo is demonstrated against rather than
+adopting. See ROADMAP.md "Not on this roadmap" and
+case-studies/consumer-benefit-user-stories/CASE-STUDY.md. Internal decision-log
+citations from the source skill (e.g. "D12", "D19 v2") have been stripped below
+since they point at a design doc that isn't part of this repo — the substance
+of each gate/rule they labeled is kept, just not the label.
 -->
 
 ---
@@ -13,7 +17,7 @@ namespace: spw
 version: 0.1.0
 origin: ground-up
 author: Pranay Mishra
-maintainer: RadiSys Skills Guild
+maintainer: Pranay Mishra
 adapted_from: ~
 upstream_version: ~
 released: 2026-06-30
@@ -26,14 +30,13 @@ tier: act
 
 > **Status: piloting.** The actor-identification pass (Step 2.5), the constraint
 > routing table (Step 3b — Enabler stories vs. Requirement Notes vs. Sequencing
-> Notes), and the D12 coverage gates (Step 4 — actor coverage, NFR threshold,
+> Notes), and the coverage gates (Step 4 — actor coverage, NFR threshold,
 > Requirement Note coverage, Enabler cross-reference) were validated end-to-end on a
 > real RBAC guest-role feature, including the full Enabler/Requirement-Note backlog
-> shaping for Jira-ready output, before this migration — see
-> `CONTEXT-ENGINEERING-DESIGN.md` D12 for the full design rationale. This skill always
+> shaping for Jira-ready output, before this migration. This skill always
 > runs against an approved `ult-context-generate` context package (also piloting,
 > `utilities` bundle) — install both bundles together. Report findings (works well /
-> doesn't / surprises) back to the RadiSys Skills Guild so this can graduate out of
+> doesn't / surprises) back to its maintainers so this can graduate out of
 > pilot status or be reworked.
 
 Writes user stories for a given feature. Checks for an approved context package first;
@@ -43,7 +46,7 @@ if not found, invokes `ult-context-generate` before generating stories.
 
 ## Step 1 — Context package check
 
-**Tagged-input check (D19 v2):** if the user's request included an existing
+**Tagged-input check:** if the user's request included an existing
 artifact — e.g. "add more stories related to this Jira item: <pasted text>",
 or a file path to an already-generated story — run
 `CONSUMING-CONTEXT-PACKAGE.md` item 0 against it first. Any `contexts/<id>.yaml`
@@ -153,7 +156,7 @@ Using **both** context packages as your primary inputs:
 ### 3a — Document header
 
 Build the output document's header block:
-- **Context package(s)** (D19 v2) — first line of the header:
+- **Context package(s)** — first line of the header:
   `**Context package(s):** <package-id>@<hash8> (human_approved[, N addenda])`
   for each `contexts/<id>.yaml` product context package loaded in Step 1
   (`;`-separated if more than one). This is the document-level tag
@@ -164,13 +167,13 @@ Build the output document's header block:
 - **Scope** — as today: capabilities in/out, key behavioral decisions from
   `decisions_log`
 - **Affected Areas** — one line summarizing Step 4.5's blast-radius/interaction-points
-  `context_items` (`type: blast-radius`, D10): the modules/files this feature touches
+  `context_items` (`type: blast-radius`): the modules/files this feature touches
   or whose behavior it depends on. If Step 4.5 found "no dependents," say so — that's
   a useful isolation signal for reviewers too.
 
 ### 3b — Route constraints and system-level requirements
 
-Before the actor brainstorm, sort `layer: constraints` `context_items` (D11, if
+Before the actor brainstorm, sort `layer: constraints` `context_items` (if
 present) and any other context_items describing system-level/cross-cutting
 requirements with no natural actor (schema/migration impact, backward-compatibility,
 determinism, audit/observability invariants):
@@ -195,7 +198,7 @@ ordering, both of which can miss actor-specific perspectives (e.g. testability,
 auditability) that don't map to an existing context item.
 
 **Each story's body begins with a `[Context: ...]` tag as its first line**
-(D19 v2 C6/C8 — this is what survives a Jira push, letting a later reader of
+(this is what survives a Jira push, letting a later reader of
 the pushed ticket discover the source context package without access to this
 repo):
 
@@ -248,7 +251,7 @@ Before presenting the stories, ask yourself:
 - Are the acceptance criteria testable?
 - Did I follow the org convention template?
 
-**D12 gates — check each explicitly:**
+**Coverage gates — check each explicitly:**
 - **Actor coverage**: does every actor confirmed in Step 2.5 have `[Actor: <name>]` on
   at least one story? If not, either add a story for that actor or note "no story for
   <actor> — because <reason>."
@@ -259,7 +262,7 @@ Before presenting the stories, ask yourself:
   a scenario/criterion that actually verifies it (added if it didn't already exist)?
 - **Enabler cross-reference**: does each Enabler story list `Referenced by: <story
   IDs>`, and does each referenced story carry the matching `[Enabler: ENB-NNN]` tag?
-- **Context tag gate (D19 v2)**: does every functional/NFR/Enabler story's
+- **Context tag gate**: does every functional/NFR/Enabler story's
   body begin with a `[Context: <package-id>@<hash8> · ...]` line, and does
   every `<package-id>@<hash8>` it uses match a package actually loaded in
   Step 1?
@@ -348,7 +351,7 @@ If (a) or (b): make changes. If (c): done. Offer to write the stories to a file
 at `output_docs/user-stories/<feature-slug>_user-stories_<date>.md` if the user wants
 to persist them.
 
-**`user_stories_output` (D20 Phase 2, D21 §16.4):** `output_docs/user-stories/`
+**`user_stories_output`:** `output_docs/user-stories/`
 above is the `user_stories_output` path-slot, resolved via
 `ult-repo-layout/SKILL.md`'s "Path resolution algorithm (§15.5 + §16.2)" — not
 a hardcoded path. If `/ult-repo-layout init|reconcile` has run for this
