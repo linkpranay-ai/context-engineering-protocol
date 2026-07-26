@@ -133,3 +133,55 @@ limitation: >
   blind search. The naive_read_cost is real (the RFC file's real word count),
   not estimated.
 ```
+
+## Consumer-output-quality record (bare-ask baseline)
+
+```yaml
+kind: consumer-output-quality
+tool: <the downstream consuming skill actually run — not a CEP-native tool>
+measurement_type: measured   # both modes actually run; citations actually grep-checked
+task: <one line, the feature/ask given to the consuming skill>
+context_package: <package id + content_hash used for the "with CEP" mode>
+bare_ask: <the exact one-to-two-sentence wording used for the "without CEP" mode>
+date_run: <YYYY-MM-DD>
+result:
+  real_citations: <count, with-CEP vs. without-CEP — grep-verified against the target codebase>
+  hallucinated_apis_or_concepts: <count, with-CEP vs. without-CEP — confirmed absent via grep>
+  distinct_actors_named: <count, with-CEP vs. without-CEP>
+  nfr_criteria_with_number_and_unit: <count/total, with-CEP vs. without-CEP>
+  required_sections_present: <count/total, with-CEP vs. without-CEP, if an org convention defines them>
+  notes: <anything that complicates a clean win — a citation the with-CEP mode
+    still missed, a placeholder number that passed the gate without being
+    benchmarked, etc.>
+limitation: >
+  One consuming skill, one feature, one run per mode — see
+  EVIDENCE-METHODOLOGY.md §7 for what this does not yet show.
+```
+
+**Worked example — a real run, not a hypothetical.** From
+`case-studies/consumer-benefit-user-stories/CASE-STUDY.md`:
+
+```yaml
+kind: consumer-output-quality
+tool: spw-write-user-story (ground-up consuming skill, vendored reference-only copy)
+measurement_type: measured
+task: Allow a disabled Button to remain in the keyboard focus chain instead of being skipped.
+context_package: disabled-widget-focusable_feature-add_20260706@4ed6ad43
+bare_ask: "Add support for disabled widgets to remain focusable. Users should be able to Tab to a disabled button so they know why it's disabled — add an opt-in setting for this."
+date_run: 2026-07-25
+result:
+  real_citations: "8 (with CEP) vs. 0 (without CEP)"
+  hallucinated_apis_or_concepts: "0 (with CEP) vs. 2 (without CEP) — an invented method (Button.set_focusable_when_disabled()) and an imported-but-inapplicable ARIA/live-region concept, both confirmed absent via grep"
+  distinct_actors_named: "5 (with CEP) vs. 2, both generic (without CEP)"
+  nfr_criteria_with_number_and_unit: "1/1 (with CEP, self-disclosed as an unvalidated placeholder) vs. 0/1 (without CEP)"
+  required_sections_present: "7/7 per story (with CEP) vs. 0/7 (without CEP)"
+  notes: >
+    Even the with-CEP mode wasn't flawless: it missed a second, independent
+    disabled-check call site (widget.py:2368's focusable property) that the
+    approved context package's own context_items didn't cite — a real gap in
+    that specific package's coverage, not in the consuming skill. Logged in
+    the case's own §7/§10 rather than silently corrected after the fact.
+limitation: >
+  One consuming skill, one feature, one run per mode — see
+  EVIDENCE-METHODOLOGY.md §7 for what this does not yet show.
+```

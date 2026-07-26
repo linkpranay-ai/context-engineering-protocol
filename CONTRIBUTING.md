@@ -14,9 +14,12 @@ Several files in this repo cite `CONTEXT-ENGINEERING-DESIGN.md`,
 DESIGN.md` D16"). These are internal design documents from the maintainer's
 own working notes, not part of this repo — they're deliberately excluded
 from the public release and cited only as provenance breadcrumbs (which
-decision produced a given behavior), not as documents you can open. If a
-citation doesn't make sense standalone, treat the surrounding prose in this
-repo as the authoritative explanation.
+decision produced a given behavior), not as documents you can open. For
+`CONTEXT-ENGINEERING-DESIGN.md`'s `D<N>`/`§<N>` labels specifically, see
+[`references/design-scratchpad-glossary.md`](references/design-scratchpad-glossary.md)
+for a plain-English gist of each one. For the other two documents, or if a
+citation still doesn't make sense standalone, treat the surrounding prose in
+this repo as the authoritative explanation.
 
 ## Frontmatter requirements
 

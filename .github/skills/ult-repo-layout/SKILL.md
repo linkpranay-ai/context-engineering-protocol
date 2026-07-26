@@ -46,6 +46,9 @@ touching that mechanism.
 Read `references/phase-history.md` for the full D20/D21 phase-by-phase build
 history and exit criteria — not needed to operate this skill day to day.
 
+This file and others in this repo cite `D<N>`/`§<N>` labels (e.g. `D21 §16.2`) — see
+`../../../references/design-scratchpad-glossary.md` for what each one means.
+
 ## Dependencies
 
 None — this skill is foundational. `ult-context-generate` (`utilities`

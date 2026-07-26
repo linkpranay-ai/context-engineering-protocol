@@ -304,6 +304,25 @@ index. Wired as an explicit optional step in `references/what-l1-fallback-query.
   completeness, body structure) are currently reviewed by hand on every PR. Porting a full
   frontmatter/body linter into `.github/workflows/ci.yml` is open future work, not yet started.
 
+## 15. Thorough internal-citation cleanup (pre-1.0 gate)
+
+**Status: stopgap in place, full cleanup deferred.** ~37 files across this repo (skills, scripts,
+tests, reference docs, and `layout-slots-registry.yaml`) cite `CONTEXT-ENGINEERING-DESIGN.md`'s
+internal `D<N>`/`§<N>` decision and section labels (see `CONTRIBUTING.md`'s "A note on internal
+design-doc citations"). The current stopgap —
+[`references/design-scratchpad-glossary.md`](references/design-scratchpad-glossary.md), a
+plain-English index of every `D<N>`/`§<N>` label, linked from `CONTRIBUTING.md` and from the two
+most heavily-cited skills (`ult-context-generate/SKILL.md`, `ult-repo-layout/SKILL.md`) — makes
+every citation resolvable, but doesn't touch the citations themselves, and two sibling private
+docs (`WHAT-L1-AND-CONTEXT-REUSE-ASSESSMENT.md`, `ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md`) are
+cited in places too and aren't covered by the glossary at all. A thorough pre-1.0 pass should:
+rewrite each citation site to state its substance inline (dropping the private-doc pointer
+entirely, not just explaining it elsewhere) where that's cheap and low-risk; extend the glossary
+(or fold its content into the citing prose) for the two uncovered docs; and re-run the full local
+CI-equivalent gate afterward, since several affected files carry their own test coverage
+(`content_hash.py`, `md_index.py`, `validate_layout.py`, `discover_layers.py`,
+`validate_path_conformance.py`, and their `tests/`).
+
 ## Not on this roadmap
 
 Some things are deliberately out of scope rather than deferred:

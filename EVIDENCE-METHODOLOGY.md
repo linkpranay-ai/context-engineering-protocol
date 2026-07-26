@@ -11,7 +11,7 @@ project's current, disclosed evidence state.
 
 ## 1. What this project evaluates
 
-Three surfaces produce evaluable claims:
+Four surfaces produce evaluable claims:
 
 1. **Token efficiency** — whether querying the generated code graph (`ult-codegraph`) costs fewer
    tokens than a naive full-corpus read, for a given codebase.
@@ -20,12 +20,19 @@ Three surfaces produce evaluable claims:
    real filtering work rather than rubber-stamping.
 3. **Context-package usage** — whether the context items a package assembles are actually cited by
    the downstream artifacts that consume them, or sit unused (over-inclusion).
+4. **Consumer-output-quality** — whether an approved context package makes a downstream *consuming
+   skill's generated output* more grounded (traceable to real code, free of invented APIs/behavior)
+   than the same skill working from a bare ask alone. Distinct from (1)/(2): those measure retrieval
+   cost/precision; this measures the quality of what a generative downstream task produces once it
+   has (or lacks) that retrieval's output to work from.
 
 (3) has a real, running measurement mechanism (`scripts/usage_report.py`, ROADMAP item 7). (1) now
 has real recorded runs against three real corpora (§2) — no longer an unfilled gap, though still
 only three data points. (2) now has a defined baseline (§4) and a first retrospective application
 across the same three corpora — a real start, but not yet a general-purpose measurement mechanism
-(see §7 for what's still limited about it).
+(see §7 for what's still limited about it). (4) now has a first real run
+(`case-studies/consumer-benefit-user-stories/CASE-STUDY.md`, 2026-07-25) against one consuming
+skill and one feature — a real start, same single-case caveat as (2)'s first application.
 
 ## 2. Benchmark methodology
 
@@ -95,6 +102,16 @@ representative for a given claim when it is:
   First applied retrospectively across the three CEP-DP-001D case studies (2026-07-24) — see each
   case's "Results at a glance" table. This is a real baseline with real numbers, but see §7 for its
   disclosed limitation (retrospective, not blind) and its current single-round-of-cases scope.
+- **Bare ask** (consumer-output-quality, §1 surface 4): given only the task's own one-to-two-sentence
+  wording, the terse ticket a developer would actually start from — no context package, no actor
+  list, no constraints, no `[Context: ...]` tagging requirement — run through the same consuming
+  skill that would otherwise read an approved context package. Measured as: (a) how many of the
+  skill's own citations are real (checkable via grep against the target codebase) vs. invented, (b)
+  how many distinct, feature-relevant actors are named vs. generic filler, (c) whether NFR
+  acceptance criteria carry a number+unit, and (d) whether the output matches the project's own
+  `required_sections` convention or falls back to a generic shape. First applied for real in
+  `case-studies/consumer-benefit-user-stories/CASE-STUDY.md` (2026-07-25) — one consuming skill, one
+  feature; see that case's §9 for what this single application does not yet show.
 
 ## 5. Measurement definitions
 
@@ -136,6 +153,11 @@ measured, regardless of how it is phrased.
 - **Single-task-type testing.** ROADMAP item 13 names this directly for How-L1: only one task type
   has been queried against the smoke-test corpus, so relevance-ranking claims cannot yet be said to
   hold across task types.
+- **Consumer-output-quality is one consuming skill, one feature, one run per mode.** The first
+  application of this surface (§1 item 4, §4's bare-ask baseline) used a single ground-up consuming
+  skill (`spw-write-user-story`, not a CEP-native tool) against a single feature. It shows a real,
+  measured gap between the two modes for that one pairing — it does not yet show whether the gap
+  holds for a different consuming skill, a different task type, or a differently-worded bare ask.
 - **Relevance baseline is real but retrospective, not blind (§4).** The naive-keyword-search
   baseline now defined and applied across the three CEP-DP-001D cases reuses grep queries drawn
   from each case's own reproduction steps — a genuine first-attempt search a developer would try,

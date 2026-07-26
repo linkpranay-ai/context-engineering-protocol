@@ -202,6 +202,41 @@ retrospective against a task whose answer was already known, not a blind trial �
 [`case-studies/SYNTHESIS.md`](case-studies/SYNTHESIS.md) for the full analysis, limitations, and
 what these three cases do and don't support.
 
+**The table above measures retrieval cost. Two further cases measure a different question: does an
+approved package make a downstream consuming skill's *generated output* better, not just cheaper to
+produce?** Running a real, ground-up user-story-writing skill once against an approved context
+package and once from a bare ask, on the same feature, found a measured gap on every dimension
+checked — in two unrelated domains:
+
+| Case | Domain | Real citations: with CEP vs. bare ask | Hallucinations: with CEP vs. bare ask | Distinct actors named: with CEP vs. bare ask | Org-convention structure |
+|---|---|---|---|---|---|
+| [consumer-benefit-user-stories](case-studies/consumer-benefit-user-stories/CASE-STUDY.md) | UI framework (Python) | 8 vs. 0 | 0 vs. 2 (an invented method + an imported web-accessibility concept with no counterpart in the codebase) | 5 vs. 2 generic | Full vs. none |
+| [open5gs-gy-supported-features](case-studies/open5gs-gy-supported-features/CASE-STUDY.md) | Telecom protocol stack (C) | 18 vs. 0 | 0 vs. 1 (the *same* imported web-accessibility concept, this time in a codebase with no UI at all) | 5 vs. 2 generic | Full (7/7) vs. none (0/7) |
+
+The bare-ask mode's failure isn't just slower — it's a *materially different and partly wrong*
+answer, with no signal to the consuming developer that anything was invented. The repeated
+web-accessibility hallucination across two unrelated domains suggests an ungrounded consuming
+skill's invention risk isn't bounded by domain plausibility.
+
+**The benefit also compounds past the user-story file itself.** Both cases found the same
+mechanical effect: every story an approved context package grounds carries a machine-checkable
+provenance tag, so any later stage of work that picks up that output — not just the story-writing
+step — gets the same grounding for free instead of re-deriving it:
+
+- **Design/review stage** — a design can be checked against the story's own scope and actors
+  directly, instead of a reviewer having to rediscover them from scratch.
+- **Planning stage** — every acceptance criterion traces to a concrete task, and disclosed gaps
+  carry forward as explicit planning items instead of being silently treated as settled.
+- **Test-writing stage** — acceptance criteria that already read as concrete pass/fail conditions
+  become the test directly, not a paraphrase target.
+- **Implementation stage** — each story's acceptance criteria become that piece of work's
+  definition of done.
+
+A bare-ask-only story carries no such tag, so that cost — or worse, an unflagged hallucination — is
+paid again independently at every one of those later stages. See each case's own "Downstream
+compounding benefit" section for the full trace and its disclosed limitations (this is a mechanical
+trace against the consuming skill's documented contract, not an actual run of any further stage).
+
 ## What's not yet done
 
 Disclosed plainly rather than glossed over. Full prioritized list with more detail:
