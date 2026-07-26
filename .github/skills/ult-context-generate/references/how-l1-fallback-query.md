@@ -63,6 +63,18 @@ results.
    **If the build/refresh fails** (e.g. `how_l1.path` doesn't exist or contains no `.md` files):
    treat as "How-L1 returns nothing" — go directly to Step 2's existing D8 branch.
 
+   **Optional — skim the skeleton first, for a large or unfamiliar corpus
+   (ROADMAP item 13).** If `how_l1.path` covers many process-standard files or
+   you don't yet know how the corpus is organized, run:
+   ```
+   python scripts/md_index.py skeleton <how_l1.index_path> [--max-depth N]
+   ```
+   Prints `doc_id` + a compact heading/clause-ID tree per file — no body text,
+   no `section_bounds`, no `cross_refs` — over the index already built above.
+   Use it to orient yourself or narrow the task-type synonyms before Step 2's
+   query, not as a replacement for it. Skip for a small or already-familiar
+   corpus. See `scripts/README.md`'s `skeleton` section.
+
 2. **Query the index, once for this task type.** Run:
    ```
    python scripts/md_index.py query <how_l1.index_path> "<task_type + 2-4 curated process synonyms>" --top 10

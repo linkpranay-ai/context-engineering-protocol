@@ -283,6 +283,17 @@ recommended gate before flipping any project's `how_l1.enabled` default guidance
 until you've verified it yourself" to something more confident — a natural fit for a pre-1.0
 release checklist.
 
+**0.3.0 update: the scaling primitive this gap needs now exists.** `md_index.py skeleton`
+(`scripts/README.md`'s `skeleton` section) prints `doc_id` + heading/clause-ID tree only, no body
+text — a cheap first look at a large corpus's shape, measured ~6.7x smaller than the full
+`index.json` on this repo's own `examples/telecom-what-l1-demo/` corpus. This doesn't close the gap
+above — there is still no real or representative CMMI/ISO/IEEE corpus to validate against, and no
+live end-to-end `ult-context-generate` run through the How-L1 fallback branch — but it removes one
+real obstacle to attempting that validation once such a corpus is available: skimming a large
+corpus's structure before committing to per-aspect `query` calls no longer requires reading the full
+index. Wired as an explicit optional step in `references/what-l1-fallback-query.md` and
+`references/how-l1-fallback-query.md`.
+
 ## 14. Smaller, lower-priority items
 
 - **Capability-profile / tool-restriction frontmatter.** No skill currently declares an
@@ -314,3 +325,16 @@ Some things are deliberately out of scope rather than deferred:
   protocol treats as load-bearing (§3.4, and `PROTOCOL.md §3.1`'s no-automatic-conflict-resolution
   stance). Item 6 above takes the useful part of this idea — persisting lessons learned — but only
   after a human has already made the call, never automatically.
+- **Session-level runtime compaction** (from Anthropic's "Effective context engineering for AI
+  agents," its 5-stage compaction pipeline for long-running conversations). That's a concern of the
+  host agent runtime managing an ongoing session, not of CEP's pre-generation context-assembly
+  step — a context package is already CEP's compacted artifact for a given feature, produced once
+  per assembly rather than needing to be pruned mid-conversation.
+- **Comment-anchored live-studio UI** (from `okf-loom`'s hosted local web server with live SSE
+  patching of annotations onto source). Directly conflicts with the "no hosted/managed version of
+  this protocol" stance above — this repo ships skills you run inside your own agent runtime, not a
+  web server to stand up.
+- **Multiple ranked search modes / multi-bundle registry** (from `okf-gem`). No demonstrated need:
+  CEP's single deterministic ranking and per-project single corpus already serve real usage. Same
+  "considered, not needed in practice" disposition already applied to SelfCite/GraphRAG above —
+  logged as related prior art, not adopted.

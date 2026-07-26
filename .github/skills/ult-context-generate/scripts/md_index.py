@@ -13,6 +13,7 @@ CLI:
         [--exclude <subpath> ...] [--include-root <dir> ...]
     python md_index.py query <index.json> "<term1> <term2> ..." [--top N]
     python md_index.py query-batch <index.json> <queries.json> [--top N]
+    python md_index.py skeleton <index.json> [--max-depth N]
 
 See scripts/README.md for the JSON schema, profile schema, and the
 line-numbering / section-bounds convention.
@@ -753,6 +754,50 @@ def query_index(index_path, terms, top):
     return results[:top]
 
 
+def build_skeleton(index_path, max_depth=None):
+    """Return doc_id + heading/clause-ID tree only, no body text.
+
+    Unlike query_index, this never re-opens source files -- the index.json
+    itself already stores no section text (see query_index's docstring), so
+    a skeleton is a pure reformat of what is already on disk. This gives a
+    large What-L1/How-L1 corpus a cheap "what does this look like" pass
+    before a full query, matching the progressive-disclosure/just-in-time
+    retrieval pattern: skim the table of contents, then fetch only the
+    section that turns out to matter.
+    """
+    index_path = Path(index_path)
+    with index_path.open(encoding="utf-8") as fh:
+        index = json.load(fh)
+
+    out_files = []
+    for fentry in index["files"]:
+        headings = []
+        for h in fentry["headings"]:
+            if h.get("is_toc"):
+                continue
+            if max_depth is not None and h["level"] > max_depth:
+                continue
+            headings.append({
+                "id": h["id"],
+                "level": h["level"],
+                "title": h["title"],
+                "clause_id": h.get("clause_id"),
+                "line": h["line"],
+            })
+        out_files.append({
+            "path": fentry["path"],
+            "doc_id": fentry.get("doc_id"),
+            "headings": headings,
+        })
+
+    return {
+        "schema_version": index.get("schema_version"),
+        "profile": index.get("profile"),
+        "root": index.get("root"),
+        "files": out_files,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # CLI                                                                         #
 # --------------------------------------------------------------------------- #
@@ -838,6 +883,12 @@ def cmd_query_batch(args):
     return 0
 
 
+def cmd_skeleton(args):
+    skeleton = build_skeleton(args.index, max_depth=args.max_depth)
+    print(json.dumps(skeleton, indent=2, ensure_ascii=False))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="md_index.py",
@@ -886,6 +937,17 @@ def main(argv=None):
     p_query_batch.add_argument("--top", type=int, default=10,
                          help="Return at most N ranked matches per key (default: 10).")
     p_query_batch.set_defaults(func=cmd_query_batch)
+
+    p_skeleton = sub.add_parser(
+        "skeleton",
+        help="Print doc_id + heading/clause-ID tree only, no body text -- "
+             "a cheap first look at a large corpus before a full query.")
+    p_skeleton.add_argument("index", help="Path to index.json.")
+    p_skeleton.add_argument("--max-depth", type=int, default=None,
+                         help="Only include headings at or above this level "
+                              "(e.g. 1 for top-level sections only). Default: "
+                              "no limit.")
+    p_skeleton.set_defaults(func=cmd_skeleton)
 
     args = parser.parse_args(argv)
     return args.func(args)

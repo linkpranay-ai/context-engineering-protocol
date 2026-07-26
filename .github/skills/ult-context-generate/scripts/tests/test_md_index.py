@@ -592,5 +592,62 @@ class TestQueryBatch(unittest.TestCase):
             self.assertEqual(batched["2"], mi.query_index(out, ["network"], 10))
 
 
+class TestSkeleton(unittest.TestCase):
+    """Progressive-disclosure skeleton mode: doc_id + heading/clause-ID tree
+    only, no body text -- a cheap first look at a large corpus."""
+
+    def test_skeleton_excludes_toc_and_body_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "index.json"
+            index = mi.build_index(FIXTURES / "mixed_atx_setext.md", "generic")
+            with out.open("w", encoding="utf-8") as fh:
+                json.dump(index, fh)
+
+            skeleton = mi.build_skeleton(out)
+            self.assertEqual(len(skeleton["files"]), 1)
+            headings = skeleton["files"][0]["headings"]
+
+            # 'Contents' (is_toc=true) must never appear in the skeleton.
+            self.assertNotIn("Contents", [h["title"] for h in headings])
+
+            match = next(h for h in headings if h["clause_id"] == "2.2")
+            self.assertEqual(match["title"], "2.2 Network access security")
+            # No body/structural fields -- just id/level/title/clause_id/line.
+            self.assertEqual(
+                set(match), {"id", "level", "title", "clause_id", "line"})
+
+    def test_skeleton_max_depth_filters_by_level(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "index.json"
+            index = mi.build_index(FIXTURES / "mixed_atx_setext.md", "generic")
+            with out.open("w", encoding="utf-8") as fh:
+                json.dump(index, fh)
+
+            unlimited = mi.build_skeleton(out)
+            titles_unlimited = {h["title"] for h in unlimited["files"][0]["headings"]}
+            self.assertIn("1.1 General", titles_unlimited)  # level 4 (ATX ####)
+
+            shallow = mi.build_skeleton(out, max_depth=2)
+            titles_shallow = {h["title"] for h in shallow["files"][0]["headings"]}
+            self.assertNotIn("1.1 General", titles_shallow)
+            self.assertIn("2.2 Network access security", titles_shallow)
+
+    def test_cmd_skeleton_matches_build_skeleton(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "index.json"
+            index = mi.build_index(FIXTURES / "mixed_atx_setext.md", "generic")
+            with out.open("w", encoding="utf-8") as fh:
+                json.dump(index, fh)
+
+            args = types.SimpleNamespace(index=str(out), max_depth=None)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = mi.cmd_skeleton(args)
+            self.assertEqual(rc, 0)
+
+            printed = json.loads(stdout.getvalue())
+            self.assertEqual(printed, mi.build_skeleton(out))
+
+
 if __name__ == "__main__":
     unittest.main()
