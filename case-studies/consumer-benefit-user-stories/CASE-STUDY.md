@@ -40,7 +40,7 @@ by reference, not re-run.
 The NFR row needs its own caveat, not glossed over: Mode 1's number (5% p95, 200 widgets) is
 self-disclosed inside its own output as an unvalidated placeholder, not a benchmarked figure — it
 passes the *form* check (does the criterion carry a number+unit?) without passing a *provenance*
-check (was that number ever measured?). See §8 and §10.
+check (was that number ever measured?). See §9 and §11.
 
 ## 1. Environment
 
@@ -124,7 +124,7 @@ line 2374) — a second call site alongside the one Mode 1's ENB-001 did find (`
 `_check_disabled()` skip at `screen.py:808`). The approved context package's `context_items` didn't
 carry a citation for this second site, and Mode 1's output inherited that gap rather than catching
 it independently. This is a real, measured limitation of this specific package's coverage, not of
-the consuming skill — see §10.
+the consuming skill — see §11.
 
 **Hallucination — Measured.** Mode 1: 0. Mode 2: 2 — `Button.set_focusable_when_disabled()` (no
 match anywhere in `src/textual/`, confirmed via grep) and a screen-reader "ARIA live region"
@@ -163,14 +163,53 @@ present for every Enabler and story. Mode 2: 0 of 7 — with no convention loade
 back to a generic "As a / I want / So that" plus acceptance criteria shape only; Observability,
 Blast-radius, and Dependencies sections are absent from every story, not thinly covered.
 
-## 8. Outcome
+## 8. Downstream compounding benefit
+
+The value of the approved context package does not stop at the user-story
+file `spw-write-user-story` produces. Per
+[`vendored-skill/CONSUMING-USER-STORY-OUTPUT.md`](vendored-skill/CONSUMING-USER-STORY-OUTPUT.md)'s
+Detect/Extract/Apply/Announce contract, any later stage of work that picks up
+Mode 1's output finds, and can act on, its `[Context: ...]` tags — the same
+context package (decisions, gaps, evidence) that grounded the stories
+becomes available, pre-identified and already approved, to whatever work
+happens next, without re-deriving it from scratch:
+
+- At a **design/review stage**, a design can be cross-checked against the
+  story file's own scope and actor list, surfacing a scope mismatch (e.g.
+  the screen-reader-discoverability open question US-002 leaves unresolved)
+  rather than a reviewer having to rediscover it independently.
+- At a **planning stage**, every acceptance criterion can be traced to a
+  concrete task, and disclosed gaps (like NFR-001's self-flagged,
+  unbenchmarked placeholder) can be carried forward as an explicit planning
+  item instead of being silently treated as settled.
+- At a **test-writing stage**, acceptance criteria that already read as
+  concrete pass/fail conditions (US-001's `screen.focus_chain` assertion
+  style) become the test directly, not a paraphrase target.
+- At an **implementation stage**, each story's acceptance criteria become
+  that piece of work's definition of done.
+
+None of this is available to work that consumes Mode 2's output instead: it
+carries no `[Context: ...]` tag at all, so the "Detect" step of the same
+contract finds nothing to extract, and every stage above would have to
+re-derive scope and actors from the bare ticket a second (and third) time —
+or, worse, inherit Mode 2's own unflagged ARIA/fabricated-method
+hallucinations into a design document or test plan with no signal that
+either was ever invented. This is the compounding effect: the context
+package is generated once, but its value is spent repeatedly across every
+later stage that consumes the tagged output, while the bare-ask mode's cost
+(re-deriving scope, or worse, propagating an invented mechanism) is paid
+again independently at each stage. This trace is mechanical, based on the
+contract's own documented steps, not an actual run of any further stage
+against either mode's output — see §10's Limitations.
+
+## 9. Outcome
 
 **Measured, not inference, on every rubric dimension above** — this case study did not need to fall
 back to a judgment call anywhere in §7, because every claim (a citation is real or isn't, an API
 exists or doesn't, a section is present or isn't) is directly checkable against the pinned repo or
 the two generated files themselves. What remains a judgment call, and is disclosed as such, is
 whether this rubric is the *right* rubric, and whether one feature and one consuming skill
-generalizes — see §9.
+generalizes — see §10.
 
 The result is a clean, unambiguous win for the with-CEP mode on every dimension measured, with one
 honest asterisk: Mode 1's own output is not itself perfect (the missed second disabled-check call
@@ -178,7 +217,7 @@ site in §7's Traceability note; the self-disclosed-placeholder NFR number) — 
 that CEP measurably improves the generated output's grounding, not that it makes the output
 flawless.
 
-## 9. Limitations
+## 10. Limitations
 
 Single feature, single consuming skill, single codebase, one run per mode — not a blind trial and
 not a claim that generalizes to every consuming skill or every feature shape. Ground truth for the
@@ -193,7 +232,7 @@ correctly (the convention is a real, previously-approved artifact, not fabricate
 means the "convention adherence" dimension is partly measuring convention availability, which is a
 prerequisite CEP's approval workflow enables but doesn't itself guarantee exists for every project.
 
-## 10. Lessons learned
+## 11. Lessons learned
 
 **The core finding generalizes CEP's existing "grounding over guessing" story from retrieval to
 generation:** every other case in this directory shows CEP finding the right answer for fewer

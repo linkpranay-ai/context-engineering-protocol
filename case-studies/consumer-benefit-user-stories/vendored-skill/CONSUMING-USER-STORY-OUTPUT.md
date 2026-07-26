@@ -4,7 +4,7 @@ case study. NOT part of this repo's installable skill set — see SKILL.md in th
 same directory for the full note.
 -->
 
-# How a downstream spw skill consumes a generated user-story file
+# How a downstream stage of work consumes a generated user-story file
 
 > **Status: production.** Complements `CONSUMING-CONTEXT-PACKAGE.md` (which
 > covers the underlying YAML context package, `contexts/<id>.yaml`) — this
@@ -47,23 +47,23 @@ From the file:
 
 ## 3 — Apply (per consuming skill)
 
-- **`spw-brainstorm`**: design sections must not contradict any Acceptance
+- **Design/review stage**: design sections must not contradict any Acceptance
   Criterion. Cross-check the design's scope and actors against the story
   file's scope/actor list before presenting the design — flag any mismatch
   to the user rather than silently resolving it.
-- **`spw-write-plan`**: every Acceptance Criterion should trace to at least
+- **Planning stage**: every Acceptance Criterion should trace to at least
   one task. Before finalizing the plan, check each story (and each
   Requirement Note's `→ Covered by:` target) against the task list — flag
   any story with no corresponding task as a gap, not a silent omission.
-- **`spw-tdd`**: write tests directly from each story's Gherkin scenarios —
-  they're already in Given/When/Then form, not a paraphrase target. NFR
-  stories' measurable criteria (the threshold + unit) become the test's
-  assertion values directly.
-- **`spw-execute-plan` / `spw-subagent-dev`**: when implementing a task,
-  check whether it traces to a story (per the plan's own tracing from the
-  `spw-write-plan` step above). If so, treat that story's Acceptance Criteria
-  as the task's Definition of Done — implementation isn't complete until
-  every criterion the task claims to cover is demonstrably true.
+- **Test-writing stage**: write tests directly from each story's Gherkin
+  scenarios — they're already in Given/When/Then form, not a paraphrase
+  target. NFR stories' measurable criteria (the threshold + unit) become the
+  test's assertion values directly.
+- **Implementation stage**: when implementing a task, check whether it
+  traces to a story (per the plan's own tracing from the planning stage
+  above). If so, treat that story's Acceptance Criteria as the task's
+  Definition of Done — implementation isn't complete until every criterion
+  the task claims to cover is demonstrably true.
 
 ## 4 — Announce
 

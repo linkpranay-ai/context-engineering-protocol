@@ -65,6 +65,9 @@ tier: draft
 > `how_l1.enabled: false` until you've run it once against your own org's
 > process-standard `.md` files and confirmed the results look right.
 
+> This file and others in this repo cite `D<N>`/`§<N>` labels (e.g. `D11`, `D20 §15.5`) —
+> see `../../../references/design-scratchpad-glossary.md` for what each one means.
+
 ## Dependencies
 
 - **`ult-codegraph`** (`utilities` bundle) — Steps 4 and 4.5 query

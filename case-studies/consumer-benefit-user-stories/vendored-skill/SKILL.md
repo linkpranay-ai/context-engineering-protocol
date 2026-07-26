@@ -7,7 +7,11 @@ adopting. See ROADMAP.md "Not on this roadmap" and
 case-studies/consumer-benefit-user-stories/CASE-STUDY.md. Internal decision-log
 citations from the source skill (e.g. "D12", "D19 v2") have been stripped below
 since they point at a design doc that isn't part of this repo — the substance
-of each gate/rule they labeled is kept, just not the label.
+of each gate/rule they labeled is kept, just not the label. Names of sibling
+skills in the source skill's own family have likewise been generalized to the
+downstream stage they perform (design, planning, test-writing, implementation)
+rather than naming the family, to avoid disclosing that broader skill library
+here — again, the substance of each rule is kept, just not the names.
 -->
 
 ---
@@ -373,24 +377,23 @@ is `output_docs/user-stories/<feature-slug>_user-stories_<date>.md` (plural
 
 ## Downstream Usage — Traceability Handoff
 
-When handing the user story file to any downstream skill (`/spw-brainstorm`,
-`/spw-write-plan`, `/spw-tdd`, etc.), mention its path explicitly so the
-downstream skill can activate **User Story Mode**:
+When handing the user story file to any downstream stage of work (design/review,
+planning, test-writing, implementation), mention its path explicitly so that
+stage can activate **User Story Mode**:
 
 > "User stories saved to `output_docs/user-stories/<feature-slug>_user-stories_<date>.md`.
-> Pass this file to `/spw-brainstorm` (or `/spw-write-plan` directly) so that
+> Pass this file to the next stage's tool so that
 > brainstorming, planning, and test writing all trace back to the acceptance criteria
-> defined here. Example: `/spw-brainstorm output_docs/user-stories/<filename>.md`"
+> defined here."
 
-**Why this matters:** mentioning the explicit path lets the downstream skill find
-and read this file as part of its own first steps. Without it, the skill has no
+**Why this matters:** mentioning the explicit path lets the downstream stage find
+and read this file as part of its own first steps. Without it, that stage has no
 reason to go looking for a user-story file and acceptance criteria are not
 propagated into the design doc, plan tasks, or test cases.
 
-**What downstream skills do with this file:** see
-`.github/skills/spw-write-user-story/CONSUMING-USER-STORY-OUTPUT.md` — the
+**What downstream stages do with this file:** see
+`CONSUMING-USER-STORY-OUTPUT.md` — the
 canonical contract for what gets extracted (Story IDs, Acceptance Criteria,
 Actor list, out-of-scope items, `[Context: ...]` tags) and how each consuming
-skill (`spw-brainstorm`, `spw-write-plan`, `spw-tdd`, `spw-execute-plan`,
-`spw-subagent-dev`) applies it. Defined once there, not restated here, so the
-two stay in sync.
+stage (design/review, planning, test-writing, implementation) applies it.
+Defined once there, not restated here, so the two stay in sync.
