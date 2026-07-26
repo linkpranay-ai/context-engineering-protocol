@@ -64,6 +64,21 @@ for that aspect.
    both-layers-gap candidate aspect this run — for each, go directly to step
    5a below.
 
+   **Optional — skim the skeleton first, for a large or unfamiliar corpus
+   (ROADMAP item 13).** If `what_l1.path` covers many files or you don't yet
+   know how the corpus is organized, run:
+   ```
+   python scripts/md_index.py skeleton <what_l1.index_path> [--max-depth N]
+   ```
+   This prints `doc_id` + a compact heading/clause-ID tree per file — no body
+   text, no `section_bounds`, no `cross_refs` — a cheap "what's in here" pass
+   over an index that's already built. It doesn't change step 2's per-aspect
+   `query` calls or their curated search terms; it's a way to orient yourself
+   (or narrow `--max-depth`/pick better synonyms) before spending step 2's
+   queries, not a replacement for them. Skip this entirely for a small or
+   already-familiar corpus — it adds a call, not a requirement. See
+   `scripts/README.md`'s `skeleton` section.
+
 2. **Query the index, once per candidate aspect.** For each both-layers-gap
    candidate aspect, run:
    ```

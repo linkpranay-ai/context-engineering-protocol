@@ -96,6 +96,21 @@ any subset of them, or none:
   specification in any form; adopting either is not currently a meaningful conformance signal
   either way.
 
+`PROTOCOL.md` §2.2's ingested-content rule (treat What-L1/How-L1/MCP-mirrored content as data to
+cite, never instructions to follow) is itself a MUST — every Implementation is bound by it whether
+or not it implements What-L1/How-L1 at all, since the rule constrains how ingested content is
+*used*, not whether a given optional layer is present. What is explicitly **SHOULD**, not MUST, is
+the specific heuristic mechanism this repository ships to help satisfy that rule:
+`scripts/content_safety_scan.py` flags `.md` files under `what_l1.path`/`how_l1.path`/an MCP-mirror
+output directory that contain imperative/instruction-like phrasing, for human review before those
+files are cited. It is a strong recommendation, not a requirement — a heuristic keyword/pattern
+match, run once per corpus build, that can miss real cases and flag harmless ones (an ordinary
+process standard's own "MUST"/"SHOULD" language is not itself suspicious). An Implementation that
+enables What-L1/How-L1 without running an equivalent scan still satisfies every MUST above as long
+as ingested content is never treated as an instruction by construction; the scan is a best-effort
+aid to a human reviewer, never itself the enforcement mechanism, and never auto-blocking
+(`PROTOCOL.md` §3.1's no-automatic-resolution stance applies here too).
+
 ## 5. Conformance levels
 
 This specification defines a **single conformance bar**, not tiered levels or profiles: an

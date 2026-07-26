@@ -46,6 +46,7 @@ same CLI, same schema, a different `-o`/index-path argument.
 python md_index.py index <dir-or-file> -o <output.json> [--profile generic|3gpp] [--stale-check]
 python md_index.py query <index.json> "<term1> <term2> ..." [--top N]
 python md_index.py query-batch <index.json> <queries.json> [--top N]
+python md_index.py skeleton <index.json> [--max-depth N]
 ```
 
 ### `index`
@@ -112,6 +113,28 @@ in one invocation, when a run has many gap topics to look up — see
 not change the documented per-aspect `query` default, and is not a guaranteed
 token-reduction in itself (it shells out once instead of N times; whether that's worth
 it depends on how many aspects a given run has).
+
+### `skeleton` — ROADMAP item 13, progressive disclosure
+
+```powershell
+python md_index.py skeleton specs-out\session.json --max-depth 2
+```
+
+Reads an already-built `index.json` and prints `doc_id` + a compact heading/clause-ID
+tree per file — `id`, `level`, `title`, `clause_id`, `line` only, with `is_toc` headings
+suppressed. No `section_bounds`, no `cross_refs`, no body text, and no re-read of the
+original `.md` source (the index never stored body text either — see `query`'s
+docstring — so this is a pure reformat of what's already on disk, not a new parse
+pass). `--max-depth N` further trims the tree to headings at or above level `N`.
+
+This is a cheap "what does this corpus look like" pass for a large What-L1/How-L1
+corpus, before spending a full `query` on it — skim the shape first, fetch a specific
+section only once you know which one matters. It is opt-in and additive: nothing else
+in this script's behavior changes if you never call it. On this repo's own
+`examples/telecom-what-l1-demo/specs-out/index.json`, the skeleton is ~6.7x smaller than
+the full index (measured: 39,076 bytes vs. 5,862 bytes) — the gap widens with corpus
+size, since `section_bounds`/`cross_refs` overhead grows with heading count while the
+skeleton's per-heading footprint stays fixed.
 
 ### Examples (using the two real validation files)
 
@@ -343,7 +366,9 @@ case the original agent-simulated mechanism never had a regression test for:
 `test_md_index.py` also covers `query_index` (ranking, TOC exclusion), the R15
 missing-source-file stderr warning (still returns results for files that DO resolve),
 `is_stale` (the `--stale-check` build-once contract, including profile-change
-invalidation), and `query-batch` (R18 — per-key results match an equivalent `query`).
+invalidation), `query-batch` (R18 — per-key results match an equivalent `query`), and
+`skeleton` (ROADMAP item 13 — TOC exclusion, no body/structural fields, `--max-depth`
+filtering, and CLI output matching the underlying `build_skeleton()` call directly).
 
 The real TS 33.401 file (524 KB, external 3GPP copyright) is intentionally **not**
 vendored as a fixture; `mixed_atx_setext.md` captures the same Setext/ATX structural
@@ -498,3 +523,30 @@ scratchpad JSON file (`{"body": "<fetched text>"}`) per `mcp_source` entry; `mcp
 reads those files (`read_content_file()`), hashes, mirrors, and manifests. See
 `examples/mcp-what-l1-demo/WALKTHROUGH.md` for a validated, real-command round trip against
 synthetic fixtures standing in for that fetched content, and `tests/test_mcp_mirror.py`.
+
+---
+
+## `content_safety_scan.py` — ingested-content injection guardrail (`PROTOCOL.md` §2.2)
+
+A fifth **Python-3-stdlib-only** CLI. `PROTOCOL.md` §2.2 states that ingested What-L1/How-L1/MCP-
+mirrored content MUST always be treated as data to cite, never as instructions to follow. This
+script is `CONFORMANCE.md` §4's SHOULD-level (not MUST) heuristic aid to that rule: it flags `.md`
+files containing imperative/instruction-like phrasing worth a second look before a package
+assembler or human reviewer reads them.
+
+```
+python content_safety_scan.py <dir-or-file> [--exclude <subpath> ...]
+```
+
+Reuses `md_index.py`'s own `gather_md_files()` for directory walking and `--exclude` semantics —
+same file-discovery behavior a `md_index.py index` run over the same target would use. Scans each
+file's lines against a short, deliberately narrow list of literal injection-style patterns (e.g.
+"ignore all previous instructions", "reveal your system prompt") and prints at most one flagged
+line per hit, grouped by file. A clean corpus prints a single "no suspicious phrasing found." line;
+nothing else changes and nothing is blocked either way — **this is informational only.** Exit code
+is always `0` regardless of what's flagged, consistent with `PROTOCOL.md` §3.1's
+no-automatic-resolution stance: a flag is a candidate for human review, not evidence of an actual
+injection attempt, since ordinary process standards and specs legitimately use imperative language
+("shall", "must") to describe their own subject matter — this script does not attempt to
+distinguish that from an injection attempt. See `tests/test_content_safety_scan.py` for the clean
+vs. planted-phrase cases, including the explicit non-flag case for ordinary "shall"/"must" wording.

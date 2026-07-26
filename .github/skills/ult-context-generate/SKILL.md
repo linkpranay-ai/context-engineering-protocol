@@ -838,6 +838,7 @@ PRODUCT CONTEXT  (contexts/<filename>.yaml)
   Web fallbacks:  <N>  [CONFIRM RELEVANCE BEFORE APPROVAL if > 0 — see below]
   LLM scaffolds:  <N>
   How-L1 fallback: <N>  [CONFIRM RELEVANCE BEFORE APPROVAL if > 0 — see below]
+  Content safety scan: <N> file(s) flagged  [INFORMATIONAL — not a blocker, see below]
 
 ASPECT COVERAGE
   #  | Aspect                        | L3  | L2  | L1  | Notes
@@ -874,6 +875,11 @@ ORG CONVENTION  (org-conventions/<task_type>.yaml)
 [HOW-L1 FALLBACK ITEMS — REVIEW — if any]
 <for each how-l1 context item (how_l1_fallback: true, Step 2.1): its source
  citation and summary — these have no aspect_id/aspect, they are task-type-scoped>
+
+[CONTENT SAFETY SCAN — INFORMATIONAL, if `content_safety_scan.py` flagged anything]
+<for each flagged file (path + matched line(s)): surfaced as-is, per PROTOCOL.md §2.2 —
+ this is a candidate for human judgment, never an automatic block. An ordinary process
+ standard's or spec's own imperative language is not itself suspicious.>
 ```
 
 **`L1 fallbacks` line wording:**
@@ -914,6 +920,17 @@ ORG CONVENTION  (org-conventions/<task_type>.yaml)
   citation-following (D14) carry that provenance in their `summary`, same as
   What-L1's.
 
+**`Content safety scan` line wording (PROTOCOL.md §2.2, `scripts/content_safety_scan.py`,
+SHOULD-level per CONFORMANCE.md — informational only, never a gate):**
+- Scan not run (script not available/invoked): `0  (scan not run)`
+- Scan run, nothing flagged: `0  (no suspicious phrasing found)`
+- Scan run, items flagged: `<N> file(s) flagged  [INFORMATIONAL — not a blocker, see
+  below]`, with the `[CONTENT SAFETY SCAN — INFORMATIONAL]` block listing each
+  flagged file's path and matched line(s). Unlike the four lines above, a flag here
+  never requires the reviewer to act before approving — it is a candidate for human
+  judgment about whether ingested content strayed from data into instruction-like
+  phrasing (PROTOCOL.md §2.2), not evidence that it did.
+
 Then ask:
 > "Please review the context package above.
 > — If there are conflicts: tell me which interpretation is correct for each.
@@ -931,6 +948,8 @@ Then ask:
 >   organization's actual process before I rely on it (these come from an
 >   external process-standard corpus, not this project's own How-L2
 >   conventions).
+> — If the content safety scan flagged anything: it's informational only, not a
+>   blocker — take a look and use your judgment on whether it matters here.
 > — If anything is missing or wrong: tell me what to fix.
 > — When you are satisfied: say APPROVE to proceed."
 
