@@ -202,6 +202,16 @@ retrospective against a task whose answer was already known, not a blind trial â
 [`case-studies/SYNTHESIS.md`](case-studies/SYNTHESIS.md) for the full analysis, limitations, and
 what these three cases do and don't support.
 
+**The table above measures retrieval cost. A fourth case measures a different question: does an
+approved package make a downstream consuming skill's *generated output* better, not just cheaper to
+produce?** Running a real, ground-up user-story-writing skill once against an approved context
+package and once from a bare ask, on the same feature, found a measured gap on every dimension
+checked â€” 8 real, grep-verified citations vs. 0; 0 hallucinated APIs/concepts vs. 2 (an invented
+method and an imported web-accessibility concept with no counterpart in the actual codebase); 5
+distinct actors named vs. 2 generic ones; full org-convention structure vs. none. See
+[consumer-benefit-user-stories](case-studies/consumer-benefit-user-stories/CASE-STUDY.md) for the
+full rubric, both generated outputs verbatim, and this single case's own disclosed limitations.
+
 ## What's not yet done
 
 Disclosed plainly rather than glossed over. Full prioritized list with more detail:

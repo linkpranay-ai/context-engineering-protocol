@@ -1,10 +1,17 @@
 # Cross-case synthesis
 
-Compares the three published cases now that all three carry real, measured "Results at a glance"
+Compares the four published cases now that all four carry real, measured "Results at a glance"
 tables (not just "inference, not measured"). See [`README.md`](README.md) for the case list and
 [`EVIDENCE-METHODOLOGY.md`](../EVIDENCE-METHODOLOGY.md) §5-§6 for the measured-vs-inference
-distinction this document relies on throughout. Three cases is not a large sample — this is a
+distinction this document relies on throughout. Four cases is not a large sample — this is a
 first read of a pattern, not a statistically grounded claim.
+
+The first three cases below all measure the same kind of benefit — retrieval: finding the right
+integration point or clause cheaper than a naive search would. The fourth,
+[consumer-benefit-user-stories](consumer-benefit-user-stories/CASE-STUDY.md), measures a different
+kind — generation: whether an approved context package makes a downstream consuming skill's
+*output* more grounded, not just cheaper to produce. See "CEP helps retrieval vs. CEP helps
+generation quality" below for why these don't share one comparison table.
 
 ## Results across cases, at a glance
 
@@ -68,7 +75,41 @@ case study itself names the limit of the finding: it is about one specific low-c
 renderable class, not "CEP adds nothing to small modules" in general. Generalizing that would need
 more negative controls across different codebases, which this project does not yet have.
 
-## Limitations across all three
+## CEP helps retrieval vs. CEP helps generation quality
+
+The three token-efficiency cases above and
+[consumer-benefit-user-stories](consumer-benefit-user-stories/CASE-STUDY.md) are not directly
+comparable in one table because they measure different things: the first three ask "how many fewer
+tokens does it cost to find the right answer," and the fourth asks "how much better is a downstream
+skill's *generated output* when it has that answer to work from, versus working from a bare ask
+alone." Both are real, measured benefits, but they are not the same axis, and collapsing them into
+one row would overstate what either individually shows.
+
+**Retrieval (three cases):** CEP's measured advantage ranges from ~15.3x to ~797x fewer tokens for
+finding the right integration point or clause, narrowing to disambiguation-only (or reversing
+outright, Textual Run B) when the target is already keyword-findable in-repo — see "Where CEP
+helped" / "Where CEP didn't help" above.
+
+**Generation quality (one case so far):** running the same consuming skill (`spw-write-user-story`,
+a ground-up tool, not CEP-native) once against an approved context package and once against a bare
+ask, on the same feature, found a clean, measured gap on every rubric dimension checked: 8 real
+citations vs. 0, 0 hallucinated APIs/concepts vs. 2, 5 distinct actors vs. 2 generic ones, and full
+org-convention structure vs. none. Unlike the retrieval cases, this isn't about cost — the bare-ask
+mode didn't just cost more effort to reach the same answer, it produced a *materially different and
+partly wrong* answer, including inventing a method that doesn't exist and importing a
+web-accessibility concept (ARIA) that has no counterpart anywhere in a terminal UI framework. A
+context package's absence here doesn't make the downstream skill slower; it makes the downstream
+skill's output ungrounded, with no signal to the consuming developer that anything was invented.
+
+This is one case, one consuming skill, one feature — see that case's own §9 for what it does not
+yet show. It is reported here as a second, distinct kind of evidence for CEP's value, not folded
+into the retrieval numbers above.
+
+## Limitations across the three retrieval cases
+
+These four limitations are specific to the retrieval-benefit comparison (the three token-efficiency
+cases); the consumer-benefit-user-stories case has its own, separately-scoped limitations in its own
+§9, since it measures a different axis and shares none of the naive-search-baseline machinery below.
 
 - **Retrospective, not blind, in every case.** Every naive-search baseline reused a query each
   case's own reproduction steps had already run to confirm the gap — the "naive" searcher already

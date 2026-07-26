@@ -17,9 +17,10 @@ deliberate negative control, chosen to show a situation where this protocol adds
 | [textual-focus-chain-and-sparkline-baseline](textual/CASE-STUDY.md) | Textualize/textual (MIT) | Yes | Ordinary focus-chain feature-add finds real cross-file structure; a deliberately self-contained `Sparkline` task finds that CEP's context-assembly overhead surfaces almost nothing worth reporting. |
 | [open5gs-s6a-error-message-avp](open5gs-ietf-rfc/CASE-STUDY.md) | open5gs/open5gs (AGPL-3.0) | No | First run against a real IETF RFC as a What-L1 source, paired with a genuine AVP-dictionary gap (Error-Message present on Gx, absent on S6a) — correctly surfaces the working exemplar, the confirmed gap, and the real error-answer integration point. |
 | [fastapi-response-links-parity](fastapi/CASE-STUDY.md) | fastapi/fastapi (MIT) | No | Second real-external-spec run, this time genuine Markdown (OpenAPI 3.1.0) rather than converted RFC plaintext — paired with a genuine `callbacks=`/`links` parity gap, correctly surfaces the working exemplar, the confirmed gap, and the exact response-merge integration point; corroborates which prior tooling defect is plaintext-specific and which one generalizes. |
+| [consumer-benefit-user-stories](consumer-benefit-user-stories/CASE-STUDY.md) | Textualize/textual (MIT) — reuses the package from the case above | No | A different kind of benefit than the other three: measures whether an approved context package improves a downstream *consuming skill's generated output* (fewer hallucinated APIs, more real citations, more actors, better convention adherence) rather than retrieval cost — first evidence for CEP's generative, not just retrieval, benefit. |
 
 ## Synthesis
 
-With all three cases published and evidence-hardened, [`SYNTHESIS.md`](SYNTHESIS.md) compares
+With all four cases published and evidence-hardened, [`SYNTHESIS.md`](SYNTHESIS.md) compares
 them — what held across cases, what didn't, and what that implies for this protocol's actual
 claims.
