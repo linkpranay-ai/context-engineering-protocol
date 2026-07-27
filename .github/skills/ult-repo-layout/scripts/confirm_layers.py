@@ -1,4 +1,4 @@
-"""confirm-layers - CEP-DP-001H PR 2 (CONTEXT-ENGINEERING-DESIGN.md §17.5-§17.6).
+"""confirm-layers - layer-path decision commit (§17.5-§17.6).
 
 Reads `context-layout-discovery.md` (written by `discover_layers.py`),
 validates every `PENDING` decision field against the verbs its own trailing

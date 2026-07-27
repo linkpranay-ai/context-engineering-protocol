@@ -49,7 +49,7 @@ Procedure:
 3. Record the result: codebase identity (name, approximate size, language), the reported
    percentage, and the date run.
 
-**Current status: run for real, for the first time, against the three CEP-DP-001D dogfood
+**Current status: run for real, for the first time, against the three dogfood
 corpora** (2026-07-24): Open5GS (`src/`+`lib/diameter/`, 3,830 nodes / 10,236 edges) — 36.8x
 reduction, 191,500 words → ~255,333 naive tokens, ~6,934 tokens/query average; FastAPI (`fastapi/`,
 911 nodes / 2,568 edges) — 5.6x reduction, 45,550 words → ~60,733 naive tokens, ~10,925
@@ -99,7 +99,7 @@ representative for a given claim when it is:
   partial, with how many extra files a developer would have had to read to disambiguate), and
   (b) the word count of what had to be read to get there, converted to tokens at the same
   ≈4/3 tokens-per-word ratio `graphify benchmark` itself already reports in its own output (§2).
-  First applied retrospectively across the three CEP-DP-001D case studies (2026-07-24) — see each
+  First applied retrospectively across the three case studies (2026-07-24) — see each
   case's "Results at a glance" table. This is a real baseline with real numbers, but see §7 for its
   disclosed limitation (retrospective, not blind) and its current single-round-of-cases scope.
 - **Bare ask** (consumer-output-quality, §1 surface 4): given only the task's own one-to-two-sentence
@@ -159,7 +159,7 @@ measured, regardless of how it is phrased.
   measured gap between the two modes for that one pairing — it does not yet show whether the gap
   holds for a different consuming skill, a different task type, or a differently-worded bare ask.
 - **Relevance baseline is real but retrospective, not blind (§4).** The naive-keyword-search
-  baseline now defined and applied across the three CEP-DP-001D cases reuses grep queries drawn
+  baseline now defined and applied across the three cases reuses grep queries drawn
   from each case's own reproduction steps — a genuine first-attempt search a developer would try,
   but reconstructed after the task's answer was already known, since true blindness isn't
   achievable after the fact. Each case study states this plainly rather than presenting the

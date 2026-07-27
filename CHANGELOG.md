@@ -47,17 +47,29 @@ external context-engineering prior art.
   `CONTEXT-ENGINEERING-DESIGN.md` `D<N>`/`§<N>` label cited across this repo, so those citations
   resolve without the private, unpublished source document. Linked from `CONTRIBUTING.md`'s existing
   citation note and from the two most heavily-cited skills (`ult-context-generate`, `ult-repo-layout`).
-  `ROADMAP.md` item 15 logs the fuller pre-1.0 citation cleanup this stops short of (rewriting every
-  citation site inline, and covering two other privately-cited documents) as deferred, not forgotten.
+  At the time this glossary shipped, `ROADMAP.md` item 15 logged the fuller pre-1.0 citation cleanup
+  it stopped short of as deferred; see the `### Fixed` entry below — that cleanup is now done.
 - Three other externally-sourced ideas (session-level runtime compaction, a comment-anchored
   live-studio UI, multiple ranked search modes/a multi-bundle registry) were reviewed and rejected,
   each for a reason tied to this repo's own prior decisions — logged to `ROADMAP.md` "Not on this
   roadmap" rather than dropped silently.
 
+### Fixed
+
+- **Private-document citation leak**: skills and scripts across the repo cited unpublished sibling
+  design docs by filename (`CONTEXT-ENGINEERING-DESIGN.md` and two others) or bare `D<N>`/`D-0NN`
+  decision-log labels a reader has no way to resolve. Rewrote every site to state the substance
+  inline instead of pointing at a document that doesn't exist in this repo, and updated
+  `CONTRIBUTING.md`'s citation note to match. Closes out `ROADMAP.md` item 15. Also removed internal
+  EngineeringOS work-package IDs (`CEP-DP-001*`) that had leaked into public docs, scripts, and
+  tests — that governance mechanism is private and was never meant to be user-facing.
+
 ### Known limitations (disclosed, not regressions)
 
-- The internal-citation cleanup is a glossary/resolution fix, not a removal — native skills still
-  cite `D<N>`/`§<N>` labels inline; the fuller pre-1.0 rewrite is `ROADMAP.md` item 15, still open.
+- A residual set of unsignposted-but-technically-resolvable citations (real in-repo section headers,
+  or labels already covered by `references/design-scratchpad-glossary.md`) were intentionally left
+  untouched — see `ROADMAP.md` §14's "Glossary-pointer consistency polish" item for the remaining,
+  non-blocking follow-up.
 - `content_safety_scan.py`'s pattern list is narrow and literal by design; it is not a general
   prompt-injection detector and makes no such claim.
 - Consumer-output-quality evidence is two case studies, one skill, not a blind trial — ground truth
@@ -107,7 +119,7 @@ token-reduction and fallback-relevance numbers.
 - **`ult-repo-layout`**: layer-path discovery engine and `confirm-layers` human-approval step with
   drift tracking (D23 S17.2–S17.8), plus per-candidate `include_roots` validation and further
   drift tracking (S40).
-- **Three real-world dogfood case studies** (CEP-DP-001D) replacing/augmenting the four synthetic
+- **Three real-world dogfood case studies** replacing/augmenting the four synthetic
   demos as the project's evidence base: [Open5GS + RFC 6733](case-studies/open5gs-ietf-rfc/CASE-STUDY.md)
   (S6a Error-Message AVP gap), [FastAPI + OpenAPI](case-studies/fastapi/CASE-STUDY.md)
   (callbacks/links parity gap), and [Textual](case-studies/textual/CASE-STUDY.md) (ordinary run +

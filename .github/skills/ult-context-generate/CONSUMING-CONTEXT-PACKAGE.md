@@ -90,11 +90,10 @@ follow this before doing that work:
 3. **Load it as primary context.** Read the package's `decisions_log` /
    `decisions`, `context_items`, `gaps_detected`, `non_regression_risks`, and
    `summary`. If a sibling `.addenda.yaml` exists, load its entries too —
-   **latest `added_at` first**. Per recommendation (d) in
-   `context-engineering/WHAT-L1-AND-CONTEXT-REUSE-ASSESSMENT.md`: when a
-   package exists, codegraph and compiled-guidelines checks become
-   **narrow/targeted** (the freshness spot-check below, plus targeted lookups
-   for genuinely new topics) rather than a second full pass.
+   **latest `added_at` first**. When a package exists, codegraph and
+   compiled-guidelines checks become **narrow/targeted** (the freshness
+   spot-check below, plus targeted lookups for genuinely new topics) rather
+   than a second full pass.
 
    **What-L1 fallback items:** any `context_items` entry with
    `what_l1_fallback: true` is an external-reference suggestion (Step 7.1,

@@ -445,7 +445,7 @@ class TestWhatL2ExcludeTypos(unittest.TestCase):
 
 
 class TestHowL2WhatL1HowL1Resolution(unittest.TestCase):
-    """D23 §17.8 (CEP-DP-001G Stage 2): resolve_how_l2_path/resolve_what_l1_*/
+    """D23 §17.8: resolve_how_l2_path/resolve_what_l1_*/
     resolve_how_l1_* - unlike what_l2, none of these widen to workspace_root
     (§16.5's widening is What-L2-specific)."""
 
@@ -486,7 +486,7 @@ class TestHowL2WhatL1HowL1Resolution(unittest.TestCase):
 
 
 class TestLayerPathsPopulated(unittest.TestCase):
-    """D23 §17.8 (CEP-DP-001G Stage 2, S28): WARN if an enabled layer's
+    """D23 §17.8 (S28): WARN if an enabled layer's
     resolved path doesn't exist or contains no files. What-L2/How-L2 are
     always checked; What-L1/How-L1 only when their own enabled: true is set -
     a disabled opt-in layer is never checked at all."""

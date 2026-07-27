@@ -37,8 +37,7 @@ tier: draft
 > matching to bridge terminology gaps between an aspect's wording and the external
 > spec's own terms. Validated end-to-end against a real downloaded 3GPP TS
 > 33.401 spec plus a NIST SP 800-63B excerpt — see
-> `WHAT-L1-AND-CONTEXT-REUSE-ASSESSMENT.md` and
-> `scripts/IMPLEMENTATION-NOTES.md`. The 500 KSLOC+ volunteer pilots above
+> `scripts/IMPLEMENTATION-NOTES.md` for the full validation write-up. The 500 KSLOC+ volunteer pilots above
 > should still leave `what_l1.enabled: false` until indexing strategy for large
 > multi-file external-spec corpora (Open Question 1) is resolved — this pilot
 > covers only the small-corpus case.
@@ -143,16 +142,16 @@ Z)`, profile-dependent), already resolved (D14) — same-file and, since R9 (ROA
 Phase B), cross-file via each file's `doc_id` front matter — Step 7.1 follows these with no
 further parsing. This is **zero-LLM extraction**: a stdlib subprocess builds the
 index; the agent only reads matched line-ranges (D13/D14). Validating this against larger
-per-spec-family corpora (e.g. a full 3GPP series) is still future work (Open Question 1 in
-`CONTEXT-ENGINEERING-DESIGN.md`), not part of this pilot — see
+per-spec-family corpora (e.g. a full 3GPP series) is still future work, not yet scoped
+or part of this pilot — see
 `examples/cross-file-resolution-demo/WALKTHROUGH.md` for a worked cross-file example.
 
 `allow_web_fallback` (default `false`) is a separate opt-in, independent of
 `enabled`/indexing: when `true`, Step 7.1 step 5a may attempt one scoped
 `WebSearch`/`WebFetch` for a both-layers-gap aspect *before* falling back to
 the Q3 training-knowledge offer — trading the "free and instant, training-data
-only" default for "one web lookup, possibly more current." See Step 7.1 step
-5a and D18 (`CONTEXT-ENGINEERING-DESIGN.md`).
+only" default for "one web lookup, possibly more current." This is a deliberate
+default, not an oversight: see Step 7.1 step 5a above for the exact trigger conditions.
 
 `mcp_source` (default `[]`) is another separate opt-in (ROADMAP item 9): an
 optional list of MCP fetch specs (`id`/`server`/`tool`/`identifier`/
@@ -254,7 +253,8 @@ Collect all answers before proceeding. Store:
 Break `FEATURE_TERM` into a small set of **aspects** — sub-topics whose
 What-L3/What-L2/What-L1 coverage may genuinely differ. This list is the
 iteration unit for Steps 4, 5, 7, and 7.1: gap detection runs **per aspect**,
-not once for the whole feature (see CONTEXT-ENGINEERING-DESIGN.md D15).
+not once for the whole feature — this is deliberate, so a gap in one aspect
+doesn't get masked by strong coverage in another.
 
 Propose aspects from `FEATURE_TERM` plus the Step 1 answers:
 
@@ -586,7 +586,7 @@ feature-wide yes/no.
 
 Constraints are coding/design conventions, compliance/regulatory requirements, and
 scheduling/dependency constraints that bound the solution space regardless of feature.
-Full model: CONTEXT-ENGINEERING-DESIGN.md D11.
+Full model: see `PROTOCOL.md` §2.1 ("The third dimension: Constraints").
 
 1. Check for `starter_kit/project_guidelines/COMPILED-GUIDELINES.md` (produced by
    `compiling-project-guidelines`).
@@ -1121,8 +1121,8 @@ report invented "~N–MK tokens" breakdowns. Instead:
   explicitly labeled as measured — it never estimates a number itself, and
   reports "no measured runs yet" until real ones exist.
 
-**Open Question 4** (`CONTEXT-ENGINEERING-DESIGN.md` §10 — token cost as the
-primary Phase 1 measurement gate) **is not yet measurable** from this skill's
+**Whether token cost should be the primary Phase 1 measurement gate is still an
+open question** and **is not yet measurable** from this skill's
 own output. It requires real harness-level usage data collected across pilot
 runs (the `learnings.md` entries above), not self-reported estimates. Treat
 Open Question 4 as open until that data exists — when reporting findings back

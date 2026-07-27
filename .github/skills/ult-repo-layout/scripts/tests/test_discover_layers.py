@@ -1,5 +1,4 @@
-"""Regression suite for discover_layers.py (CONTEXT-ENGINEERING-DESIGN.md
-§17.2-17.4, CEP-DP-001H Stage 3 PR 1).
+"""Regression suite for discover_layers.py (§17.2-17.4).
 
 Stdlib unittest only, same posture as test_validate_layout.py. Run with:
 
@@ -8,8 +7,8 @@ Stdlib unittest only, same posture as test_validate_layout.py. Run with:
 Test classes are grouped by §17.9 stress-scenario intent rather than by
 function, since discovery's externally-observable unit is "what shows up in
 the artifact for this repo layout" - matching how the design doc itself
-frames the stress scenarios (S23-S27, S29-S40; S28 stays CEP-DP-001G's,
-untouched).
+frames the stress scenarios (S23-S27, S29-S40; S28 is out of scope for this
+module, untouched).
 """
 
 import shutil
@@ -319,8 +318,7 @@ class TestOptInLayerMatrix(TempRepoTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Cross-layer collision/nesting check (S30, D-017/D-018) - new to this
-# package, algorithm not specified verbatim in the design doc.
+# Cross-layer collision/nesting check (S30) - new to this package.
 # ---------------------------------------------------------------------------
 
 class TestCrossLayerCollisionCheck(TempRepoTestCase):
@@ -369,7 +367,7 @@ class TestCrossLayerCollisionCheck(TempRepoTestCase):
         )
         sections, cfg = dl.discover_layers(self.repo_root)
         titles = [s.title for s in sections]
-        self.assertIn("Cross-layer path collisions (S30, D-017/D-018)", titles)
+        self.assertIn("Cross-layer path collisions (S30)", titles)
 
 
 # ---------------------------------------------------------------------------

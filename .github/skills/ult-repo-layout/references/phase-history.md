@@ -5,11 +5,10 @@ operate this skill day to day — see `SKILL.md` for the current operating
 manual. Kept here for provenance and for anyone extending the slot registry
 further.
 
-This skill implements `context-engineering/CONTEXT-ENGINEERING-DESIGN.md` §15
-("Project Layout and Path-Dependency Configuration", D20 v2) and §16
-("Workspace Root Consolidation", D21 v3 — `layout.workspace_root`, the Gap-B
-slots, scaffold-not-copy, and the `layout-slots-registry.yaml` superset
-registry).
+This skill implements the project layout and path-dependency configuration
+model (§15) and workspace-root consolidation (§16 — `layout.workspace_root`,
+the Gap-B slots, scaffold-not-copy, and the `layout-slots-registry.yaml`
+superset registry).
 
 ## Slots covered
 

@@ -17,8 +17,8 @@ tier: draft
 # ult-repo-layout
 
 **Status: implemented — all 8 phases complete.** This skill implements
-`context-engineering/CONTEXT-ENGINEERING-DESIGN.md` §15 ("Project Layout and
-Path-Dependency Configuration") and §16 ("Workspace Root Consolidation" —
+the project layout and path-dependency configuration model (§15) and
+workspace-root consolidation (§16 —
 `layout.workspace_root`, scaffold-not-copy, and the
 `layout-slots-registry.yaml` superset registry), covering **eight**
 path-slots:
@@ -443,7 +443,7 @@ matrix:
   that looks vendor/generated (many files, no human-authored docs) is
   proposed as `exclude_decision: PENDING   # ADD: <path> | SKIP` instead of an
   `include_roots` candidate.
-- A cross-layer collision check (D-017) flags — but never blocks — two layers
+- A cross-layer collision check flags — but never blocks — two layers
   whose resolved or candidate paths are equal or nested, as a
   `collision_decision: PENDING   # CUSTOM: <dotted.path> -> <new path> |
   ACKNOWLEDGE` line.
@@ -686,7 +686,7 @@ sees messages about slots owned by skills they didn't install. Repos with no
 `.github/skills/` directory at all (including every test fixture in this
 suite) are unaffected — the gate is a no-op there.
 
-11. **Layer path population (D23 §17.8, CEP-DP-001G Stage 2, S28)** — a
+11. **Layer path population (D23 §17.8, S28)** — a
     non-blocking `WARN` if an *enabled* layer's resolved path
     (`layers.what_l2.path`, `layers.what_l1.path`, `how_dimension.how_l2.path`,
     `how_dimension.how_l1.path`) doesn't exist or contains no files.
