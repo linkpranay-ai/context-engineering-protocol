@@ -29,3 +29,6 @@ jobs:
 
       - name: Check cross-runtime adapters (Copilot/Cursor/Codex) are up to date
         run: python catalog/export_adapters.py --check
+
+      - name: Check Claude Code plugin package is up to date
+        run: python catalog/export_claude_plugin.py --check

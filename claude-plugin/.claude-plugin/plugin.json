@@ -1,0 +1,17 @@
+{
+  "name": "context-engineering-protocol",
+  "version": "0.3.0",
+  "description": "Source-cited, human-approved context packages (code graph + requirements + conventions) for AI coding agents -- assembled before a generation task runs, not guessed at afterward.",
+  "author": {
+    "name": "Pranay Mishra"
+  },
+  "homepage": "https://github.com/linkpranay-ai/context-engineering-protocol",
+  "repository": "https://github.com/linkpranay-ai/context-engineering-protocol",
+  "license": "Apache-2.0",
+  "keywords": [
+    "context-engineering",
+    "code-graph",
+    "requirements",
+    "human-approval"
+  ]
+}
