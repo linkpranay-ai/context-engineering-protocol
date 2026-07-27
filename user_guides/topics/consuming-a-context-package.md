@@ -15,8 +15,8 @@ see [`demo-consume-context`](../../.github/skills/demo-consume-context/SKILL.md)
 
 ### 1. Check whether a package exists
 
-Look in `contexts/` for a file matching `<feature-slug>_<task-type>_*.yaml` with
-`human_approved: true`.
+Look in `contexts/` for a file matching `<feature-slug>_<task-type>_*.yaml` with a
+non-empty `approved_by`.
 
 - **Not found** → proceed however your skill normally would (read the code, check compiled
   guidelines if relevant). Don't tell the user to go run `/ult-context-generate` — that's a
@@ -25,7 +25,7 @@ Look in `contexts/` for a file matching `<feature-slug>_<task-type>_*.yaml` with
 
 ### 2. Confirm with the user, in one line
 
-> "Found a context package for this feature (`<id>`, generated `<date>`, human_approved) — use
+> "Found a context package for this feature (`<id>`, generated `<date>`, approved) — use
 > it as primary context for this work?"
 
 ### 3. Load it as primary context
@@ -88,7 +88,7 @@ Folding addenda back into the approved package is `ult-context-generate`'s job, 
 
 At the end of your work, state in one line which mode you were in:
 
-- `"Context package consulted: <id>@<hash8> (human_approved, generated <date>; <N> addenda
+- `"Context package consulted: <id>@<hash8> (approved, generated <date>; <N> addenda
   read, <M> written)"`
 - or `"No context package found — proceeding without it."`
 

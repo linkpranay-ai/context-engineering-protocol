@@ -47,6 +47,12 @@ external context-engineering prior art.
   `CONTEXT-ENGINEERING-DESIGN.md` `D<N>`/`§<N>` label cited across this repo, so those citations
   resolve without the private, unpublished source document. Linked from `CONTRIBUTING.md`'s existing
   citation note and from the two most heavily-cited skills (`ult-context-generate`, `ult-repo-layout`).
+- **`approved_by` trust signal**: replaces the old `human_approved: true|false` boolean across the
+  context-package mechanism. Now a list — empty until a human approves (Step 9), then exactly one
+  `{actor: human:<id>, at: <ISO8601>}` entry is appended; v1 enforces at most one (multi-approver
+  review is explicit future scope). Backed by a new hard-gate script, `scripts/validate_approved_by.py`
+  (flags a missing field, more than one entry, or a malformed entry — exit code 1 on failure, unlike
+  `content_safety_scan.py`'s informational-only exit 0), run as part of Step 9's approval flow.
   At the time this glossary shipped, `ROADMAP.md` item 15 logged the fuller pre-1.0 citation cleanup
   it stopped short of as deferred; see the `### Fixed` entry below — that cleanup is now done.
 - Three other externally-sourced ideas (session-level runtime compaction, a comment-anchored
@@ -74,6 +80,10 @@ external context-engineering prior art.
   prompt-injection detector and makes no such claim.
 - Consumer-output-quality evidence is two case studies, one skill, not a blind trial — ground truth
   for traceability checks is knowable because both real features already exist upstream.
+- **`approved_by` is a breaking rename of `human_approved`, with no migration shim.** Acceptable
+  pre-1.0 since no automated consumer ever read either field; the three real case-study runs
+  recorded before this rename keep their original `human_approved: true` values as accurate history
+  (see `EVIDENCE-METHODOLOGY.md`'s field-name-drift note) rather than being rewritten to match.
 
 ## [0.2.0]
 

@@ -553,3 +553,28 @@ injection attempt, since ordinary process standards and specs legitimately use i
 ("shall", "must") to describe their own subject matter — this script does not attempt to
 distinguish that from an injection attempt. See `tests/test_content_safety_scan.py` for the clean
 vs. planted-phrase cases, including the explicit non-flag case for ordinary "shall"/"must" wording.
+
+---
+
+## `validate_approved_by.py` — `approved_by` trust-signal schema check
+
+A sixth **Python-3-stdlib-only** CLI. `references/context-package-schema.md` defines
+`approved_by` as a list — empty until a human approves the package, then exactly one
+`{actor: human:<id>, at: <ISO8601>}` entry is appended (`SKILL.md` Step 9). It replaced the
+older `human_approved: true|false` boolean outright (no automated validation ever read that
+boolean, so there was nothing to migrate). v1 enforces **at most one** entry — multi-approver
+review is explicit future scope, not now.
+
+```
+python validate_approved_by.py <dir-or-file>
+```
+
+Given a directory, walks every `*.yaml` file except `*.addenda.yaml` siblings (which never carry
+this field) — this covers both `contexts/<feature-slug>_<task-type>_*.yaml` package files and
+`org-conventions/<task_type>.yaml` convention files. Given a single file, checks just that file
+(and refuses an `.addenda.yaml` target outright, since it can never be valid here). For each file:
+flags a missing `approved_by` field, more than one entry, or an entry missing `actor`/`at` or whose
+`actor` isn't shaped like `human:<id>`. Exit code is `1` if any file fails, `0` otherwise — unlike
+`content_safety_scan.py`, this is a hard schema check, not an informational heuristic. Like
+`content_hash.py` and `usage_report.py`, this hand-parses the documented package shape with a
+targeted line-scanner rather than a general YAML parser. See `tests/test_validate_approved_by.py`.
