@@ -6,6 +6,63 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
 
 ## [Unreleased]
 
+## [0.3.0]
+
+2 PRs since v0.2.0. Headline: two case studies close the "does CEP help retrieval only, or does it
+help a downstream *generative* task too" evidence gap, and two research-informed protocol additions
+(a corpus-scaling primitive, an ingested-content-safety rule) came out of a deliberate review of
+external context-engineering prior art.
+
+### Added
+
+- **Consumer-output-quality case studies (2)**: `case-studies/consumer-benefit-user-stories/` runs a
+  real, already-built consumer skill (`spw-write-user-story`, vendored read-only for reproducibility,
+  outside `.github/skills/` and never installable — same demonstrated-against-not-adopted treatment
+  as the FastAPI/Textual/Open5GS corpora) twice against the same real feature: once with an approved
+  context package, once from a bare ticket-sized ask with no package. Scored both against a rubric
+  fixed before either output was read (traceability, hallucination, actor coverage, NFR specificity,
+  testability, convention adherence), each finding tagged Measured or Inference. Two features, two
+  unrelated domains (Textual UI/accessibility, Open5GS telecom Diameter stack in C) — the second run
+  checks the first wasn't a fluke, and the win is sharper there (18 real citations vs. 0; 0
+  hallucinated mechanisms vs. 1; 5 distinct actors vs. 2 generic; full convention structure 7/7 vs.
+  none). Both cases also trace the compounding benefit of a package's `[Context: ...]` tags past the
+  user-story file itself into design/review, planning, test-writing, and implementation stages.
+  `EVIDENCE-METHODOLOGY.md` gains a 4th evidence category (**consumer-output-quality**, alongside
+  token-efficiency, fallback-relevance, and the naive-keyword-search baseline) and a bare-ask-baseline
+  definition.
+- **Progressive-disclosure skeleton mode**: `md_index.py skeleton` reformats an already-built
+  `index.json` into a `doc_id` + heading/clause-ID tree only, no body text — zero re-parsing, since
+  the index never stored body text. Measured 6.7x compression on the real `telecom-what-l1-demo`
+  corpus (39,076 → 5,862 bytes). Wired into `what-l1-fallback-query.md`/`how-l1-fallback-query.md` as
+  an opt-in first look at a large/unfamiliar corpus before a full `query`; zero behavior change for
+  existing configs. Closes the scaling primitive `ROADMAP.md` item 13 was missing.
+- **Ingested-content injection guardrail**: new MUST-level `PROTOCOL.md` §2.2 — ingested What-L1/
+  How-L1/MCP-mirrored content is always data to cite, never instructions to follow. Backed by a new
+  SHOULD-level heuristic script, `scripts/content_safety_scan.py` (a narrow, literal pattern list,
+  deliberately scoped to avoid false-positiving on ordinary "shall"/"must" spec language),
+  informational only, never auto-blocking. Surfaced as a new non-blocking line in
+  `ult-context-generate/SKILL.md`'s Step 9 human-review-gate template. `CONFORMANCE.md` §4 records it
+  as a SHOULD, not the enforcement mechanism itself.
+- **`references/design-scratchpad-glossary.md`**: a plain-English index of every
+  `CONTEXT-ENGINEERING-DESIGN.md` `D<N>`/`§<N>` label cited across this repo, so those citations
+  resolve without the private, unpublished source document. Linked from `CONTRIBUTING.md`'s existing
+  citation note and from the two most heavily-cited skills (`ult-context-generate`, `ult-repo-layout`).
+  `ROADMAP.md` item 15 logs the fuller pre-1.0 citation cleanup this stops short of (rewriting every
+  citation site inline, and covering two other privately-cited documents) as deferred, not forgotten.
+- Three other externally-sourced ideas (session-level runtime compaction, a comment-anchored
+  live-studio UI, multiple ranked search modes/a multi-bundle registry) were reviewed and rejected,
+  each for a reason tied to this repo's own prior decisions — logged to `ROADMAP.md` "Not on this
+  roadmap" rather than dropped silently.
+
+### Known limitations (disclosed, not regressions)
+
+- The internal-citation cleanup is a glossary/resolution fix, not a removal — native skills still
+  cite `D<N>`/`§<N>` labels inline; the fuller pre-1.0 rewrite is `ROADMAP.md` item 15, still open.
+- `content_safety_scan.py`'s pattern list is narrow and literal by design; it is not a general
+  prompt-injection detector and makes no such claim.
+- Consumer-output-quality evidence is two case studies, one skill, not a blind trial — ground truth
+  for traceability checks is knowable because both real features already exist upstream.
+
 ## [0.2.0]
 
 37 commits since v0.1.0. Headline: How-L1 shipped, cross-file citation resolution (R9/Phase B)
