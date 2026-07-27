@@ -25,7 +25,12 @@ context_package:
       web_fallback_used: <true|false>  # true if this aspect's web fallback
                                         # (Step 7.1 step 5a, D18) offer was accepted
   generated_at: <ISO timestamp>
-  human_approved: false
+  approved_by: []                   # list, empty until Step 9 approval; append exactly
+                                     # one entry on approval:
+                                     #   - actor: human:<id>
+                                     #     at: <ISO timestamp>
+                                     # v1 enforces exactly one entry once non-empty —
+                                     # multi-approver review is future scope, not now.
   content_hash: <hash8>             # see "content_hash maintenance" below
                                      # (D19 v2, C1/C2) — always present
   supersedes: <old-package-id>      # only present if this package was created

@@ -127,7 +127,7 @@ anything downstream is generated.
    org/guidelines/    — narrative guidance on house style
    ```
    `ult-context-generate` Step 2 reads these and caches the result to
-   `org-conventions/<task_type>.yaml`, gated on `human_approved: true`.
+   `org-conventions/<task_type>.yaml`, gated on a non-empty `approved_by`.
 
 7. **Populate How-L1 (org-wide process standards) — optional, piloting**: if your
    org has its own CMMI/ISO/IEEE-style process standards you want incorporated,

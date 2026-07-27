@@ -71,8 +71,8 @@ follow this before doing that work:
    today.
 
 1. **Check** whether `contexts/` contains a file matching
-   `<feature-slug>_<task-type>_*.yaml` for the feature/task at hand, with
-   `human_approved: true`. Also check for a sibling
+   `<feature-slug>_<task-type>_*.yaml` for the feature/task at hand, with a
+   non-empty `approved_by`. Also check for a sibling
    `<feature-slug>_<task-type>_*.addenda.yaml`. This glob check is the
    fallback path used when step 0 found no tagged packages.
    - **Not found:** proceed exactly as you normally would — consult the code
@@ -84,7 +84,7 @@ follow this before doing that work:
 
 2. **Confirm with the user**, in one line:
    > "Found a context package for this feature (`<id>`, generated `<date>`,
-   > human_approved[, `<N>` addenda]) — use it as primary context for this
+   > approved[, `<N>` addenda]) — use it as primary context for this
    > work?"
 
 3. **Load it as primary context.** Read the package's `decisions_log` /
@@ -168,8 +168,8 @@ follow this before doing that work:
 
 7. **Addendum file format** —
    `contexts/<feature-slug>_<task-type>_<date>.addenda.yaml`, a sibling of
-   the main package, append-only, and **never itself `human_approved`**
-   (that keeps `human_approved: true` on the main package meaning what it
+   the main package, append-only, and **never itself carries `approved_by`**
+   (that keeps a non-empty `approved_by` on the main package meaning what it
    already means). Reuses the package's existing `context_items` /
    `decisions_log` shapes — just two new fields, `added_by` and `added_at`:
 
@@ -191,7 +191,7 @@ follow this before doing that work:
    list. If it exists, append to it.
 
 8. **State, in one line, which mode was used** — at the end of your work:
-   - `"Context package consulted: <id>@<hash8> (human_approved, generated
+   - `"Context package consulted: <id>@<hash8> (approved, generated
      <date>; <N> addenda read, <M> written)"` — for multiple packages,
      `;`-separate them: `<id1>@<hash8-1>; <id2>@<hash8-2>`.
    - or `"No context package found — proceeding without it."`

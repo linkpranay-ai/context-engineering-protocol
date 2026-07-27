@@ -20,7 +20,9 @@ import usage_report as ur  # noqa: E402
 PACKAGE_ALL_CITED = """context_package:
   id: alpha_design_20260701
   generated_at: "2026-07-01T00:00:00Z"
-  human_approved: true
+  approved_by:
+    - actor: human:alice
+      at: "2026-07-01T00:30:00Z"
   context_items:
     - id: ctx_001
       layer: what-l3
@@ -52,7 +54,9 @@ ADDENDA_ALL_CITED = """addenda:
 PACKAGE_SOME_NEVER_CITED = """context_package:
   id: beta_bugfix_20260702
   generated_at: "2026-07-02T00:00:00Z"
-  human_approved: true
+  approved_by:
+    - actor: human:bob
+      at: "2026-07-02T00:30:00Z"
   context_items:
     - id: ctx_001
       layer: what-l3

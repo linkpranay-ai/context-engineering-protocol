@@ -174,6 +174,14 @@ measured, regardless of how it is phrased.
   at most a handful of runs. None of the claims in this document or elsewhere in the repo should be
   read as statistically robust; they are disclosed pilot-stage findings, consistent with how
   `README.md` and `ROADMAP.md` already frame this project's maturity.
+- **Field-name drift in historical case studies.** The three real dogfood runs (§2, §4) recorded
+  under `case-studies/` were captured before the context-package schema renamed its approval field
+  from `human_approved: true|false` to `approved_by: [{actor, at}]`. Those case studies, and their
+  vendored fixture YAMLs, still show the old boolean field verbatim, as an accurate record of what
+  each run actually produced at the time — they are not out of date or in error, and are left
+  unedited on purpose (rewriting historical evidence to match a later schema would misrepresent what
+  the run actually output). Read `human_approved: true` in a case study as equivalent to today's
+  `approved_by` holding one entry.
 
 ## See also
 

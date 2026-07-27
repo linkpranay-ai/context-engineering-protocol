@@ -369,7 +369,7 @@ If user chooses **fold addenda**:
 - Re-run **Step 6** (contradiction detection) and **Step 7** (gap detection)
   on the merged result — addenda may close a previously-detected gap or
   introduce a new contradiction.
-- Set `human_approved: false` again (the merged content hasn't been reviewed)
+- Clear `approved_by` back to `[]` (the merged content hasn't been reviewed)
   and proceed to **Step 9** for re-approval.
 - On approval, remove the `.addenda.yaml` file — its contents are now part of
   the approved package.
@@ -797,7 +797,9 @@ For each approved suggestion, add a context item:
   source: llm_domain_knowledge
   type: domain-best-practice
   confidence: SUGGESTED
-  human_approved: true
+  approved_by:
+    - actor: human:<id>
+      at: <ISO timestamp>
   summary: >
     <the approved suggestion expressed as a factual context item>
 ```
@@ -997,10 +999,14 @@ The user must say the word APPROVE (or a clear explicit equivalent like "approve
 "I approve"). If they say anything ambiguous, ask: "Do you approve both packages?"
 
 Once user says APPROVE (and all conflicts addressed):
-1. Set `human_approved: true` in the YAML, then apply the **two-pass
-   `content_hash` save** (Step 8) before writing `contexts/<id>.yaml` to disk.
-2. Set `human_approved: true` in the org convention YAML (if it was newly generated)
-3. Report: "Both packages approved. Ready for artifact generation."
+1. Append an `approved_by` entry (`actor: human:<id>`, `at: <ISO timestamp>`) in the
+   YAML, then apply the **two-pass `content_hash` save** (Step 8) before writing
+   `contexts/<id>.yaml` to disk.
+2. Append an `approved_by` entry in the org convention YAML (if it was newly generated)
+3. Run `scripts/validate_approved_by.py contexts/` — it exits non-zero if the field
+   is missing, malformed, or has more than one entry (v1 allows at most one). Fix
+   before reporting approval if it fails.
+4. Report: "Both packages approved. Ready for artifact generation."
 
 ---
 

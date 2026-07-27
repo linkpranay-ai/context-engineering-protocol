@@ -20,14 +20,18 @@ SAMPLE_WITHOUT_HASH = (
     "context_package:\n"
     "  id: example_user-story_20260613\n"
     "  generated_at: \"2026-06-13T00:00:00Z\"\n"
-    "  human_approved: true\n"
+    "  approved_by:\n"
+    "    - actor: human:alice\n"
+    "      at: \"2026-06-13T00:05:00Z\"\n"
 )
 
 SAMPLE_WITH_HASH = (
     "context_package:\n"
     "  id: example_user-story_20260613\n"
     "  generated_at: \"2026-06-13T00:00:00Z\"\n"
-    "  human_approved: true\n"
+    "  approved_by:\n"
+    "    - actor: human:alice\n"
+    "      at: \"2026-06-13T00:05:00Z\"\n"
     "  content_hash: deadbeef\n"
 )
 

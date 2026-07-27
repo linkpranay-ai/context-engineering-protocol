@@ -381,7 +381,7 @@ candidate location — except the five Phase 2 slots, which have none and skip
 straight to asking (§15.7):
 
 1. **`context_packages`** — scan for `*.yaml` files containing a top-level
-   `context_package:` key with a `human_approved` field, **sorted
+   `context_package:` key with an `approved_by` field, **sorted
    deterministically** (path depth ascending, then lexical ascending — the
    same order `reconcile`'s tie-breaks use).
 2. **`plans_output`/`brainstorm_output`** — simpler signature: does the slot's
