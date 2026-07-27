@@ -1,0 +1,10 @@
+{
+  "name": "generic",
+  "description": "Permissive, low-confidence default. Parses dotted-numeric heading prefixes (e.g. '4.2.1 Title') but does NOT invent clause ids from ordinary prose headings. Cross-ref patterns cover the widest common phrasings (clause/section/clauses, 'see', and bare '#4.2' / '4.2.1'-style refs are intentionally NOT matched to avoid false positives on prose).",
+  "clause_id_regex": "^(\\d+(?:\\.\\d+)*)\\s+(.+)$",
+  "cross_ref_patterns": [
+    {"regex": "\\b(?:clause|clauses|section|sections|subclause|subclauses)\\s+(\\d+(?:\\.\\d+)*)\\b", "kind": "clause"},
+    {"regex": "\\(\\s*see\\s+(\\d+(?:\\.\\d+)*)\\s*\\)", "kind": "see"}
+  ],
+  "toc_titles_to_suppress": ["contents", "table of contents"]
+}

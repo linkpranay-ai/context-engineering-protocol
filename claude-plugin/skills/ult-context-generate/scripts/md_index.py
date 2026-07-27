@@ -1,0 +1,957 @@
+#!/usr/bin/env python3
+"""md_index.py - deterministic, zero-LLM markdown structural indexer.
+
+The "graphify for markdown". Build-once -> write JSON index -> skills query it.
+Re-implementation of the deleted ``ast_crossref.py`` (Context Engineering D14),
+this time as a real, tested CLI that does NOT get deleted.
+
+Python 3 stdlib only (argparse, re, json, hashlib, pathlib, datetime) so the
+script is vendorable for an OSS framework with no pip install step.
+
+CLI:
+    python md_index.py index <dir-or-file> -o <out.json> [--profile generic|3gpp] [--stale-check]
+        [--exclude <subpath> ...] [--include-root <dir> ...]
+    python md_index.py query <index.json> "<term1> <term2> ..." [--top N]
+    python md_index.py query-batch <index.json> <queries.json> [--top N]
+    python md_index.py skeleton <index.json> [--max-depth N]
+
+See scripts/README.md for the JSON schema, profile schema, and the
+line-numbering / section-bounds convention.
+"""
+
+import argparse
+import hashlib
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCHEMA_VERSION = "1.2"
+
+# Directory holding the bundled profile pattern-packs.
+PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
+
+# Profiles whose clause_id_regex describes a plaintext house style
+# (RFC-editor .txt, 3GPP, IEEE) that detect_headings() cannot itself detect --
+# it only recognizes ATX (`#`) and Setext (===/---) Markdown syntax, then
+# applies clause_id_regex to titles of headings already found that way. If
+# the real input is raw plaintext with no markdown-ified headings, indexing
+# silently produces near-zero real headings instead of failing loudly.
+_PLAINTEXT_HOUSE_STYLE_PROFILES = ("rfc", "3gpp", "ieee")
+# Below this many lines per detected heading, warn that the input may be
+# unconverted plaintext. Calibrated against the real RFC 6733 case: ~43
+# lines/heading once correctly markdown-ified vs. ~1062 lines/heading when
+# fed as raw RFC-editor .txt (one heading found for the whole document).
+_LOW_HEADING_DENSITY_THRESHOLD = 150
+# Minimum total lines before the density check applies, so small,
+# legitimately sparse files (e.g. a short single-section doc) don't
+# false-trigger.
+_LOW_HEADING_DENSITY_MIN_LINES = 200
+
+# A term appearing in a heading's own title is a much stronger relevance
+# signal than the same term recurring in body prose -- without this, a term
+# that happens to recur across many *sibling* sections' own content (e.g. a
+# name mentioned in passing by several neighboring definitions) can outrank
+# the one section that is actually about it. Counted on top of the plain
+# body+title count below, not as a replacement for it.
+#
+# This only distinguishes a target section from siblings whose own titles
+# DON'T also contain the term -- when every sibling in a family shares the
+# same title vocabulary (e.g. a chapter of same-shaped "X AVP" / "Y AVP"
+# subsections), every title gets an equal boost and relative ranking still
+# falls back to raw body match count. Closing that remaining gap needs
+# corpus-wide term-frequency normalization, a larger change left for later.
+_TITLE_MATCH_WEIGHT = 4
+
+
+# --------------------------------------------------------------------------- #
+# Profiles                                                                     #
+# --------------------------------------------------------------------------- #
+
+def load_profile(name):
+    """Load a profile pattern-pack by name from profiles/<name>.json.
+
+    Returns a dict with compiled regexes added under private keys.
+    """
+    path = PROFILES_DIR / "{}.json".format(name)
+    if not path.exists():
+        available = sorted(p.stem for p in PROFILES_DIR.glob("*.json"))
+        raise SystemExit(
+            "Unknown profile '{}'. Available: {}".format(name, ", ".join(available))
+        )
+    with path.open(encoding="utf-8") as fh:
+        prof = json.load(fh)
+
+    prof["_clause_id_re"] = re.compile(prof["clause_id_regex"])
+    prof["_cross_ref_res"] = [
+        (re.compile(p["regex"], re.IGNORECASE), p["kind"])
+        for p in prof.get("cross_ref_patterns", [])
+    ]
+    prof["_toc_suppress"] = {
+        t.strip().lower() for t in prof.get("toc_titles_to_suppress", [])
+    }
+    return prof
+
+
+# --------------------------------------------------------------------------- #
+# Line reading / normalisation                                                #
+# --------------------------------------------------------------------------- #
+
+def read_lines(path):
+    """Read a file and return (raw_bytes_for_hash, lines).
+
+    ``lines`` are 0-indexed in the list but every line *number* exposed in the
+    output is 1-based. Windows CRLF and lone CR are normalised so regexes that
+    anchor on end-of-line behave identically across platforms; the sha256 is
+    taken over the *original* bytes so it is a faithful content fingerprint.
+    """
+    data = path.read_bytes()
+    text = data.decode("utf-8", errors="replace")
+    # Normalise line endings for parsing only.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    return data, lines
+
+
+def sha256_of(data_bytes):
+    return hashlib.sha256(data_bytes).hexdigest()
+
+
+# --------------------------------------------------------------------------- #
+# Code-block / front-matter masking                                           #
+# --------------------------------------------------------------------------- #
+
+_FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})")
+_INDENTED_CODE_RE = re.compile(r"^( {4,}|\t)")
+
+
+def compute_masks(lines):
+    """Return (code_mask, front_matter_lines).
+
+    ``code_mask[i]`` is True when 1-based line (i+1) is inside a fenced or
+    indented code block, OR inside a detected front-matter block. Masked lines
+    are excluded from heading / table-separator detection entirely.
+
+    ``front_matter_lines`` is ``[start, end]`` (1-based, inclusive) of a
+    detected front-matter block at the head of the file, or ``None``.
+
+    Front matter recognised:
+      * YAML ``---`` ... ``---`` at the very top of the file.
+      * An HTML comment block ``<!-- ... -->`` at the very top (TS 33.401 uses
+        this for its provenance header).
+    """
+    n = len(lines)
+    mask = [False] * n
+    front_matter = None
+
+    # ---- front matter (must be at file head, after optional blank lines) ----
+    first = 0
+    while first < n and lines[first].strip() == "":
+        first += 1
+
+    if first < n:
+        stripped = lines[first].strip()
+        if stripped == "---":
+            # YAML front matter: closes at the next line that is exactly '---'.
+            for j in range(first + 1, n):
+                if lines[j].strip() == "---":
+                    front_matter = [first + 1, j + 1]
+                    for k in range(first, j + 1):
+                        mask[k] = True
+                    break
+        elif stripped.startswith("<!--"):
+            # HTML-comment header block. Closes at the line containing '-->'.
+            if "-->" in lines[first]:
+                front_matter = [first + 1, first + 1]
+                mask[first] = True
+            else:
+                for j in range(first + 1, n):
+                    if "-->" in lines[j]:
+                        front_matter = [first + 1, j + 1]
+                        for k in range(first, j + 1):
+                            mask[k] = True
+                        break
+
+    # ---- fenced code blocks ----
+    fm_end = front_matter[1] if front_matter else 0  # 1-based; 0 => none
+    in_fence = False
+    fence_marker = None
+    for i, line in enumerate(lines):
+        if i + 1 <= fm_end:
+            continue  # already masked as front matter
+        m = _FENCE_RE.match(line)
+        if not in_fence:
+            if m:
+                in_fence = True
+                fence_marker = m.group(2)[0]  # '`' or '~'
+                mask[i] = True
+        else:
+            mask[i] = True
+            # A closing fence uses the same marker char, >= as many chars.
+            if m and m.group(2)[0] == fence_marker:
+                in_fence = False
+                fence_marker = None
+
+    # ---- indented code blocks ----
+    # An indented code block requires a preceding blank line (CommonMark): a
+    # 4-space indent that merely continues a paragraph or a list item is NOT a
+    # code block. We approximate: an indented line is code only if the nearest
+    # preceding non-masked line is blank. This keeps Setext underlines (never
+    # indented) and ATX headings (never indented) safe while still masking
+    # genuine indented code that could contain '#', '---', or '|---|'.
+    for i, line in enumerate(lines):
+        if mask[i] or in_fence:
+            continue
+        if _INDENTED_CODE_RE.match(line) and line.strip() != "":
+            prev = i - 1
+            if prev < 0 or lines[prev].strip() == "":
+                mask[i] = True
+
+    return mask, front_matter
+
+
+# --------------------------------------------------------------------------- #
+# Heading detection                                                           #
+# --------------------------------------------------------------------------- #
+
+_ATX_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+
+# A table-separator row: pipes / dashes / colons / spaces only, with at least
+# two consecutive dashes somewhere. Covers '|---|---|', ':--|--:', '---|---',
+# and alignment-colon variants. Must contain a dash run and may be pipe-less.
+_TABLE_SEP_RE = re.compile(r"^\s*\|?[\s:|-]*-{2,}[\s:|-]*\|?\s*$")
+
+# Setext underline: a line of only '=' (level 1) or only '-' (level 2).
+_SETEXT_UNDER_RE = re.compile(r"^\s*(=+|-+)\s*$")
+
+
+def is_table_separator(line):
+    """True if the line is a markdown pipe-table separator row.
+
+    Distinguished from a Setext H2 underline (which is dashes only, no pipes
+    and no colons) by the presence of a pipe or a colon, OR by the structure
+    of a multi-column dash row.
+    """
+    if "|" in line or ":" in line:
+        # Any pipe/colon dashed row is a table separator, never a heading.
+        return bool(_TABLE_SEP_RE.match(line))
+    return False
+
+
+def detect_headings(lines, mask, profile):
+    """Walk the masked line list and produce a list of raw heading dicts.
+
+    Each dict: {style, level, title, line (1-based of the heading TEXT line),
+    underline_line (1-based, only for setext else None)}.
+    """
+    headings = []
+    n = len(lines)
+    i = 0
+    while i < n:
+        if mask[i]:
+            i += 1
+            continue
+        line = lines[i]
+
+        # ---- ATX ----
+        m = _ATX_RE.match(line)
+        if m:
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            headings.append({
+                "style": "atx",
+                "level": level,
+                "title": title,
+                "line": i + 1,
+                "underline_line": None,
+            })
+            i += 1
+            continue
+
+        # ---- Setext ----
+        # Current line is the (non-empty, non-masked) title candidate; the NEXT
+        # non-masked line must be a pure '='/'-' underline and NOT a table sep.
+        text = line.rstrip()
+        if text.strip() != "" and i + 1 < n and not mask[i + 1]:
+            nxt = lines[i + 1]
+            if _SETEXT_UNDER_RE.match(nxt) and not is_table_separator(nxt):
+                # Guard: the title candidate itself must not be ATX/table/blank
+                # and must not itself look like an underline (avoid '---' over
+                # '---'). Also the title line cannot be a list/blockquote start
+                # that would normally be a lazy continuation.
+                if not _SETEXT_UNDER_RE.match(text) and not is_table_separator(text):
+                    underline = nxt.strip()
+                    level = 1 if underline[0] == "=" else 2
+                    headings.append({
+                        "style": "setext",
+                        "level": level,
+                        "title": text.strip(),
+                        "line": i + 1,
+                        "underline_line": i + 2,
+                    })
+                    i += 2
+                    continue
+        i += 1
+    return headings
+
+
+# --------------------------------------------------------------------------- #
+# Clause id + section bounds + cross-refs                                      #
+# --------------------------------------------------------------------------- #
+
+# Strip pandoc attribute tails like '{#contents .TT}' from setext titles before
+# clause-id / TOC matching.
+_ATTR_TAIL_RE = re.compile(r"\s*\{[^}]*\}\s*$")
+
+
+def clean_title(title):
+    return _ATTR_TAIL_RE.sub("", title).strip()
+
+
+def parse_clause_id(title, profile):
+    """Return (clause_id or None, display_title). Profile-driven."""
+    m = profile["_clause_id_re"].match(title)
+    if m:
+        return m.group(1), m.group(2).strip()
+    return None, title
+
+
+def compute_section_bounds(headings, total_lines):
+    """Set section_bounds on each heading in place.
+
+    Convention (documented in README): section_bounds = [content_start,
+    content_end], 1-based inclusive, where:
+        content_start = heading text line + 1, and +1 again for a Setext
+                        underline (so the bound begins at the first BODY line,
+                        excluding both the title and its underline).
+        content_end   = (line of the next heading at the SAME-OR-HIGHER level) - 1,
+                        EOF-clamped.
+    If a section has no body (next heading immediately follows), content_start
+    may exceed content_end; we clamp to an empty range [content_start,
+    content_start - 1] -> represented as [content_start, content_start - 1].
+    """
+    n = len(headings)
+    for idx, h in enumerate(headings):
+        if h["style"] == "setext":
+            content_start = h["underline_line"] + 1
+        else:
+            content_start = h["line"] + 1
+
+        # Find next heading at same or higher level (level <= current level).
+        end_line = total_lines  # EOF default (1-based last line)
+        for j in range(idx + 1, n):
+            if headings[j]["level"] <= h["level"]:
+                end_line = headings[j]["line"] - 1
+                break
+
+        if end_line < content_start:
+            end_line = content_start - 1  # empty section
+        h["section_bounds"] = [content_start, end_line]
+
+
+_DOC_ID_RE = re.compile(r"^\s*doc_id\s*:\s*(.+?)\s*$")
+
+
+def extract_front_matter_doc_id(lines, front_matter_bounds):
+    """Extract a ``doc_id: <value>`` scalar from a file's front matter.
+
+    This is a single-line text scan, not a YAML parser - it works uniformly for
+    both the YAML ``---``/``---`` style and the HTML-comment style front matter
+    ``compute_masks`` already detects, since both are just lines of text within
+    ``front_matter_bounds`` (1-based, inclusive). Returns None if there is no
+    front matter or no doc_id line. Surrounding quotes are stripped.
+    """
+    if not front_matter_bounds:
+        return None
+    start, end = front_matter_bounds
+    for lineno in range(start, end + 1):
+        text = lines[lineno - 1]
+        m = _DOC_ID_RE.match(text)
+        if m:
+            value = m.group(1)
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            return value
+    return None
+
+
+def build_clause_index(headings):
+    """Map clause_id -> heading id (first occurrence), plus the set of clause
+    ids that appear on more than one heading in this file.
+
+    Ambiguous ids are tracked rather than silently resolved to whichever
+    heading happened to come first - a cross-ref targeting one is kept
+    unresolved (see find_cross_refs) instead of guessing.
+    """
+    index = {}
+    seen_counts = {}
+    for h in headings:
+        cid = h.get("clause_id")
+        if not cid:
+            continue
+        seen_counts[cid] = seen_counts.get(cid, 0) + 1
+        if cid not in index:
+            index[cid] = h["id"]
+    ambiguous_ids = {cid for cid, count in seen_counts.items() if count > 1}
+    return index, ambiguous_ids
+
+
+def find_cross_refs(body_text, profile, clause_index, ambiguous_ids):
+    """Find and resolve cross-references in a section body.
+
+    Returns a de-duplicated list of cross_ref dicts. A ref's pattern may
+    optionally capture a document designator via a named group (`(?P<doc>...)`
+    alongside `(?P<clause>...)`); when present, the ref targets a DIFFERENT
+    file and is left pending here for resolve_cross_file_refs() to finish in a
+    corpus-wide second pass - it is deliberately NOT looked up in this file's
+    own clause_index, even if the clause id happens to coincide locally, to
+    avoid resolving a cross-doc-looking reference against the wrong file.
+    Patterns with no named groups keep today's `m.group(1)` behaviour
+    (`target_doc` is always None) and resolve same-file, single-hop, as before.
+
+    Each ref carries a resolution_status:
+      - "resolved": target_clause matches exactly one heading (same-file case)
+        or was resolved cross-file in pass 2.
+      - "unresolved-ambiguous": target_clause matches more than one heading in
+        the (same or resolved target) file - never guessed, resolved_heading_id
+        stays None.
+      - "unresolved-not-found": target_clause matches no heading in the file.
+      - "unresolved-cross-file-pending": target_doc is set; awaiting pass 2.
+      - "unresolved-doc-not-found" / "unresolved-doc-ambiguous": pass 2 could
+        not uniquely match target_doc to a file.
+    `resolved` (bool) is kept as a derived convenience field, True iff
+    resolution_status == "resolved", so existing consumers keying off the
+    boolean are unaffected.
+    """
+    seen = {}
+    for regex, kind in profile["_cross_ref_res"]:
+        for m in regex.finditer(body_text):
+            raw = m.group(0).strip()
+            groups = m.groupdict()
+            if "clause" in groups:
+                target_clause = groups["clause"]
+                target_doc = groups.get("doc")
+                if target_doc is not None:
+                    # A designator pattern's `\s+` may span a hard line-wrap in
+                    # the source prose; collapse to single spaces so it still
+                    # exact-matches a clean single-line doc_id in pass 2.
+                    target_doc = " ".join(target_doc.split())
+            else:
+                target_clause = m.group(1)
+                target_doc = None
+            key = (raw.lower(), target_doc, target_clause)
+            if key in seen:
+                continue
+            if target_doc is not None:
+                status = "unresolved-cross-file-pending"
+                resolved_id = None
+            elif target_clause in ambiguous_ids:
+                status = "unresolved-ambiguous"
+                resolved_id = None
+            elif target_clause in clause_index:
+                status = "resolved"
+                resolved_id = clause_index[target_clause]
+            else:
+                status = "unresolved-not-found"
+                resolved_id = None
+            seen[key] = {
+                "raw": raw,
+                "kind": kind,
+                "target_doc": target_doc,
+                "target_clause": target_clause,
+                "resolved_file": None,
+                "resolved_heading_id": resolved_id,
+                "resolved": status == "resolved",
+                "resolution_status": status,
+            }
+    return list(seen.values())
+
+
+def resolve_cross_file_refs(file_entries):
+    """Second pass: resolve cross_refs left pending by find_cross_refs()
+    because their pattern captured a document designator (target_doc).
+
+    Runs after every file has been parsed, so it has full corpus visibility -
+    unlike find_cross_refs(), which only ever sees one file. Matching target_doc
+    to a file is exact-string equality against that file's doc_id (front matter);
+    no fuzzy matching, consistent with "never guess" elsewhere in this module.
+    """
+    by_doc_id = {}
+    for entry in file_entries:
+        doc_id = entry.get("doc_id")
+        if doc_id:
+            by_doc_id.setdefault(doc_id, []).append(entry)
+
+    for entry in file_entries:
+        for h in entry["headings"]:
+            for ref in h["cross_refs"]:
+                if ref["resolution_status"] != "unresolved-cross-file-pending":
+                    continue
+                matches = by_doc_id.get(ref["target_doc"], [])
+                if not matches:
+                    ref["resolution_status"] = "unresolved-doc-not-found"
+                    continue
+                if len(matches) > 1:
+                    ref["resolution_status"] = "unresolved-doc-ambiguous"
+                    continue
+                target_file = matches[0]
+                clause_index, ambiguous_ids = build_clause_index(target_file["headings"])
+                target_clause = ref["target_clause"]
+                if target_clause in ambiguous_ids:
+                    ref["resolution_status"] = "unresolved-ambiguous"
+                elif target_clause in clause_index:
+                    ref["resolution_status"] = "resolved"
+                    ref["resolved"] = True
+                    ref["resolved_file"] = target_file["path"]
+                    ref["resolved_heading_id"] = clause_index[target_clause]
+                else:
+                    ref["resolution_status"] = "unresolved-not-found"
+
+
+# --------------------------------------------------------------------------- #
+# Per-file parsing                                                             #
+# --------------------------------------------------------------------------- #
+
+def parse_file(path, root, profile):
+    """Parse a single markdown file into the file-entry dict for the index."""
+    data_bytes, lines = read_lines(path)
+    mask, front_matter = compute_masks(lines)
+    doc_id = extract_front_matter_doc_id(lines, front_matter)
+    raw_headings = detect_headings(lines, mask, profile)
+
+    # Assign stable ids + clause ids + TOC suppression flag.
+    for n, h in enumerate(raw_headings):
+        h["id"] = "h_{:04d}".format(n)
+        title = clean_title(h["title"])
+        h["title"] = title
+        cid, _disp = parse_clause_id(title, profile)
+        h["clause_id"] = cid
+        h["is_toc"] = title.strip().lower() in profile["_toc_suppress"]
+
+    total_lines = len(lines)
+    compute_section_bounds(raw_headings, total_lines)
+    clause_index, ambiguous_ids = build_clause_index(raw_headings)
+
+    # Cross-refs: scan each section's body (scoped to its own bounds).
+    for h in raw_headings:
+        start, end = h["section_bounds"]
+        if end >= start:
+            body = "\n".join(lines[start - 1:end])  # 1-based -> slice
+        else:
+            body = ""
+        h["cross_refs"] = find_cross_refs(body, profile, clause_index, ambiguous_ids)
+
+    # Emit final heading objects (drop internal-only keys).
+    out_headings = []
+    for h in raw_headings:
+        out_headings.append({
+            "id": h["id"],
+            "style": h["style"],
+            "level": h["level"],
+            "title": h["title"],
+            "clause_id": h["clause_id"],
+            "is_toc": h["is_toc"],
+            "line": h["line"],
+            "section_bounds": h["section_bounds"],
+            "cross_refs": h["cross_refs"],
+        })
+
+    try:
+        rel = str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        rel = str(path)
+    rel = rel.replace("\\", "/")
+
+    return {
+        "path": rel,
+        "sha256": sha256_of(data_bytes),
+        "front_matter_lines": front_matter,
+        "doc_id": doc_id,
+        "headings": out_headings,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Index build                                                                 #
+# --------------------------------------------------------------------------- #
+
+def gather_md_files(target, exclude=None, include_roots=None):
+    """Return (files, root) - a sorted list of *.md files for a dir or single
+    file, and the root they're collected relative to.
+
+    ``exclude`` (D21 §16.5, ``what_l2.exclude``): subtree paths relative to
+    ``target`` to skip - only applies when ``target`` is a directory. A
+    candidate is skipped when its path-relative-to-``target`` starts with one
+    of these entries (path-component prefix match). Defaults to ``[]``
+    (no-op): every project that doesn't set ``what_l2.exclude`` collects
+    exactly the files it did before this parameter existed.
+
+    ``include_roots`` (D21 §16.7, ``what_l2.include_roots``): additional
+    directories OUTSIDE ``target`` to also walk with ``rglob("*.md")`` and
+    union into the result, unfiltered - being named here *is* the inclusion
+    decision. Defaults to ``[]`` (no-op). Each entry is resolved to an
+    absolute path before globbing, so ``parse_file``'s existing
+    not-under-root fallback (and ``query_index``'s absolute-path candidate)
+    locate these files correctly regardless of the current working directory.
+    """
+    target = Path(target)
+    if target.is_file():
+        if target.suffix.lower() != ".md":
+            raise SystemExit("Input file is not a .md file: {}".format(target))
+        return [target], target.parent
+    if not target.is_dir():
+        raise SystemExit("Path does not exist: {}".format(target))
+
+    exclude_parts = []
+    for entry in exclude or []:
+        stripped = entry.rstrip("/\\")
+        if stripped:
+            exclude_parts.append(Path(stripped).parts)
+
+    files = []
+    for f in sorted(target.rglob("*.md")):
+        rel_parts = f.relative_to(target).parts
+        if any(rel_parts[:len(ep)] == ep for ep in exclude_parts):
+            continue
+        files.append(f)
+
+    for extra in include_roots or []:
+        extra_path = Path(extra)
+        if extra_path.is_dir():
+            files.extend(sorted(extra_path.resolve().rglob("*.md")))
+
+    return files, target
+
+
+def build_index(target, profile_name, exclude=None, include_roots=None):
+    files, root = gather_md_files(target, exclude=exclude, include_roots=include_roots)
+    profile = load_profile(profile_name)
+    file_entries = [parse_file(f, root, profile) for f in files]
+    resolve_cross_file_refs(file_entries)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "profile": profile_name,
+        # Absolute root the file paths are relative to. Used by `query` to
+        # re-open source files for content search wherever the index lives.
+        "root": str(root.resolve()).replace("\\", "/"),
+        "files": file_entries,
+    }
+
+
+def is_stale(out_path, inputs, profile_name):
+    """Return True if the index must be (re)built.
+
+    Stale when: out file missing, built with a different profile, or older than
+    any input file. Mirrors graphify's build-once / incremental behaviour.
+    """
+    out_path = Path(out_path)
+    if not out_path.exists():
+        return True
+    try:
+        with out_path.open(encoding="utf-8") as fh:
+            existing = json.load(fh)
+    except (ValueError, OSError):
+        return True
+    if existing.get("profile") != profile_name:
+        return True
+    out_mtime = out_path.stat().st_mtime
+    for f in inputs:
+        if Path(f).stat().st_mtime > out_mtime:
+            return True
+    return False
+
+
+# --------------------------------------------------------------------------- #
+# Query                                                                       #
+# --------------------------------------------------------------------------- #
+
+def query_index(index_path, terms, top):
+    """Search section *content* for any of the OR'd terms; rank by match count.
+
+    The index does not store section text -- we re-open each source file and
+    scan only each heading's own direct content (up to the next heading of
+    any level, not the full nested section_bounds -- see the inline comment
+    below on why) (zero-LLM, file I/O only). Source files are resolved
+    relative to the index file's directory, matching how the index recorded
+    their (relative) paths.
+    """
+    index_path = Path(index_path)
+    with index_path.open(encoding="utf-8") as fh:
+        index = json.load(fh)
+    index_dir = index_path.parent
+    root = Path(index["root"]) if index.get("root") else index_dir
+
+    term_res = [re.compile(re.escape(t), re.IGNORECASE) for t in terms if t.strip()]
+    if not term_res:
+        raise SystemExit("No search terms provided.")
+
+    results = []
+    file_cache = {}
+    for fentry in index["files"]:
+        # Resolve source file: prefer the recorded absolute root, then the
+        # index's own directory, then the path as-is (absolute paths).
+        candidates = [root / fentry["path"], index_dir / fentry["path"],
+                      Path(fentry["path"])]
+        src = next((c for c in candidates if c.exists()), None)
+        if src is None:
+            print(
+                "Warning: source file not found for indexed path '{}' "
+                "(tried: {}) - skipping".format(
+                    fentry["path"], ", ".join(str(c) for c in candidates)
+                ),
+                file=sys.stderr,
+            )
+            continue
+        if src not in file_cache:
+            _data, file_cache[src] = read_lines(src)
+        lines = file_cache[src]
+
+        headings = fentry["headings"]
+        for idx, h in enumerate(headings):
+            if h.get("is_toc"):
+                continue
+            start, end = h["section_bounds"]
+            # Score against this heading's OWN direct content only, not its
+            # full section_bounds. section_bounds (by the documented
+            # convention) extends through every nested child section's text
+            # too, so scoring the raw match count over section_bounds always
+            # makes an ancestor heading accumulate all of its descendants'
+            # matches and outrank the specific subsection a query is actually
+            # looking for. Children remain separately queryable/rankable as
+            # their own results, so narrowing to own content here loses no
+            # coverage - it only stops double-counting. section_bounds itself
+            # is left untouched in the reported result below.
+            own_end = end
+            if idx + 1 < len(headings):
+                own_end = min(own_end, headings[idx + 1]["line"] - 1)
+            if own_end < start:
+                body = ""
+            else:
+                body = "\n".join(lines[start - 1:own_end])
+            # Title matches count on their own, weighted more heavily, on
+            # top of the plain title+body count -- see _TITLE_MATCH_WEIGHT.
+            title_count = sum(len(r.findall(h["title"])) for r in term_res)
+            haystack = h["title"] + "\n" + body
+            count = sum(len(r.findall(haystack)) for r in term_res)
+            count += title_count * (_TITLE_MATCH_WEIGHT - 1)
+            if count > 0:
+                results.append({
+                    "file": fentry["path"],
+                    "clause_id": h.get("clause_id"),
+                    "title": h["title"],
+                    "heading_id": h["id"],
+                    "line": h["line"],
+                    "section_bounds": h["section_bounds"],
+                    "match_count": count,
+                    "cross_refs": [
+                        c for c in h.get("cross_refs", []) if c.get("resolved")
+                    ],
+                })
+
+    results.sort(key=lambda r: (-r["match_count"], r["file"], r["line"]))
+    return results[:top]
+
+
+def build_skeleton(index_path, max_depth=None):
+    """Return doc_id + heading/clause-ID tree only, no body text.
+
+    Unlike query_index, this never re-opens source files -- the index.json
+    itself already stores no section text (see query_index's docstring), so
+    a skeleton is a pure reformat of what is already on disk. This gives a
+    large What-L1/How-L1 corpus a cheap "what does this look like" pass
+    before a full query, matching the progressive-disclosure/just-in-time
+    retrieval pattern: skim the table of contents, then fetch only the
+    section that turns out to matter.
+    """
+    index_path = Path(index_path)
+    with index_path.open(encoding="utf-8") as fh:
+        index = json.load(fh)
+
+    out_files = []
+    for fentry in index["files"]:
+        headings = []
+        for h in fentry["headings"]:
+            if h.get("is_toc"):
+                continue
+            if max_depth is not None and h["level"] > max_depth:
+                continue
+            headings.append({
+                "id": h["id"],
+                "level": h["level"],
+                "title": h["title"],
+                "clause_id": h.get("clause_id"),
+                "line": h["line"],
+            })
+        out_files.append({
+            "path": fentry["path"],
+            "doc_id": fentry.get("doc_id"),
+            "headings": headings,
+        })
+
+    return {
+        "schema_version": index.get("schema_version"),
+        "profile": index.get("profile"),
+        "root": index.get("root"),
+        "files": out_files,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# CLI                                                                         #
+# --------------------------------------------------------------------------- #
+
+def cmd_index(args):
+    files, _root = gather_md_files(args.target, exclude=args.exclude, include_roots=args.include_roots)
+    if not files:
+        print("No .md files found under {}".format(args.target), file=sys.stderr)
+
+    if args.stale_check:
+        if not is_stale(args.output, files, args.profile):
+            print("Index up to date (profile={}, {} inputs): {}".format(
+                args.profile, len(files), args.output))
+            return 0
+        print("Index stale - rebuilding: {}".format(args.output), file=sys.stderr)
+
+    index = build_index(args.target, args.profile, exclude=args.exclude, include_roots=args.include_roots)
+    out_path = Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as fh:
+        json.dump(index, fh, indent=2, ensure_ascii=False)
+    n_headings = sum(len(f["headings"]) for f in index["files"])
+    if args.profile in _PLAINTEXT_HOUSE_STYLE_PROFILES:
+        _warn_on_low_heading_density(index, args.profile)
+    print("Indexed {} file(s), {} heading(s) -> {} (profile={})".format(
+        len(index["files"]), n_headings, args.output, args.profile))
+    return 0
+
+
+def _warn_on_low_heading_density(index, profile_name):
+    """Warn when a plaintext-house-style profile found very few headings.
+
+    A `rfc`/`3gpp`/`ieee` profile only tunes clause-id parsing and cross-ref
+    patterns for that house style once real ATX/Setext headings exist -- it
+    does not detect raw flush-left plaintext headings. Feeding it unconverted
+    plaintext silently produces near-zero real headings instead of failing
+    loudly, so this flags that situation for the operator to markdown-ify the
+    source first.
+    """
+    root = Path(index["root"])
+    for fentry in index["files"]:
+        n_head = len(fentry["headings"])
+        if n_head == 0:
+            continue
+        src = root / fentry["path"]
+        try:
+            _data, flines = read_lines(src)
+        except OSError:
+            continue
+        total = len(flines)
+        if total < _LOW_HEADING_DENSITY_MIN_LINES:
+            continue
+        lines_per_heading = total / n_head
+        if lines_per_heading > _LOW_HEADING_DENSITY_THRESHOLD:
+            print(
+                "Warning: '{}' has only {} heading(s) over {} lines "
+                "(~{:.0f} lines/heading) under profile '{}'. This profile "
+                "does not detect raw flush-left plaintext headings -- if "
+                "this source is plaintext (e.g. RFC-editor .txt house "
+                "style), markdown-ify it first (convert real headings to "
+                "'#'/Setext syntax) before indexing.".format(
+                    fentry["path"], n_head, total, lines_per_heading,
+                    profile_name,
+                ),
+                file=sys.stderr,
+            )
+
+
+def cmd_query(args):
+    terms = args.terms.split()
+    results = query_index(args.index, terms, args.top)
+    print(json.dumps(results, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_query_batch(args):
+    with open(args.queries_file, encoding="utf-8") as fh:
+        queries = json.load(fh)
+    out = {}
+    for key, terms in queries.items():
+        out[key] = query_index(args.index, terms, args.top)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_skeleton(args):
+    skeleton = build_skeleton(args.index, max_depth=args.max_depth)
+    print(json.dumps(skeleton, indent=2, ensure_ascii=False))
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="md_index.py",
+        description="Deterministic, zero-LLM markdown structural indexer "
+                    "(the 'graphify for markdown').",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_index = sub.add_parser("index", help="Build a JSON index from .md files.")
+    p_index.add_argument("target", help="Directory or single .md file to index.")
+    p_index.add_argument("-o", "--output", required=True,
+                         help="Output JSON path (e.g. specs-out/index.json).")
+    p_index.add_argument("--profile", default="generic",
+                         help="Pattern profile: generic | 3gpp | <name> "
+                              "(default: generic).")
+    p_index.add_argument("--stale-check", action="store_true",
+                         help="Skip rebuild if index is newer than all inputs "
+                              "and built with the same profile.")
+    p_index.add_argument("--exclude", action="append", default=[],
+                         metavar="SUBPATH",
+                         help="Subtree path relative to <target> to skip "
+                              "(repeatable). D21 what_l2.exclude (§16.5). "
+                              "Default: none.")
+    p_index.add_argument("--include-root", dest="include_roots", action="append",
+                         default=[], metavar="DIR",
+                         help="Additional directory outside <target> to also "
+                              "index, unfiltered (repeatable). D21 "
+                              "what_l2.include_roots (§16.7). Default: none.")
+    p_index.set_defaults(func=cmd_index)
+
+    p_query = sub.add_parser("query", help="Search a built index by content terms.")
+    p_query.add_argument("index", help="Path to index.json.")
+    p_query.add_argument("terms", help="Space-separated OR'd search terms.")
+    p_query.add_argument("--top", type=int, default=10,
+                         help="Return at most N ranked matches (default: 10).")
+    p_query.set_defaults(func=cmd_query)
+
+    p_query_batch = sub.add_parser(
+        "query-batch",
+        help="Run multiple queries from a JSON file in one process.")
+    p_query_batch.add_argument("index", help="Path to index.json.")
+    p_query_batch.add_argument(
+        "queries_file",
+        help="JSON file mapping an arbitrary key (e.g. aspect id) to a list "
+             'of OR\'d search terms, e.g. {"1": ["term1", "term2"], "2": ["term3"]}.')
+    p_query_batch.add_argument("--top", type=int, default=10,
+                         help="Return at most N ranked matches per key (default: 10).")
+    p_query_batch.set_defaults(func=cmd_query_batch)
+
+    p_skeleton = sub.add_parser(
+        "skeleton",
+        help="Print doc_id + heading/clause-ID tree only, no body text -- "
+             "a cheap first look at a large corpus before a full query.")
+    p_skeleton.add_argument("index", help="Path to index.json.")
+    p_skeleton.add_argument("--max-depth", type=int, default=None,
+                         help="Only include headings at or above this level "
+                              "(e.g. 1 for top-level sections only). Default: "
+                              "no limit.")
+    p_skeleton.set_defaults(func=cmd_skeleton)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
