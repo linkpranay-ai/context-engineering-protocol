@@ -47,14 +47,14 @@ external context-engineering prior art.
   `CONTEXT-ENGINEERING-DESIGN.md` `D<N>`/`§<N>` label cited across this repo, so those citations
   resolve without the private, unpublished source document. Linked from `CONTRIBUTING.md`'s existing
   citation note and from the two most heavily-cited skills (`ult-context-generate`, `ult-repo-layout`).
+  At the time this glossary shipped, `ROADMAP.md` item 15 logged the fuller pre-1.0 citation cleanup
+  it stopped short of as deferred; see the `### Fixed` entry below — that cleanup is now done.
 - **`approved_by` trust signal**: replaces the old `human_approved: true|false` boolean across the
   context-package mechanism. Now a list — empty until a human approves (Step 9), then exactly one
   `{actor: human:<id>, at: <ISO8601>}` entry is appended; v1 enforces at most one (multi-approver
   review is explicit future scope). Backed by a new hard-gate script, `scripts/validate_approved_by.py`
   (flags a missing field, more than one entry, or a malformed entry — exit code 1 on failure, unlike
   `content_safety_scan.py`'s informational-only exit 0), run as part of Step 9's approval flow.
-  At the time this glossary shipped, `ROADMAP.md` item 15 logged the fuller pre-1.0 citation cleanup
-  it stopped short of as deferred; see the `### Fixed` entry below — that cleanup is now done.
 - Three other externally-sourced ideas (session-level runtime compaction, a comment-anchored
   live-studio UI, multiple ranked search modes/a multi-bundle registry) were reviewed and rejected,
   each for a reason tied to this repo's own prior decisions — logged to `ROADMAP.md` "Not on this
