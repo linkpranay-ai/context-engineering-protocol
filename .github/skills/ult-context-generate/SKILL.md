@@ -2,7 +2,7 @@
 name: context-generate
 description: Assemble a context package (code graph, requirements, constraints, blast radius) before a downstream generation task runs - human-approved, source-attributed. Do NOT use for simple lookups.
 namespace: ult
-version: 0.2.0
+version: 0.3.0
 origin: ground-up
 author: Pranay Mishra
 maintainer: Pranay Mishra
