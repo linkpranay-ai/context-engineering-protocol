@@ -149,7 +149,7 @@ real per-run token counts can start being collected the same way citations alrea
   runs yet" rather than fabricate a figure, and will keep saying so until an operator actually
   records one via the `tokens_used` field this pass added. Separately, `graphify benchmark`
   (`EVIDENCE-METHODOLOGY.md` §2) now has real recorded runs (2026-07-24) against all three
-  CEP-DP-001D dogfood corpora — a different, real, measured token-reduction number, just not this
+  dogfood corpora — a different, real, measured token-reduction number, just not this
   mechanism's per-session harness data.
 
 See [`EVIDENCE-METHODOLOGY.md`](EVIDENCE-METHODOLOGY.md) §5 for the measured-vs-self-reported
@@ -303,25 +303,31 @@ index. Wired as an explicit optional step in `references/what-l1-fallback-query.
 - **CI-enforced skill quality linter.** `CONTRIBUTING.md`'s skill quality standards (frontmatter
   completeness, body structure) are currently reviewed by hand on every PR. Porting a full
   frontmatter/body linter into `.github/workflows/ci.yml` is open future work, not yet started.
+- **Glossary-pointer consistency polish.** A handful of files (e.g. `compiling-project-guidelines/*`,
+  `validate_layout.py`) carry bare `D<N>`/`§<N>` labels but don't themselves link to
+  `references/design-scratchpad-glossary.md` the way `ult-context-generate/SKILL.md` and
+  `ult-repo-layout/SKILL.md` do. No reader-facing breakage today — the glossary is still one click
+  away via `CONTRIBUTING.md` — but adding a direct pointer in each file would be more consistent.
+  Pure polish, not blocking.
 
 ## 15. Thorough internal-citation cleanup (pre-1.0 gate)
 
-**Status: stopgap in place, full cleanup deferred.** ~37 files across this repo (skills, scripts,
-tests, reference docs, and `layout-slots-registry.yaml`) cite `CONTEXT-ENGINEERING-DESIGN.md`'s
-internal `D<N>`/`§<N>` decision and section labels (see `CONTRIBUTING.md`'s "A note on internal
-design-doc citations"). The current stopgap —
-[`references/design-scratchpad-glossary.md`](references/design-scratchpad-glossary.md), a
-plain-English index of every `D<N>`/`§<N>` label, linked from `CONTRIBUTING.md` and from the two
-most heavily-cited skills (`ult-context-generate/SKILL.md`, `ult-repo-layout/SKILL.md`) — makes
-every citation resolvable, but doesn't touch the citations themselves, and two sibling private
-docs (`WHAT-L1-AND-CONTEXT-REUSE-ASSESSMENT.md`, `ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md`) are
-cited in places too and aren't covered by the glossary at all. A thorough pre-1.0 pass should:
-rewrite each citation site to state its substance inline (dropping the private-doc pointer
-entirely, not just explaining it elsewhere) where that's cheap and low-risk; extend the glossary
-(or fold its content into the citing prose) for the two uncovered docs; and re-run the full local
-CI-equivalent gate afterward, since several affected files carry their own test coverage
-(`content_hash.py`, `md_index.py`, `validate_layout.py`, `discover_layers.py`,
-`validate_path_conformance.py`, and their `tests/`).
+**Status: done.** ~40 sites across this repo (skills, scripts, tests, reference docs,
+`layout-slots-registry.yaml`, and even `CHANGELOG.md`/`ROADMAP.md` themselves) used to cite
+`CONTEXT-ENGINEERING-DESIGN.md`'s internal `D<N>`/`§<N>` labels by filename, or bare
+`D-0NN`-style decision-log labels, or two uncovered sibling private docs
+(`WHAT-L1-AND-CONTEXT-REUSE-ASSESSMENT.md`, `ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md`), or
+internal `CEP-DP-001*` EngineeringOS work-package IDs that had no business being public. Every
+one of those has been rewritten to state its substance inline, dropping the private pointer
+entirely — see `CONTRIBUTING.md`'s "A note on internal design-doc citations" for the current
+state. The full local CI-equivalent gate (both test suites, `check_eval_triggers.py`,
+`generate_notice.py --check`, `export_adapters.py --check`) was re-run after the rewrite.
+
+What's intentionally still here, and is not deferred work: bare `D<N>`/`§<N>` labels with no
+filename attached remain throughout the repo as provenance breadcrumbs, resolved via
+[`references/design-scratchpad-glossary.md`](references/design-scratchpad-glossary.md). That's
+the permanent resolution mechanism, not a stopgap — removing the labels entirely would lose the
+"which decision produced this behavior" trail with no replacement.
 
 ## Not on this roadmap
 

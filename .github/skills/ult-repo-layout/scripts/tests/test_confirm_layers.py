@@ -1,5 +1,4 @@
-"""Regression suite for confirm_layers.py (CONTEXT-ENGINEERING-DESIGN.md
-§17.5-17.6, CEP-DP-001H Stage 3 PR 2).
+"""Regression suite for confirm_layers.py (§17.5-17.6).
 
 Stdlib unittest only, same posture as test_discover_layers.py. Run with:
 

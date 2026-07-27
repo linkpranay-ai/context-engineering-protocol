@@ -61,7 +61,7 @@ Checks (§15.9, plus §16.2's D21 Phase 3a additions):
       this script. FAIL on drift in either direction. A no-op (the file is
       library-level-only, never copied into consuming projects) for every
       consuming project and every test fixture.
-  11. Layer path population (D23 §17.8, CEP-DP-001G Stage 2, S28) - WARN if an
+  11. Layer path population (D23 §17.8, S28) - WARN if an
       *enabled* layer's resolved path (`layers.what_l2.path`,
       `layers.what_l1.path`, `how_dimension.how_l2.path`,
       `how_dimension.how_l1.path`) doesn't exist or contains no files.
@@ -454,8 +454,7 @@ def resolve_what_l2_index_path(config):
 
 
 # ---------------------------------------------------------------------------
-# What-L1 / How-L2 / How-L1 resolution helpers (D23 §17.8, CEP-DP-001G
-# Stage 2, S28)
+# What-L1 / How-L2 / How-L1 resolution helpers (D23 §17.8, S28)
 #
 # Unlike what_l2 (above), none of these three get a `workspace_root`-relative
 # default - §16.5's widening is specific to What-L2 (D21). How-L2 has a
@@ -634,7 +633,7 @@ def check_what_l2_exclude_typos(repo_root, config):
 
 
 # ---------------------------------------------------------------------------
-# Layer path population check (D23 §17.8, CEP-DP-001G Stage 2, S28)
+# Layer path population check (D23 §17.8, S28)
 # ---------------------------------------------------------------------------
 
 def check_layer_paths_populated(repo_root, config):

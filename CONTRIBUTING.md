@@ -8,18 +8,22 @@ branch, and open a pull request on GitHub.
 
 ### A note on internal design-doc citations
 
-Several files in this repo cite `CONTEXT-ENGINEERING-DESIGN.md`,
-`WHAT-L1-AND-CONTEXT-REUSE-ASSESSMENT.md`, and
-`ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md` (e.g. "see `CONTEXT-ENGINEERING-
-DESIGN.md` D16"). These are internal design documents from the maintainer's
-own working notes, not part of this repo — they're deliberately excluded
-from the public release and cited only as provenance breadcrumbs (which
-decision produced a given behavior), not as documents you can open. For
-`CONTEXT-ENGINEERING-DESIGN.md`'s `D<N>`/`§<N>` labels specifically, see
+This repo's skills, scripts, and docs were built against an internal working
+scratchpad (`CONTEXT-ENGINEERING-DESIGN.md`) and two narrower internal
+review notes — the maintainer's own notes, never part of this repo and not
+published. Earlier releases had files citing those documents by filename
+(e.g. "see `CONTEXT-ENGINEERING-DESIGN.md` D16"), which was a dead end for
+anyone reading this repo standalone; that's been cleaned up, so no file
+cites those documents by name anymore.
+
+What remains, deliberately: many files still carry bare `D<N>`/`§<N>`
+decision and section labels (e.g. `(D14)`, `D20 §15.5`) as provenance
+breadcrumbs — not pointers to a document you can open, just a stable label
+for "which decision produced this behavior." See
 [`references/design-scratchpad-glossary.md`](references/design-scratchpad-glossary.md)
-for a plain-English gist of each one. For the other two documents, or if a
-citation still doesn't make sense standalone, treat the surrounding prose in
-this repo as the authoritative explanation.
+for a plain-English gist of every one of those labels. If a citation still
+doesn't make sense standalone, treat the surrounding prose in this repo as
+the authoritative explanation.
 
 ## Frontmatter requirements
 

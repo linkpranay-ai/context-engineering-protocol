@@ -90,7 +90,7 @@ its own numbered reproduction steps and pinned ref — this guide does not resta
 
 Fallback-relevance measurement (`EVIDENCE-METHODOLOGY.md` §1, surface 2) now has a defined
 baseline — the naive-keyword-search comparison in `EVIDENCE-METHODOLOGY.md` §4 — applied for real
-across all three CEP-DP-001D case studies (2026-07-24). To reproduce a record: re-run the same
+across all three case studies (2026-07-24). To reproduce a record: re-run the same
 naive grep query each case's own "Reproduction steps" section already documents (it's the exact
 query used to confirm the case's gap/exemplar, reused rather than invented after the fact), then
 compare its hit set and rough token cost against the case's generated context package, following

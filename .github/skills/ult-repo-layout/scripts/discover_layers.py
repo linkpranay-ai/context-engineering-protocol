@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""discover_layers.py - layer-path discovery for brownfield adoption
-(D23 CONTEXT-ENGINEERING-DESIGN.md §17.2-17.4, CEP-DP-001H Stage 3 PR 1).
+"""discover_layers.py - layer-path discovery for brownfield adoption (§17.2-17.4).
 
-Adds the second `discover` phase §17.2 describes: after the existing 8-slot
-resolution (`validate_layout.py`'s SLOT_REGISTRY, unaffected by this module),
-scan for candidates for the four layer paths (`layers.what_l2`,
-`layers.what_l1`, `how_dimension.how_l2`, `how_dimension.how_l1`) and render
+Adds a second `discover` phase: after the existing 8-slot resolution
+(`validate_layout.py`'s SLOT_REGISTRY, unaffected by this module), scan for
+candidates for the four layer paths (`layers.what_l2`, `layers.what_l1`,
+`how_dimension.how_l2`, `how_dimension.how_l1`) and render
 `context-layout-discovery.md` - a proposal artifact, never written back to
-`context-config.yaml` directly (that is `confirm-layers`'s job, §17.5,
-CEP-DP-001H PR 2, not this module).
+`context-config.yaml` directly (that is `confirm-layers`'s job, §17.5, not
+this module).
 
 Reuses `validate_layout.py`'s YAML-lite parser and layer-path resolvers
 rather than reimplementing them - this module's own resolver-precedence
@@ -16,31 +15,26 @@ logic (`_precedence_check`, `_default_path_check`) is additive on top of
 those, not a replacement.
 
 Per-layer discovery runs three checks in a fixed order (§17.4):
-1. Hand-configured-path precedence (resolves H4) - a path a human already
-   set, that exists and has content, is never re-scored (shape 2b NOTICE).
+1. Hand-configured-path precedence - a path a human already set, that exists
+   and has content, is never re-scored (shape 2b NOTICE).
 2. Default-path check (What-L2/How-L2 only) - the CEP-promised default,
    if it exists and has content, stops here too (shape 2a NOTICE).
 3. Scan and score - deterministic, stdlib-only (no LLM in scoring itself,
    same posture as `validate_layout.py`).
 
-Escalation (fixes C-1, generalizes to all four layers): if none of the three
-checks resolves a layer, it never falls through to a passive shape-3 notice
-unless it is What-L1/How-L1 while `enabled: false`. Always-on layers
+Escalation, generalized to all four layers: if none of the three checks
+resolves a layer, it never falls through to a passive shape-3 notice unless
+it is What-L1/How-L1 while `enabled: false`. Always-on layers
 (What-L2/How-L2) get `CUSTOM: <path> | ACKNOWLEDGE`; an enabled-but-unresolved
 opt-in layer gets `CUSTOM: <path> | DISABLE`.
 
 Cross-layer collision/nesting check (§17.4 "known limitation", stress
-scenario S30, open question 6) is pulled into this package's own scope per
-decision log D-017/D-018 - NOT specified in `CONTEXT-ENGINEERING-DESIGN.md`
-beyond naming the gap. Its artifact syntax (`collision_decision: PENDING #
-ACKNOWLEDGE | CUSTOM: <layer> -> <path>`) is this module's own
-implementation-shape choice, built by extending the same PENDING-decision-
-field pattern §17.3 already uses for every other escalation case (consistent
-CEP terminology, per the Implementation Order's Stage 3 instructions) - it is
-not a literal design-doc quote. Flagged for Founder review in the PR 1
-report, same as every other artifact-syntax choice this module had to make
-where §17.3's worked example didn't show one (e.g. the "Requirements
-category empty, multiple other categories tie" sub-case, H-2).
+scenario S30): whether two resolved/candidate layer paths that are equal or
+nested should block discovery outright, or just be flagged for a human to
+acknowledge, was left unspecified beyond naming the gap - this module treats
+it as a non-blocking flag, extending the same PENDING-decision-field pattern
+§17.3 already uses for every other escalation case (`collision_decision:
+PENDING # ACKNOWLEDGE | CUSTOM: <layer> -> <path>`), not a blocking error.
 
 Python 3 stdlib only (re, os, pathlib) - vendorable alongside
 validate_layout.py / md_index.py / content_hash.py.
@@ -110,17 +104,17 @@ MEDIUM_CONFIDENCE_FILE_FLOOR = 3
 # qualifies regardless of file count) or a genuinely well-populated one.
 MIN_DOC_COUNT_FOR_UNNAMED_MATCH = 2
 
-# Section titles - named constants so confirm_layers.py (CEP-DP-001H PR 2)
-# can import them rather than duplicating the literal strings.
+# Section titles - named constants so confirm_layers.py can import them
+# rather than duplicating the literal strings.
 WHAT_L2_TITLE = "What-L2 - project's own requirements/spec docs"
 HOW_L2_TITLE = "How-L2 - this project's own compiled conventions"
 WHAT_L1_TITLE = "What-L1 - external reference material (standards/specs this project didn't author)"
 HOW_L1_TITLE = "How-L1 - org-wide process standards"
-COLLISION_TITLE = "Cross-layer path collisions (S30, D-017/D-018)"
+COLLISION_TITLE = "Cross-layer path collisions (S30)"
 
 # Maps each primary layer section's title to its dotted context-config.yaml
-# base key - confirm_layers.py (CEP-DP-001H PR 2) uses this to resolve a
-# section's decision fields to config keys without a second lookup table.
+# base key - confirm_layers.py uses this to resolve a section's decision
+# fields to config keys without a second lookup table.
 TITLE_TO_BASE_KEY = {
     WHAT_L2_TITLE: "layers.what_l2",
     HOW_L2_TITLE: "how_dimension.how_l2",
@@ -791,10 +785,11 @@ def discover_how_l1(repo_root, config):
 
 
 # ---------------------------------------------------------------------------
-# Cross-layer collision/nesting check (S30, open question 6, pulled into
-# scope per decision log D-017/D-018 - NOT specified in the design doc
-# beyond naming the gap; this module's own extension of §17.3's PENDING-
-# decision-field pattern, flagged in the PR 1 report).
+# Cross-layer collision/nesting check (S30): whether two resolved/candidate
+# layer paths that are equal or nested should block discovery outright, or
+# just be flagged for a human to acknowledge, was left unspecified beyond
+# naming the gap; this module's own extension of §17.3's PENDING-decision-
+# field pattern, treated as non-blocking.
 # ---------------------------------------------------------------------------
 
 def _resolved_layer_paths(config, what_l2_path, what_l2_roots, what_l1_path, how_l2_path, how_l1_path):
@@ -841,9 +836,8 @@ def render_collision_section(collisions):
     section.status_lines = [
         "Checked every resolved/proposed layer path (including What-L2's "
         "include_roots candidates) pairwise for equality or nesting. This "
-        "check is newly in scope for this package (decision log D-017/D-018) "
-        "- it was a named-but-unimplemented gap in the design doc (§17.4's "
-        "\"known limitation\", S30)."
+        "check is newly in scope for this package - it was a named-but-"
+        "unimplemented gap (§17.4's \"known limitation\", S30)."
     ]
     for label_a, label_b, path_a, path_b in collisions:
         section.decision_lines.append(

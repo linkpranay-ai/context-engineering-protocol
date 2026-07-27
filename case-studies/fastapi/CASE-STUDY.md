@@ -59,7 +59,8 @@ Add a first-class `links` parameter to the path-operation decorators (`@app.get`
 they already declare OpenAPI callbacks via the existing `callbacks=` parameter — instead of only
 being reachable through the generic `responses=` raw-dict override or `openapi_extra`.
 
-This is a deliberate-gap task (D-012 methodology): `callbacks=` and `links` are peer constructs in
+This is a deliberate-gap task (chosen so the correct answer requires noticing something is
+genuinely absent, not just retrieving something present): `callbacks=` and `links` are peer constructs in
 the OpenAPI spec's own Response/Components object family, but FastAPI gives one full first-class
 parameter support and the other none — confirmed by grep against the real source before the task
 was framed, not invented for the case study.

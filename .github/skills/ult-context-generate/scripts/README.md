@@ -4,8 +4,10 @@ The "graphify for markdown." A standalone, **Python-3-stdlib-only** CLI that par
 markdown spec files into a structural index (headings, clause ids, section bounds,
 resolved cross-references) and answers content queries against it — **with no LLM in
 the loop**. This is the real, tested re-implementation of the deleted `ast_crossref.py`
-prototype (Context Engineering design doc D14), built to satisfy **R1** + **R3** of the
-adversarial review (`ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md`).
+prototype, built to close two gaps an internal review of external markdown-mining and
+context-engineering prior art flagged: no regression coverage for the original
+agent-simulated cross-file-resolution mechanism, and no deterministic index a consumer
+could query without re-deriving it via an LLM each time.
 
 Build-once → write JSON → skills query the JSON. Same contract graphify uses for code.
 
@@ -438,7 +440,8 @@ in the index — never an LLM guessing which file a designator refers to.
 
 A second small, **Python-3-stdlib-only** CLI, unrelated to markdown indexing:
 computes the `content_hash` field for a `contexts/<package-id>.yaml` context
-package (`CONTEXT-ENGINEERING-DESIGN.md` D19 v2, C1/C2). A
+package, so a package's traceability tag can be checked for drift against its
+current content without re-reading the whole file. A
 `<package-id>@<hash8>` traceability tag embeds this value at tagging time;
 `CONSUMING-CONTEXT-PACKAGE.md` item 0 compares a tag's `<hash8>` against the
 package's *current* `content_hash` field (a plain field read) to detect drift

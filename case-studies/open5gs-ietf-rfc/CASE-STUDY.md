@@ -51,7 +51,8 @@ self-answered and flagged as simulated (see §6).
 
 RFC 6733 (Diameter Base Protocol) was fetched directly from `https://www.rfc-editor.org/rfc/rfc6733.txt`
 (the RFC Editor's own canonical, freely-republishable plaintext) and dropped into
-`specs/external/rfc6733.md` for indexing, per D-010's link/section-number-only citation rule — the
+`specs/external/rfc6733.md` for indexing, per this repo's convention of citing external specs by
+link and section number rather than reproducing their text — the
 full text exists only in the disposable local clone, never in this repo.
 
 ## 2. Task
@@ -61,7 +62,8 @@ Authentication-Information-Answer on failure) can carry a human-readable diagnos
 alongside the existing Result-Code AVP — matching the level of support Error-Message already has
 on Gx.
 
-This is a deliberate-gap task (D-012 methodology): Error-Message is genuinely registered in
+This is a deliberate-gap task (chosen so the correct answer requires noticing something is
+genuinely absent, not just retrieving something present): Error-Message is genuinely registered in
 Open5GS's Gx (PCRF) AVP dictionary but genuinely absent from S6a and the shared common dictionary,
 confirmed by grep against the real source before the task was framed, not invented for the case
 study.

@@ -192,7 +192,8 @@ an alternative.
   extraction section of `ult-codegraph/SKILL.md`).
 - **Consumer expectation:** pick a budget large enough that the truncation
   note doesn't cover symbols you actually care about; re-run higher if it
-  does (`CONTEXT-ENGINEERING-DESIGN.md` D16).
+  does — see `ult-context-generate/references/corroboration-gate.md`'s
+  same corroboration-gate principle applied to graph queries.
 - **Known symptom:** a query for a specific, unambiguous class/symbol name
   returning a large number of mostly-unrelated nodes can mean the graph's
   node IDs were built before `graphify` started path-qualifying same-named
@@ -235,7 +236,7 @@ an alternative.
   but **low-degree (≤~5) node is normal, not a dead end** — pivot to a
   higher-degree, structurally-related node (e.g. the class/type the symbol
   belongs to) and re-run `affected` there before concluding "self-contained,
-  no dependents" (`CONTEXT-ENGINEERING-DESIGN.md` D16).
+  no dependents" — same corroboration-gate principle as above.
 
 ### Known limitations of the reference implementation (`graphify`)
 

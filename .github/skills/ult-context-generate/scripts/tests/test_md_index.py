@@ -6,8 +6,7 @@ with md_index.py itself. Run with:
     python -m unittest discover -s scripts/tests -v
 
 Each fixture in fixtures/*.md targets one of the edge cases the original
-agent-simulated D13/D14 mechanism never had a regression test for (see
-ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md, finding H2 / recommendation R2).
+agent-simulated D13/D14 mechanism never had a regression test for.
 
 The two real validation files (TS 33.401, session-management.md) are too
 large/external to vendor as fixtures; `golden_session_management.md` is a
