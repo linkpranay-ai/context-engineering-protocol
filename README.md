@@ -2,7 +2,7 @@
 <img src="./assets/readme/hero.svg" width="100%" alt="Context Engineering Protocol — human-approved, source-attributed context (code graph + requirements + conventions) before a generation task runs">
 </p>
 
-<p align="center">
+<p align="center" markdown="1">
 
 [![CI](https://github.com/linkpranay-ai/context-engineering-protocol/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/linkpranay-ai/context-engineering-protocol/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
