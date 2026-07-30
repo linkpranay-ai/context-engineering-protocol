@@ -122,15 +122,25 @@ record should state which kind it is:
   Example: a citation count from `contexts/USAGE_REPORT.md` (`scripts/usage_report.py`), which
   scans real `contexts/<id>.yaml` and `<id>_*.addenda.yaml` files. A future `graphify benchmark`
   run, once recorded, is also measured.
+  **Common misreading:** "measured" is read as "statistically significant" or "representative of
+  the general case." It isn't — it only means the number came from running something real, not
+  that five cases (§7) generalize to every codebase. A measured number can still be a small sample.
 - **Self-reported** — an estimate not backed by a harness run against real session data.
   `README.md`'s current token-cost claims are explicitly this kind ("partly self-reported... not
   yet independently measured against a real, large repo").
+  **Common misreading:** "self-reported" is read as "unreliable" or "made up," on the assumption
+  that anything short of a harness run is marketing. It isn't a hidden estimate — it's a labeled
+  one, disclosed as such precisely so it isn't mistaken for the stronger claim.
 - **Inference** — a qualitative judgment call, not a number at all — e.g. whether a package
   "helped" a downstream task, made without a controlled comparison against a no-CEP baseline. This
   is the category `case-studies/TEMPLATE.md` §8 asks case studies to distinguish from a measured
   outcome (an artifact you can point to). Inference is not a weaker form of self-reported; it's a
   different kind of claim (judgment, not estimate) and should be labeled as such, not folded into
   either of the two above.
+  **Common misreading:** the opposite direction — inference claims are the ones most likely to get
+  *read* as measured, because they're usually phrased as a firm conclusion ("CEP helped here") with
+  no numeric hedge attached to signal otherwise. The absence of a number is not the absence of a
+  judgment call; check for a named controlled comparison before treating an inference as a result.
 
 The `tokens_used` field added to the addenda schema (ROADMAP item 7) exists specifically to let
 token-cost claims move from self-reported to measured, once operators start recording real per-run
