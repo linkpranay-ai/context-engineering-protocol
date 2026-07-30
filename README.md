@@ -12,7 +12,7 @@
 
 **[Protocol](PROTOCOL.md) · [Glossary](GLOSSARY.md) · [Conformance](CONFORMANCE.md) ·
 [Quickstart](#quickstart) · [Skills](#skills-in-this-repo) · [Runtime support](#runtime-support) ·
-[Roadmap](ROADMAP.md) · [Evidence methodology](EVIDENCE-METHODOLOGY.md) ·
+[Evidence](EVIDENCE.md) · [Roadmap](ROADMAP.md) · [Evidence methodology](EVIDENCE-METHODOLOGY.md) ·
 [Contributing](CONTRIBUTING.md)**
 
 > Don't let the agent guess what's true. Make it prove the context agrees, then get a human to
@@ -22,12 +22,19 @@ A set of AI-coding-agent skills that assemble a **human-approved, source-attribu
 package** — code graph + requirements + org conventions + constraints — before a generation task
 runs, instead of letting the agent free-read the repo and guess.
 
-Built for Claude Code / GitHub Copilot; adaptable to Cursor and OpenAI Codex (see
-[Runtime support](#runtime-support) below).
+**In practice:** an ungrounded assistant invented the same hallucinated concept twice, in two
+completely unrelated codebases — a UI framework and a telecom protocol stack. The CEP-grounded run
+produced 26 real, checkable citations and zero inventions across both. See [Evidence](EVIDENCE.md)
+for the full measured breakdown, plus the dogfood validation across Claude Code, GitHub Copilot,
+and Codex Desktop, across five real-codebase cases including one deliberate negative control.
 
-**In practice:** dogfood-validated on a real 1,353-file external repo across Claude Code, GitHub
-Copilot, and Codex Desktop; measured against three further real corpora in the
-[case studies](#case-studies) below, including one deliberate negative control.
+Built for Claude Code / GitHub Copilot; adaptable to Cursor and OpenAI Codex (see
+[Runtime support](#runtime-support) below). Beyond code: the same mechanism that stops an agent
+from inventing an API is the mechanism an engineering org can run its own conventions, constraints,
+and process standards through — context engineering as the substrate for a QMS in agentic mode.
+**On the roadmap:** a trip-wire layer that watches for a task walking a road the org has already
+rejected — and surfaces that history to a human before the agent repeats the mistake, instead of
+silently reinventing it. See [Roadmap](ROADMAP.md).
 
 ## Why this exists
 
@@ -115,8 +122,9 @@ The full formal contract (addenda, multi-package edge cases, tag-discovery rules
 
 ## Roadmap
 
-What's planned next — comprehensive How-L1 validation, Cursor live-install testing, and more — is
-tracked in [`ROADMAP.md`](ROADMAP.md), roughly prioritized.
+What's planned next — comprehensive How-L1 validation, Cursor live-install testing, a trip-wire
+layer extending this protocol's discipline across time (design complete, not yet implemented), and
+more — is tracked in [`ROADMAP.md`](ROADMAP.md), roughly prioritized.
 
 ## Runtime support
 
@@ -181,9 +189,11 @@ deliberate negative control showing where it adds little or no value. See
 
 ### Measured impact
 
-Every number below is tool-measured (`graphify benchmark`, or a naive-keyword-search baseline
-reused from each case's own reproduction steps), not self-reported — see
-[`EVIDENCE-METHODOLOGY.md`](EVIDENCE-METHODOLOGY.md) §4-§6 for exactly what "measured" means here.
+See [`EVIDENCE.md`](EVIDENCE.md) for a condensed, headline-first version of this section — same
+numbers, sized for sharing a single link. Every number below is tool-measured (`graphify
+benchmark`, or a naive-keyword-search baseline reused from each case's own reproduction steps), not
+self-reported — see [`EVIDENCE-METHODOLOGY.md`](EVIDENCE-METHODOLOGY.md) §4-§6 for exactly what
+"measured" means here.
 
 | Case | Corpus | Task-level token reduction | `graphify benchmark` reduction | Graph size |
 |---|---|---|---|---|

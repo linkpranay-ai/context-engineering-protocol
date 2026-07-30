@@ -329,6 +329,15 @@ filename attached remain throughout the repo as provenance breadcrumbs, resolved
 the permanent resolution mechanism, not a stopgap — removing the labels entirely would lose the
 "which decision produced this behavior" trail with no replacement.
 
+## 16. Trip-wire — institutional memory for agentic work (design complete, not yet implemented)
+
+A persistent, project-scoped decision ledger distilled from PRs, design docs, and postmortems —
+recording not just what was decided, but what was *rejected*, and why. When a new context package
+touches a topic with a related past decision, the ledger surfaces it: a structured, source-cited
+hit an approver sees before generation runs, never auto-applied and never auto-suppressed, matching
+this protocol's existing conflicts-surface-never-auto-resolve rule ([`PROTOCOL.md §3.1`](PROTOCOL.md#31-conflict-detection--blocks)).
+Full design write-up and adversarial review targeted for the `1.2.0` cycle.
+
 ## Not on this roadmap
 
 Some things are deliberately out of scope rather than deferred:
