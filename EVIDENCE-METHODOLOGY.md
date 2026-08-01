@@ -60,6 +60,12 @@ glance" table. This closes the gap for these three corpora specifically — the 
 in §3 still have no recorded run, and three real-repo data points is not yet a claim about
 `graphify benchmark`'s behavior in general.
 
+**Common misreading:** the reported multiplier (e.g. "39.6x") is an *average* across a small set of
+queries per corpus (5-8 questions each), not a per-query guarantee. A single expensive query — one
+that genuinely needs broad context — can sit well below the average while the aggregate still looks
+strong; the average hides that one catastrophic-for-that-query case rather than ruling it out. Read
+the number as "typical across the queries actually run," not "every query gets this reduction."
+
 ## 3. Representative-corpus selection criteria
 
 Four demo corpora exist today under [`examples/`](examples/):
@@ -102,6 +108,12 @@ representative for a given claim when it is:
   First applied retrospectively across the three case studies (2026-07-24) — see each
   case's "Results at a glance" table. This is a real baseline with real numbers, but see §7 for its
   disclosed limitation (retrospective, not blind) and its current single-round-of-cases scope.
+  **Common misreading:** a "yes" on (a) — naive search technically found the right file — is not
+  the same as naive search being usable. The real cost hides in (b): a "yes, found it" result that
+  also required reading through several extra files to disambiguate which match was correct still
+  cost real time and attention. High precision on (a) alone can make naive search look like it
+  worked fine when the disambiguation count says otherwise — read (a) and (b) together, never (a)
+  in isolation.
 - **Bare ask** (consumer-output-quality, §1 surface 4): given only the task's own one-to-two-sentence
   wording, the terse ticket a developer would actually start from — no context package, no actor
   list, no constraints, no `[Context: ...]` tagging requirement — run through the same consuming
@@ -112,6 +124,11 @@ representative for a given claim when it is:
   `required_sections` convention or falls back to a generic shape. First applied for real in
   `case-studies/consumer-benefit-user-stories/CASE-STUDY.md` (2026-07-25) — one consuming skill, one
   feature; see that case's §9 for what this single application does not yet show.
+  **Common misreading:** a fluent, confident-sounding bare-ask output is not evidence of grounding —
+  fluency and correctness are independent. A well-organized answer that cites plausible-looking but
+  invented APIs is the exact failure mode this baseline exists to catch, not a sign the comparison
+  was easy or the baseline was "basically fine." Judge grounding by (a) — real vs. invented citations,
+  checked by grepping the target codebase — never by how polished or complete the prose reads.
 
 ## 5. Measurement definitions
 
