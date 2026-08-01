@@ -47,7 +47,7 @@
   <rect x="994" y="106" width="980" height="428" rx="24" fill="#F8FBFE"/>
 
   <!-- left copy -->
-  <text x="94" y="94" fill="#A5B6CA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" letter-spacing="1.1">AI-CODING-AGENT SKILLS • CLAUDE CODE / COPILOT / CODEX</text>
+  <text x="94" y="94" fill="#A5B6CA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="19" letter-spacing="0.8">AI-CODING-AGENT SKILLS • CLAUDE CODE / COPILOT / CURSOR / CODEX</text>
 
   <g transform="translate(92,132)" filter="url(#softShadow)">
     <rect width="282" height="224" rx="18" fill="#152238" opacity="0.95"/>

@@ -25,10 +25,10 @@ runs, instead of letting the agent free-read the repo and guess.
 **In practice:** an ungrounded assistant invented the same hallucinated concept twice, in two
 completely unrelated codebases — a UI framework and a telecom protocol stack. The CEP-grounded run
 produced 26 real, checkable citations and zero inventions across both. See [Evidence](EVIDENCE.md)
-for the full measured breakdown, plus the dogfood validation across Claude Code, GitHub Copilot,
-and Codex Desktop, across five real-codebase cases including one deliberate negative control.
+for the full measured breakdown, plus field-validated runs across Claude Code, GitHub Copilot,
+Codex, and Cursor, across five real-codebase cases including one deliberate negative control.
 
-Built for Claude Code / GitHub Copilot; adaptable to Cursor and OpenAI Codex (see
+Built for Claude Code / GitHub Copilot, with Cursor and OpenAI Codex field-validated as well (see
 [Runtime support](#runtime-support) below). Beyond code: the same mechanism that stops an agent
 from inventing an API is the mechanism an engineering org can run its own conventions, constraints,
 and process standards through — context engineering as the substrate for a QMS in agentic mode.
