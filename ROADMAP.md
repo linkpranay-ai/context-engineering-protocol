@@ -86,14 +86,19 @@ needed — this was purely a stale local install. All references to the old work
 
 ## 5. Cursor live-install validation
 
-**Status: generated, doc-verified, not field-tested.** `catalog/export_adapters.py` generates
-`.cursor/rules/*.mdc` deterministically from each skill's `SKILL.md` frontmatter, checked against
-Cursor's currently published docs for format correctness — but never confirmed against a real
-Cursor install actually picking up and invoking a skill end-to-end (Claude Code and GitHub
-Copilot both have this field validation already; Codex has it via Codex Desktop — see
-[`README.md` "Runtime support"](README.md#runtime-support)). Needs someone with a Cursor
-installation to run the same kind of dogfood pass Phase 9 already did for the other three
-runtimes.
+**Status: resolved, field-validated (2026-08-01).** Installed the real skill library into a
+throwaway scratch project via `install.ps1 -InitProject`, then drove Cursor's own chat directly. A
+positive-trigger prompt (worded against `ult-context-generate`'s rule `description`, not its name)
+correctly attached the Agent Requested `.cursor/rules/ult-context-generate.mdc` rule — Cursor read
+the real `SKILL.md`, ran its documented 4-question scope-clarification gate, and produced real
+structured YAML context packages, gated on an explicit typed `approve` that correctly stamped
+`approved_by`/`generated_at`. A negative-control simple-lookup prompt correctly bypassed the rule
+entirely, per its own "Do NOT use for simple lookups" clause. Full report:
+[issue #35](https://github.com/linkpranay-ai/context-engineering-protocol/issues/35#issuecomment-5150441056).
+All four supported runtimes (Claude Code, GitHub Copilot, Codex, Cursor) are now field-validated —
+see [`README.md` "Runtime support"](README.md#runtime-support). One incidental fix landed during
+setup: the installer no longer leaks gitignored `__pycache__`/`.pytest_cache` build artifacts into
+installed projects ([PR #37](https://github.com/linkpranay-ai/context-engineering-protocol/pull/37)).
 
 ## 6. Project memory feedback loop
 

@@ -122,9 +122,9 @@ The full formal contract (addenda, multi-package edge cases, tag-discovery rules
 
 ## Roadmap
 
-What's planned next — comprehensive How-L1 validation, Cursor live-install testing, a trip-wire
-layer extending this protocol's discipline across time (design complete, not yet implemented), and
-more — is tracked in [`ROADMAP.md`](ROADMAP.md), roughly prioritized.
+What's planned next — comprehensive How-L1 validation, a trip-wire layer extending this protocol's
+discipline across time (design complete, not yet implemented), and more — is tracked in
+[`ROADMAP.md`](ROADMAP.md), roughly prioritized.
 
 ## Runtime support
 
@@ -166,28 +166,37 @@ wrapper and follow through into the real `SKILL.md` content — not a generic/ha
   "Reproduction steps" in the [Textual case study](case-studies/textual/CASE-STUDY.md) to
   reproduce the clone and re-run the same check yourself).
 
-**Codex — field-validated via Codex Desktop** (Phase 9), with one known caveat on the VS Code
-extension surface.
+**Codex — field-validated**, both Codex Desktop (Phase 9) and the VS Code extension (2026-08-01,
+separate machine).
 
 - Codex Desktop found and read the root `AGENTS.md` unprompted, correctly listed all four real
   skills with descriptions matching the table, and gave an accurate summary of `ult-repo-layout`'s
   `discover` mode after actually opening the real `SKILL.md`.
-- The Codex **VS Code extension**'s chat panel hung indefinitely on any file-read tool call
-  (reproduced twice — once in a multi-root workspace, once with the dogfood clone opened
-  standalone — while responding normally to plain chat), a defect in that extension's own
-  tool-call path, unrelated to this project's skills or adapters.
-- Codex Desktop completing the same test cleanly against the same clone confirms the `AGENTS.md`
-  adapter itself works; the still-open gap is narrower than "Codex support" — it's the VS Code
-  *extension panel's* file-read path.
+- The Codex **VS Code extension** was retested on a separate machine and now completes the same
+  file-read tool-call path cleanly — the earlier hang (reproduced twice during Phase 9, isolated to
+  that extension's own tool-call handling rather than this project's skills or adapters) no longer
+  reproduces.
 - Transcript kept in the local dogfood clone (`dogfood-textual/`, not part of this repo — see
   "Reproduction steps" in the [Textual case study](case-studies/textual/CASE-STUDY.md) to
   reproduce the clone and re-run the same check yourself).
 
-Cursor's adapter is generated deterministically from each skill's `SKILL.md` frontmatter and
-verified against Cursor's currently published docs, but **has not been live-install-tested**
-against a real Cursor installation — see "What's not yet done" below. Run
-`python catalog/export_adapters.py --check` (wired into CI) to confirm generated files are current;
-`--write` regenerates them after adding or editing a skill.
+**Cursor — field-validated** (2026-08-01): installed the real skill library into a scratch project
+via `install.ps1 -InitProject`, then drove Cursor's own chat directly.
+
+- A positive-trigger prompt, worded against `ult-context-generate`'s rule `description` rather than
+  its name, correctly attached the Agent Requested `.cursor/rules/ult-context-generate.mdc` rule —
+  Cursor read the real `SKILL.md`, ran its documented 4-question scope-clarification gate with
+  context-aware recommended answers, and produced real structured YAML context packages.
+- Finalization correctly gated on an explicit typed `approve`, stamping
+  `approved_by: - actor: human:<user>` and `generated_at` — matching the `approved_by` schema
+  shipped in 0.3.0.
+- A negative-control simple-lookup prompt in a fresh chat correctly bypassed the rule entirely, per
+  its own "Do NOT use for simple lookups" clause — answered directly with source-line citations, no
+  skill or clarification gate involved.
+- Full report: [issue #35](https://github.com/linkpranay-ai/context-engineering-protocol/issues/35#issuecomment-5150441056).
+
+Run `python catalog/export_adapters.py --check` (wired into CI) to confirm generated Cursor/Codex
+files are current; `--write` regenerates them after adding or editing a skill.
 
 ## Case studies
 
@@ -280,17 +289,6 @@ Disclosed plainly rather than glossed over. Full prioritized list with more deta
   real, tool-measured runs, not self-reported; see [Measured impact](#measured-impact).
 - **No capability-profile / tool-restriction field** (e.g. an `allowed-tools`-style frontmatter key)
   exists yet on any skill.
-- **Cursor is not installed and its adapter is not live-install-tested.** `catalog/export_adapters.py`
-  generates `.cursor/rules/*.mdc` deterministically from each skill's `SKILL.md` frontmatter, and
-  the output format was checked against Cursor's currently published docs — but it has not been
-  confirmed against a real Cursor install actually picking up and invoking a skill end-to-end.
-  Treat it as documentation-verified, not field-verified, until that happens.
-- **Codex itself is field-validated via Codex Desktop** (see "Runtime support" above: it found
-  and read the real `AGENTS.md` unprompted and correctly listed every skill). **The Codex VS Code
-  extension was not tested** — its chat panel hangs indefinitely on any file-read tool call, a
-  defect in that extension's own tool-call path, unrelated to this project's skills or adapters
-  (confirmed by Codex Desktop completing the same test cleanly against the same clone). Transcripts
-  for both runs are kept in the local dogfood clone (`dogfood-textual/`, not part of this repo).
 
 ## Contributing
 

@@ -32,6 +32,26 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   (`/plugin marketplace add` + `/plugin install`), not just `claude plugin validate`. **Not yet
   submitted to the public Claude Code marketplace listing** — that's a later, deliberate launch
   action, not a side effect of this package existing.
+- **Cursor — field-validated** (closes [`ROADMAP.md`](ROADMAP.md) item 5): installed the real skill
+  library into a scratch project via `install.ps1 -InitProject` and drove Cursor's chat directly.
+  Positive-trigger prompt (worded against the rule's own `description`, not its name) correctly
+  attached the `ult-context-generate` Agent Requested rule — Cursor read `SKILL.md`, ran the 4-question
+  scope-clarification gate with context-aware recommended answers, produced real structured YAML
+  context packages, and gated finalization on an explicit typed "approve" (correctly stamping
+  `approved_by: - actor: human:<user>` and `generated_at`, matching the `approved_by` schema shipped
+  in 0.3.0). Negative-control simple-lookup prompt correctly bypassed the rule entirely, per its own
+  "Do NOT use for simple lookups" clause. Full report: [issue #35](https://github.com/linkpranay-ai/context-engineering-protocol/issues/35#issuecomment-5150441056).
+
+### Fixed
+
+- **Installer no longer leaks `__pycache__`/`.pytest_cache` into installed projects.** Both
+  `install.sh` and `install.ps1` mirrored whatever was physically present in the source clone's
+  working tree, gitignored or not — anyone installing from a clone where the test suite had been run
+  locally would copy those build-artifact directories into every target project. Found during the
+  Cursor field-test above. Fixed by excluding both at copy time (`robocopy /XD` on Windows, post-copy
+  cleanup on the non-robocopy paths); `test_install_scripts.py`'s tree-comparison helper updated to
+  match the corrected invariant (it previously required an exact file-for-file mirror, silently
+  encoding the leak as correct behavior). [PR #37](https://github.com/linkpranay-ai/context-engineering-protocol/pull/37).
 
 ## [0.3.0]
 
