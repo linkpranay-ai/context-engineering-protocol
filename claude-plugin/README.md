@@ -9,6 +9,7 @@ Source-cited, human-approved context packages (code graph + requirements + conve
 ## Supporting skills
 
 - `/context-engineering-protocol:compiling-project-guidelines` -- Compile scattered guideline sources into one scope-aware COMPILED-GUIDELINES.md for other skills and ult-context-generate's Constraints layer. Do NOT use to enforce rules at runtime.
+- `/context-engineering-protocol:demo-write-user-stories` -- Reference implementation that writes functional user stories from a feature description, optionally grounded in an approved CEP context package per CONSUMING-CONTEXT-PACKAGE.md, with per-story citations and the standard tag/reverse-index loop. A worked example for downstream teams building their own context-consuming skills.
 - `/context-engineering-protocol:ult-codegraph` -- Generate a codebase knowledge graph with `graphify` at `graphify-out/` so other skills can query cross-file relationships before touching code. Do NOT use for runtime profiling.
 - `/context-engineering-protocol:ult-repo-layout` -- Register, resolve, and validate where a project's path-slots actually live via .layout-slots.yaml markers, so relocating a slot needs zero SKILL.md edits. Do NOT use for single-file lookups.
 
