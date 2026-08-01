@@ -57,10 +57,22 @@ your own files alongside it; they are never touched.
 """
 
 
+
+# Gitignored local build artifacts (see repo .gitignore) that may exist in
+# this checkout's working tree if tests were ever run here. Both installers
+# now exclude these when copying (never leak into an installed target
+# project), so the source side of the comparison must ignore them too -
+# otherwise this test just re-encodes the leak as "correct" behavior.
+_IGNORED_DIR_NAMES = {"__pycache__", ".pytest_cache"}
+
+
 def _tree_files(root: Path):
     files = set()
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _IGNORED_DIR_NAMES]
         for name in filenames:
+            if name.endswith(".pyc"):
+                continue
             rel = Path(dirpath, name).relative_to(root)
             files.add(str(rel).replace("\\", "/"))
     return files

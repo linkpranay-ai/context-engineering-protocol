@@ -111,7 +111,11 @@ function Copy-LibraryTree([string]$RelSrc, [string]$RelDst) {
         # Windows PowerShell 5.1 and fail on deeply nested trees. Exit codes
         # 0-7 are success; 8+ is failure. robocopy itself is Windows-only, so
         # this branch never runs under pwsh on Linux/macOS (see below).
-        $null = robocopy $src $dst /MIR /NFL /NDL /NJH /NJS /NC /NS /NP
+        # /XD excludes gitignored local build artifacts (__pycache__,
+        # .pytest_cache) that may exist in the source clone's working tree
+        # if tests were ever run there — these must never leak into an
+        # installed target project.
+        $null = robocopy $src $dst /MIR /XD __pycache__ .pytest_cache /NFL /NDL /NJH /NJS /NC /NS /NP
         if ($LASTEXITCODE -ge 8) {
             Write-Error "robocopy failed copying $src to $dst (exit code $LASTEXITCODE)"
             exit 1
@@ -139,6 +143,15 @@ function Copy-LibraryTree([string]$RelSrc, [string]$RelDst) {
         }
         New-Item -ItemType Directory -Path (Split-Path -Parent $dst) -Force | Out-Null
         Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
+
+        # No robocopy /XD equivalent here, so strip gitignored local build
+        # artifacts (__pycache__, .pytest_cache) post-copy instead — same
+        # reasoning as the Windows branch above.
+        if ((Get-Item -LiteralPath $dst).PSIsContainer) {
+            Get-ChildItem -LiteralPath $dst -Recurse -Force -Directory |
+                Where-Object { $_.Name -eq "__pycache__" -or $_.Name -eq ".pytest_cache" } |
+                Remove-Item -Recurse -Force
+        }
     }
 
     if ($existed) { Write-InstallAction "overwrote: $RelDst" }

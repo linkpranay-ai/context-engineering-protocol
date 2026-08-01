@@ -144,6 +144,13 @@ copy_tree() {
   rm -rf "$dst"
   cp -R "$src" "$dst"
 
+  # Strip gitignored local build artifacts (__pycache__, .pytest_cache) that
+  # may exist in the source clone's working tree if tests were ever run
+  # there — these must never leak into an installed target project.
+  if [ -d "$dst" ]; then
+    find "$dst" -depth -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -exec rm -rf {} +
+  fi
+
   if [ "$existed" -eq 1 ]; then
     log_action "overwrote: $2"
   else
