@@ -29,6 +29,30 @@ tagged output next, instead of being re-derived from scratch at each stage. See 
 "Downstream compounding benefit" section, and the [top-level README](../README.md#measured-impact)
 for the marketing-facing summary table.
 
+## Feature coverage
+
+Which CEP capability each case actually exercised — a cheap cross-check for gaps in what's been
+proven, not a completeness scorecard.
+
+Legend: ✅ exercised and reported on directly · ➖ not yet part of the protocol (derived-package
+composition, trip-wire, and the CEP-retrofit metaskill are all still in design, not implemented —
+see each capability's own design draft once published) · N/A doesn't apply to this case's own scope.
+
+| Case | Approval gate | Provenance tagging | Staleness / conflict checks | Derived-package composition | Trip-wire | Metaskill-retrofit origin | Benefit measured |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| textual-focus-chain-and-sparkline-baseline | ✅ (simulated, disclosed) | ✅ | ✅ (0 conflicts on Run A; Run B is the negative control) | ➖ | ➖ | N/A — no consuming skill | Retrieval |
+| open5gs-s6a-error-message-avp | ✅ (simulated, disclosed) | ✅ | ✅ (0 conflicts) | ➖ | ➖ | N/A — no consuming skill | Retrieval |
+| fastapi-response-links-parity | ✅ (simulated, disclosed) | ✅ | ✅ (0 conflicts) | ➖ | ➖ | N/A — no consuming skill | Retrieval |
+| consumer-benefit-user-stories | ✅ (reuses a prior, already-approved package) | ✅ | N/A — reuses `textual` case's package, no new package generated | ➖ | ➖ | No — hand-built, vendored `spw-write-user-story` | Generative |
+| open5gs-gy-supported-features | ✅ | ✅ | ✅ (0 conflicts) | ➖ | ➖ | No — same vendored `spw-write-user-story` | Generative |
+| ripgrep-crlf-replace-terminator ⚠️ tooling side-quest | N/A — no package generated | N/A | N/A | ➖ | ➖ | N/A | N/A — not a protocol case |
+| ripgrep-trim-user-stories | ✅ (self-approved, disclosed) | ✅ | ✅ (0 conflicts) | ➖ | ➖ | No — new, ground-up `demo-write-user-stories` | Generative |
+
+All seven cases show ➖ across the same three columns: derived-package composition, trip-wire, and
+metaskill-retrofit origin. That's an honest gap in what's been demonstrated so far, not a
+case-study omission — none of the three exist in the protocol yet. Each gets its own case once it
+ships.
+
 ## Synthesis
 
 [`SYNTHESIS.md`](SYNTHESIS.md) compares the first five cases above — what held across cases, what
