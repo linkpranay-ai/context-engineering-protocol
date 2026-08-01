@@ -1,5 +1,18 @@
 # Case Study: BurntSushi/ripgrep
 
+> **⚠️ Tooling side-quest, not a CEP protocol case study.** This evaluates `graphify`
+> (the `ult-codegraph` skill's underlying tool) against naive search on a real Rust
+> codebase — nothing here exercises CEP's actual protocol machinery: no context package
+> was generated, no approval gate was exercised, no provenance/staleness/composition
+> mechanics ran. It shows graphify is a useful component; it is **not** evidence for
+> CEP's core thesis (grounding reduces hallucination, packages are provenance-tracked
+> and reusable). Read it as a tool evaluation that happens to live in this directory
+> for reproducibility, not as one of the protocol-level cases below it. A real
+> CEP-protocol case study in a new ecosystem — context package generation + a
+> downstream consuming skill, the same pattern as
+> [`consumer-benefit-user-stories`](../consumer-benefit-user-stories/CASE-STUDY.md) —
+> is still owed and tracked separately.
+
 ```yaml
 case: ripgrep-crlf-replace-terminator
 codebase: BurntSushi/ripgrep, dual-licensed Unlicense OR MIT, ~50 KSLOC Rust across 10 crates (CLI search tool)
