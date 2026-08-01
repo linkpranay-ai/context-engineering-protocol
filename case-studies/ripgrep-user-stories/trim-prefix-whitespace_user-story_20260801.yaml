@@ -1,0 +1,229 @@
+context_package:
+  id: trim-prefix-whitespace_user-story_20260801
+  task: >
+    Write functional user stories for ripgrep's `--trim`/`--no-trim` flag —
+    stripping leading ASCII whitespace from each printed matching line — and
+    for its execution-order relationship with `-M/--max-columns` truncation
+    (trim must run before max-columns windowing, per issue #917 introducing
+    the flag and PR #2458 fixing an ordering bug between the two).
+  scope:
+    feature: "--trim flag: prefix-whitespace trimming and its ordering relative to --max-columns"
+    task_type: user-story
+    new_or_existing: existing
+    out_of_scope: >
+      CRLF/line-terminator handling and the `--replace`/Replacer subsystem
+      (a separate, already-covered feature — see the
+      ripgrep-crlf-replace-terminator case study); `--max-columns`'s own
+      truncation/preview logic itself (only its ordering relative to trim is
+      in scope); any change to trim's default-off behavior.
+  aspects:
+    - aspect_id: a1
+      name: Trim flag definition and wiring (CLI flag -> LowArgs -> HiArgs -> printer config)
+      what_l3_covered: true
+      what_l2_covered: true
+      what_l1_covered: false
+      llm_knowledge_used: false
+      web_fallback_used: false
+    - aspect_id: a2
+      name: Trim execution order relative to --max-columns windowing (PR #2458 ordering fix)
+      what_l3_covered: true
+      what_l2_covered: true
+      what_l1_covered: false
+      llm_knowledge_used: false
+      web_fallback_used: false
+  generated_at: "2026-08-01T00:00:00Z"
+  approved_by:
+    - actor: agent:dogfood-context-engineering-oss
+      at: "2026-08-01T00:00:00Z"
+  content_hash: ee9c7b70
+  what_l1_fallback_count: 0
+  llm_knowledge_count: 0
+  web_fallback_count: 0
+  conflicts_count: 0
+  llm_scaffold_count: 0
+  how_l1_fallback_count: 0
+  how_l1_covered: false
+  org_convention_ref: >
+    N/A — Step 2 (How-L2 org convention) intentionally skipped this run; see
+    decisions_log. demo-write-user-stories does not consume org conventions
+    by design.
+  summary:
+    - "What-L3: `--trim` is a real, existing flag (`Trim` struct, crates/core/flags/defs.rs:6814-6844, `is_switch`/`name_negated(\"no-trim\")`/`doc_category: Output`) wired through `LowArgs.trim` (crates/core/flags/lowargs.rs:105) -> `HiArgs.trim` (crates/core/flags/hiargs.rs:102,317) -> `StandardBuilder::trim_ascii(self.trim)` (crates/core/flags/hiargs.rs:636), which sets `Config.trim_ascii` (crates/printer/src/standard.rs:352-358, disabled by default)."
+    - "What-L3: at every call site in crates/printer/src/standard.rs (L1053-1054, L1137-1138, L1198-1201, L1231-1232), `self.trim_ascii_prefix(bytes, &mut line)` runs immediately before `self.exceeds_max_columns(...)` — the real, in-code ordering PR #2458 fixed, confirmed directly in the current source, not inferred."
+    - "What-L2 (CHANGELOG.md, hand-adapted source — see decisions_log): FEATURE #917 (line 891) introduced `--trim`; the BUG entry for PR #2458 (line 369) documents exactly the ordering fix ctx_004 verifies in code. The two layers agree — no conflict."
+    - "No gaps detected for either aspect — both have real What-L3 and What-L2 (CHANGELOG) coverage. This is the expected outcome for an already-shipped, existing feature, not a check that failed to fire (see CASE-STUDY.md §5)."
+    - "Domain enrichment (self-approved, dogfooding run, Step 7.6): the same trimmed `line: Match` range is what downstream color-highlighting (`write_colored_matches`) and the max-columns truncation check both consume (crates/printer/src/standard.rs:1050-1057) — one mutation point feeds both behaviors consistently."
+  context_items:
+    - id: ctx_001
+      layer: what-l3
+      source: "crates/core/flags/defs.rs:6814-6844 (Trim struct)"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: Trim flag definition and wiring
+      summary: >
+        The `Trim` flag struct implements `Flag`: `is_switch() = true`,
+        `name_long() = "trim"`, `name_negated() = Some("no-trim")`,
+        `doc_category() = Category::Output`, `doc_short: "Trim prefix
+        whitespace matches."`. `update()` sets `args.trim =
+        v.unwrap_switch()` on `LowArgs`.
+      what_l1_fallback: false
+
+    - id: ctx_002
+      layer: what-l3
+      source: "crates/core/flags/lowargs.rs:105; crates/core/flags/hiargs.rs:102,317,636"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: Trim flag definition and wiring
+      summary: >
+        `LowArgs.trim: bool` (lowargs.rs:105) is copied into `HiArgs.trim:
+        bool` (hiargs.rs:102, assigned from `low.trim` at hiargs.rs:317) and
+        consumed at hiargs.rs:636 via `.trim_ascii(self.trim)` when building
+        the `StandardBuilder` used by the single-threaded/buffered printer
+        path.
+      what_l1_fallback: false
+
+    - id: ctx_003
+      layer: what-l3
+      source: "crates/printer/src/standard.rs:352-358 (StandardBuilder::trim_ascii)"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: Trim flag definition and wiring
+      summary: >
+        `StandardBuilder::trim_ascii(&mut self, yes: bool)` sets
+        `self.config.trim_ascii = yes`; doc comment confirms "disabled by
+        default" — matches `Trim`'s flag default of off.
+      what_l1_fallback: false
+
+    - id: ctx_004
+      layer: what-l3
+      source: "crates/printer/src/standard.rs:1053-1054,1137-1138,1198-1201,1231-1232"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: a2
+      aspect: Trim execution order relative to --max-columns windowing
+      summary: >
+        Every call site pairs `self.trim_ascii_prefix(bytes, &mut line)`
+        immediately followed by `self.exceeds_max_columns(&bytes[line])` (or
+        the free-function variant `trim_ascii_prefix(...)` at L1198 followed
+        by `self.exceeds_max_columns(line)` at L1201) — trim always runs
+        first, mutating the `line: Match` range in place before the
+        max-columns length check reads it. This is the exact ordering
+        CHANGELOG.md's PR #2458 entry (ctx_008) describes as the fix.
+      what_l1_fallback: false
+
+    - id: ctx_005
+      layer: what-l3
+      source: "crates/printer/src/util.rs:452-471 (trim_ascii_prefix free function)"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: Trim flag definition and wiring
+      summary: >
+        The free function trims leading bytes matching `is_space()` (tab,
+        LF, VT, FF, CR, space) via `take_while`, but explicitly excludes any
+        byte that is part of the configured `line_term`
+        (`!line_term.as_bytes().contains(&b)`) — so it never eats a CRLF
+        `\r` that is itself the line terminator. This is a genuine,
+        verified interaction point with the separate CRLF/line-terminator
+        subsystem the ripgrep-crlf-replace-terminator case study covers
+        (same file, util.rs), without overlapping its scope.
+      what_l1_fallback: false
+
+    - id: ctx_006
+      layer: what-l3
+      source: "graphify affected \"StandardBuilder\" --depth 2; crates/printer/src/standard.rs:2248,2271,2296 (trim tests), 2471+ (max_columns tests)"
+      type: blast-radius
+      confidence: EXTRACTED
+      aspect_id: a2
+      aspect: Trim execution order relative to --max-columns windowing
+      summary: >
+        `graphify affected "StandardBuilder" --depth 2` surfaces 30+ real
+        dependent methods/tests, including the existing test functions
+        `trim_ascii()` (L2248), `trim_ascii_multi_line()` (L2271),
+        `trim_ascii_with_line_term()` (L2296), and the `max_columns*()` test
+        family (L2471 onward) — confirming both trim and its ordering with
+        max-columns already have direct test coverage today, not just
+        implementation.
+      what_l1_fallback: false
+
+    - id: ctx_007
+      layer: what-l2
+      source: "CHANGELOG.md:889-891 (FEATURE #917)"
+      type: requirement
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: Trim flag definition and wiring
+      summary: >
+        "The `--trim` flag strips prefix whitespace from all lines
+        printed." — the original feature-introduction changelog entry,
+        linking to https://github.com/BurntSushi/ripgrep/issues/917.
+      what_l1_fallback: false
+
+    - id: ctx_008
+      layer: what-l2
+      source: "CHANGELOG.md:367-369 (BUG entry for PR #2458)"
+      type: requirement
+      confidence: EXTRACTED
+      aspect_id: a2
+      aspect: Trim execution order relative to --max-columns windowing
+      summary: >
+        "Make `--trim` run before `-M/--max-columns` takes effect." — links
+        to https://github.com/BurntSushi/ripgrep/pull/2458. Matches ctx_004
+        exactly: both layers agree on the ordering requirement.
+      what_l1_fallback: false
+
+    - id: ctx_009
+      layer: domain-knowledge
+      source: "llm_domain_knowledge, corroborated at crates/printer/src/standard.rs:1050-1057"
+      type: domain-best-practice
+      confidence: SUGGESTED
+      aspect_id: a1
+      aspect: Trim flag definition and wiring
+      summary: >
+        The `line: Match` range mutated by `trim_ascii_prefix` is the same
+        range later passed to `write_colored_matches` for match
+        highlighting, in addition to the max-columns check (ctx_004) — one
+        mutation point feeds both downstream behaviors consistently, so
+        trimming never causes color-highlighted spans and max-columns
+        truncation to disagree about where the line actually starts.
+      approved_by:
+        - actor: agent:dogfood-context-engineering-oss
+          at: "2026-08-01T00:00:00Z"
+      what_l1_fallback: false
+
+  conflicts_detected: []
+
+  gaps_detected: []
+
+  open_questions: []
+
+  decisions_log:
+    - topic: what_l3.path adaptation (no context-config.yaml exists for this clone)
+      decided: >
+        Treated `crates/` as this run's What-L3 source root — ripgrep's real
+        source layout — rather than the skill's literal `app/` default,
+        since no `context-config.yaml` exists for this clone. Same class of
+        hand-adaptation the fastapi/open5gs dogfood runs made for their own
+        non-`app/` layouts.
+    - topic: what_l2.path adaptation (no docs/requirements/ folder exists)
+      decided: >
+        Treated CHANGELOG.md as this run's What-L2 source for both aspects
+        — the closest real, existing artifact documenting user-facing
+        feature/bugfix intent (FEATURE #917, PR #2458) that ripgrep actually
+        maintains. No docs/requirements/-shaped corpus exists in this repo
+        to fall back to by default.
+    - topic: How-L2 org convention (Step 2) intentionally skipped
+      decided: >
+        demo-write-user-stories does not consume org conventions by design
+        (see its SKILL.md scope note) — generating
+        org-conventions/user-story.yaml for this run would be a produced
+        artifact with no downstream consumer, so Step 2 was skipped rather
+        than performed as dead weight.
+
+  non_regression_risks:
+    - "StandardBuilder's trim_ascii()/trim_ascii_prefix() interaction point (crates/printer/src/standard.rs): blast radius via `graphify affected \"StandardBuilder\" --depth 2` surfaces 30+ dependent methods/tests, including the real existing trim_ascii()/trim_ascii_multi_line()/trim_ascii_with_line_term() and max_columns*() test family — these must keep passing for trim and max-columns to keep composing correctly."
+    - ".trim_ascii()'s own node is low-degree (degree 2) and `graphify affected \".trim_ascii()\" --depth 2` returns \"No affected nodes found\" directly — corroborates, on a different feature, the same low-degree-leaf disclosed limitation the ripgrep-crlf-replace-terminator case study first found. The real blast radius only surfaces by pivoting to the higher-degree StandardBuilder node (ctx_006)."
+    - "util.rs's trim_ascii_prefix() free function (ctx_005) deliberately excludes line-terminator bytes from trimming — this must not regress if a future change to the CRLF/line-terminator subsystem (same file, covered by the separate ripgrep-crlf-replace-terminator case) touches it."

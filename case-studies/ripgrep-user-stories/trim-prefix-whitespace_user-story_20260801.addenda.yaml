@@ -1,0 +1,9 @@
+addenda:
+  - id: add_001
+    kind: reference
+    added_by: demo-write-user-stories
+    added_at: "2026-08-01T00:15:00Z"
+    artifact: case-studies/ripgrep-user-stories/mode-1-with-cep-output.md
+    cites:
+      ctx_ids: [ctx_001, ctx_002, ctx_003, ctx_004, ctx_005, ctx_006, ctx_007, ctx_008, ctx_009]
+      aspect_ids: [a1, a2]
