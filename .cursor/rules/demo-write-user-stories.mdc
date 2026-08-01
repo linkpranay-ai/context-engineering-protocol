@@ -1,0 +1,11 @@
+---
+description: "Reference implementation that writes functional user stories from a feature description, optionally grounded in an approved CEP context package per CONSUMING-CONTEXT-PACKAGE.md, with per-story citations and the standard tag/reverse-index loop. A worked example for downstream teams building their own context-consuming skills."
+globs:
+alwaysApply: false
+---
+
+# Demo: Writing User Stories (worked example)
+
+This repository packages its capabilities as portable skills for AI
+coding agents. Read `.github/skills/demo-write-user-stories/SKILL.md` and follow it
+when this rule applies.
