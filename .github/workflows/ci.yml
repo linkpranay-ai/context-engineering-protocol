@@ -24,6 +24,9 @@ jobs:
       - name: Run ult-institutional-memory-distill test suite
         run: python -m unittest discover -s .github/skills/ult-institutional-memory-distill/scripts/tests -p "test_*.py" -v
 
+      - name: Run ult-cep-retrofit test suite
+        run: python -m unittest discover -s .github/skills/ult-cep-retrofit/scripts/tests -p "test_*.py" -v
+
       - name: Check skill eval-trigger accuracy
         run: python catalog/check_eval_triggers.py
 

@@ -1,0 +1,11 @@
+---
+description: "Point at an existing skill library, inventory it format-agnostically, and (with human confirmation at every step) insert pointers to CEP's existing CONSUMING-*.md contracts into the skills that should consume them. Do NOT use to write new CONSUMING-*.md contracts, validate that a retrofit works at runtime, or edit a library's own logic beyond the inserted pointer."
+globs:
+alwaysApply: false
+---
+
+# CEP Retrofit
+
+This repository packages its capabilities as portable skills for AI
+coding agents. Read `.github/skills/ult-cep-retrofit/SKILL.md` and follow it
+when this rule applies.

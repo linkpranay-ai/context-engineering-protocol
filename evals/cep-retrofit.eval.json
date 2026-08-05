@@ -1,0 +1,26 @@
+{
+  "skill": "cep-retrofit",
+  "cases": [
+    {
+      "id": "cep-retrofit-01",
+      "type": "positive",
+      "input": "I have an existing skill library and want to retrofit the skills so they consume CEP's context package contract -- can you inventory it and insert the right pointers?",
+      "expected_skill": "cep-retrofit",
+      "notes": "Canonical trigger: retrofitting an existing skill library with CEP consumption pointers."
+    },
+    {
+      "id": "cep-retrofit-02",
+      "type": "positive",
+      "input": "Can you scan my prompt library, tell me which skills should point at the CEP consuming-contracts docs, and draft the pointer insertions for me to approve?",
+      "expected_skill": "cep-retrofit",
+      "notes": "Emphasizes inventory + human-approved drafting, distinct phrasing from case 01."
+    },
+    {
+      "id": "cep-retrofit-03-negative",
+      "type": "negative",
+      "input": "The retrofitted automation has been deployed -- can you confirm it behaves correctly at runtime in production traffic now?",
+      "not_expected_skill": "cep-retrofit",
+      "notes": "Runtime validation of a retrofit's behavior -- exactly the case the skill's 'Do NOT use to... validate that a retrofit works at runtime' clause exists to redirect away from this skill."
+    }
+  ]
+}
