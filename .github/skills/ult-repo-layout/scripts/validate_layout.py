@@ -99,7 +99,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # §15.2 slot registry (Phase 1: context_packages; Phase 3b: + plans_output,
 # brainstorm_output; Phase 2: + compiled_guidelines, user_stories_output,
-# security_docs, security_report, project_plan_docs)
+# security_docs, security_report, project_plan_docs; trip-wire (CEP-1.0-ROADMAP.md
+# §7): + decision_ledger)
 # ---------------------------------------------------------------------------
 
 SLOT_REGISTRY = {
@@ -158,6 +159,15 @@ SLOT_REGISTRY = {
         "default": "output_docs/project_plan_docs/",
         "workspace_root_leaf": "outputs/project_plan_docs/",
         "owning_skill": "pm-project-plan",
+    },
+    "decision_ledger": {
+        "kind": "file",
+        "default": "starter_kit/decision_ledger/DECISION-LEDGER.json",
+        # trip-wire (CEP-1.0-ROADMAP.md §7) - a derived/regenerable artifact
+        # (entries only ever added via decision_ledger.py, never hand-edited),
+        # same bucket-reassignment rationale as compiled_guidelines above.
+        "workspace_root_leaf": "cache/decision-ledger/DECISION-LEDGER.json",
+        "owning_skill": "ult-institutional-memory-distill",
     },
 }
 

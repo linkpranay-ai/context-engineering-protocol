@@ -297,6 +297,61 @@ every other runtime's adapter (`.prompt.md` for Copilot, `.mdc` for Cursor, `AGE
 Codex) is **generated from it** by `catalog/export_adapters.py` — never hand-duplicated. See
 [`README.md`](README.md#runtime-support) for current per-runtime validation status.
 
+## 7. Trip-wire — institutional memory, decision ledger (piloting)
+
+**Implemented, but newly added and not yet field-validated against a real corpus of PRs,
+design docs, and postmortems.** Trip-wire is a distinct mechanism from every layer in §2: it
+doesn't answer "what does the code/spec/org say," it answers "has someone already tried this,
+and what happened." It surfaces past decisions — including rejected paths — that are
+topically related to what a new context package is about to propose, so the same argument
+doesn't get re-litigated from scratch and the same rejected approach doesn't get quietly
+re-proposed.
+
+**What it draws from:** a persistent, project-scoped **decision ledger**
+(`ult-institutional-memory-distill`), distilled from PRs, design docs, and postmortems. Each
+entry records a `decision`, its `reasoning`, any `rejected_alternatives`, the `topics` it
+touches, a `source`, and a `confidence` tier (`EXTRACTED` — stated explicitly in the source;
+`INFERRED` — reasonably inferred by whoever distilled it; `SUGGESTED` — a weaker guess).
+Distillation is idempotent: a per-source-stream `cursor` plus a per-entry `distilled_through`
+prevent re-processing the same artifact twice, and a `tombstone` records a source deliberately
+judged not worth distilling (terminal unless overridden). Duplicate entries are never merged —
+constraint: only aliased (a structured `alias` record on the surviving entry) — and a later
+decision that replaces an earlier one is recorded as a symmetric `supersedes`/`superseded_by`
+back-link, so both stay independently addressable rather than one silently disappearing.
+
+**Where it slots in:** `ult-context-generate` Step 7.7, after How-L1 fallback handling (§5) and
+before the human-review gate (§3.4). For each aspect, the ledger is queried
+(`decision_ledger.py query`, read-only and deterministic) using the same search terms already
+derived for L3/L2 querying — no separate term-derivation pass. The query itself never assigns
+meaning; it returns candidate matches plus a per-aspect `ledger_coverage` note. Tiering each
+candidate is the agent's judgment call, made explicit against three criteria:
+
+- **`revise`** — the feature proposes something the ledger shows was already tried and
+  rejected.
+- **`proceed`** — the feature's approach already matches what the ledger says was decided.
+- **`escalate`** — genuinely ambiguous overlap that can't be resolved from the ledger text
+  alone.
+
+A topically-adjacent candidate that doesn't clearly fit one of these is excluded, not forced
+into a tier. Every queried aspect's coverage is recorded in the package — including a
+`0` zero-hit result plus the total ledger size — because an aspect the query never reached
+(complexity-budget exhaustion mid-scan, §7's `complexity_budget`) must be distinguishable from
+one that was fully scanned and came up empty; the two look identical unless coverage is
+recorded explicitly (the same false-absence problem gap detection avoids in §3.2).
+
+**How it's gated:** every `revise`- or `escalate`-tier hit **MUST** receive an explicit human
+disposition — `dismissed`, `accepted` (proceed anyway, overruling the ledger, with a stated
+reason), or `escalated` further — before Step 9's approval gate closes; `proceed`-tier hits need
+only a one-word acknowledgment. A disposition is recorded twice, kept in sync: once in the
+ledger itself (`decision_ledger.py disposition`, the durable cross-package audit trail) and once
+in the approved package's own `institutional_memory_hits[]` entry, so a downstream consumer
+reading the package alone sees the same disposition the ledger records. An **unresolved** hit
+(no disposition recorded) is never treated as dismissed by default — silence is not a decision.
+
+**What's still manual:** curating which PRs/design docs/postmortems get distilled, and judging
+each candidate's tier — the query is deterministic, the judgment isn't. Like How-L1's process
+corpus, nothing here auto-ingests a source stream on its own.
+
 ## Protocol Lifecycle
 
 This document is versioned independently of any package built using it. A **protocol version**

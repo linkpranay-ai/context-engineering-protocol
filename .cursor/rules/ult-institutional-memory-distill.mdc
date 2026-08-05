@@ -1,0 +1,11 @@
+---
+description: "Distill decisions, reasoning, and rejected alternatives from PRs, design docs, and postmortems into the project's decision_ledger, so ult-context-generate's trip-wire can surface institutional memory before new work quietly repeats settled ground."
+globs:
+alwaysApply: false
+---
+
+# Distilling Institutional Memory (Trip-Wire)
+
+This repository packages its capabilities as portable skills for AI
+coding agents. Read `.github/skills/ult-institutional-memory-distill/SKILL.md` and follow it
+when this rule applies.

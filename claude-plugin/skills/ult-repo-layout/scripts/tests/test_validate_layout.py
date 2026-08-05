@@ -1058,6 +1058,7 @@ class TestValidate(unittest.TestCase):
                 "ult-context-generate", "writing-plans", "brainstorming",
                 "compiling-project-guidelines", "example-consumer",
                 "sec-threat-model", "security-test-report", "pm-project-plan",
+                "ult-institutional-memory-distill",
             ):
                 (root / ".github" / "skills" / skill).mkdir(parents=True)
             ok, report = vl.validate(root)

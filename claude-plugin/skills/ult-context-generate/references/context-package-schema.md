@@ -14,7 +14,8 @@ context_package:
     out_of_scope: <user's answer>
   aspects:                          # from Step 1.5 — one entry per ASPECTS member
     - aspect_id: <aspect.aspect_id>  # stable join key for context_items[]/
-                                      # gaps_detected[] — see D17
+                                      # gaps_detected[]/institutional_memory_hits[]
+                                      # — see D17
       name: <aspect.name>
       what_l3_covered: <true|false>    # from l3_coverage (Step 4)
       what_l2_covered: <true|false>    # from l2_coverage (Step 5)
@@ -24,6 +25,23 @@ context_package:
                                         # offer was accepted
       web_fallback_used: <true|false>  # true if this aspect's web fallback
                                         # (Step 7.1 step 5a, D18) offer was accepted
+      ledger_coverage:                 # from decision_ledger.py query (Step 7.7,
+                                        # §7) — always present once Step 7.7 has
+                                        # run, even when zero hits were found for
+                                        # this aspect. Absent only if trip-wire's
+                                        # query step did not run at all (e.g. an
+                                        # older package predating this field).
+        covers_through: <cursor string, e.g. "prs:sha-99, postmortems:doc-12">
+                                        # "" if no distillation run has ever
+                                        # advanced any cursor
+        total_entries: <N>             # total entries in the ledger at query time
+        entries_in_scope_for_this_aspect: <N|null>  # null only if stopped_early
+                                        # cut this aspect off before it was
+                                        # scanned at all — see note below
+        note: <string, present only if the query result carried one>  # partial-
+                                        # scan or not-scanned caveat (§7 false-
+                                        # absence fix) — surface verbatim, never
+                                        # drop or soften it
   generated_at: <ISO timestamp>
   approved_by: []                   # list, empty until Step 9 approval; append exactly
                                      # one entry on approval:
@@ -55,6 +73,9 @@ context_package:
   how_l1_covered: false             # true if Step 2.1 found a How-L1 item for this
                                      # package — package-level, not per-aspect
                                      # (How-L1 is task-type-scoped, not aspect-scoped)
+  institutional_memory_hit_count: 0 # count of institutional_memory_hits[] below;
+                                     # 0 if no decision_ledger distilled yet or
+                                     # Step 7.7 found nothing
 
   summary:
     - "<bullet 1 — key What-L3 finding>"
@@ -178,6 +199,25 @@ context_package:
       web_fallback_used: false       # true if this aspect's web fallback
                                       # (Step 7.1 step 5a, D18) offer was accepted
       note: "<what is missing>"
+
+  institutional_memory_hits:        # empty list if none (§7, trip-wire — see
+                                     # ult-context-generate/SKILL.md Step 7.7 and
+                                     # ult-institutional-memory-distill/references/ledger-schema.md)
+    - id: ihm_<NNN>
+      aspect_id: <aspect.aspect_id>  # join key — see D17
+      matched_decision: <decision_ledger entry id>
+      ledger_confidence: EXTRACTED|INFERRED|SUGGESTED  # from the matched ledger entry
+      tier: revise|proceed|escalate
+      reason: "<why this tier — cites the matched entry's decision/reasoning/rejected_alternatives>"
+      required_evidence:
+        - "<concrete thing the reviewer should check before dispositioning this hit>"
+      disposition: null              # dismissed|accepted|escalated|null — filled at Step 9;
+                                      # null means unresolved, NEVER treat as dismissed (§7)
+      disposition_reason: null       # required (non-null) once disposition is set, for
+                                      # revise/escalate tiers only — see ledger-schema.md's
+                                      # tier -> legal-disposition table
+      dispositioned_by: null         # "human:<id>", set alongside disposition
+      dispositioned_at: null         # ISO timestamp, set alongside disposition
 
   open_questions: []              # empty after Step 7.5 resolves all
 

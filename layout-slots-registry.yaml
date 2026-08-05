@@ -86,6 +86,18 @@ slots:
     consumers:
       - compiling-project-guidelines/CONSUMING-COMPILED-GUIDELINES.md
 
+  - id: decision_ledger
+    project_layout_slot: true
+    kind: file
+    default_bucket: cache
+    pre_d21_default: starter_kit/decision_ledger/DECISION-LEDGER.json
+    workspace_root_leaf: cache/decision-ledger/DECISION-LEDGER.json
+    config_key: ~   # NEW slot (trip-wire, CEP-1.0-ROADMAP.md §7) -- no pre-existing config-key fallback
+    note: "JSON, not YAML, unlike every other kind:file slot here -- a human-reviewed but machine-read/written structured log (entries + run_state cursors/tombstones + hit_dispositions audit trail), same format family as graphify_graph_path/index_paths below, not prose-shaped like compiled_guidelines. Reviewed via normal PR diff (the §7 write-gate), never hand-edited outside decision_ledger.py."
+    producer: ult-institutional-memory-distill
+    consumers:
+      - ult-context-generate/SKILL.md Step 7.7 (trip-wire query) and Step 9 (disposition write-back)
+
   - id: user_stories_output
     project_layout_slot: true
     kind: directory

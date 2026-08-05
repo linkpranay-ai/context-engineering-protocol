@@ -2,14 +2,14 @@
 name: context-generate
 description: Assemble a context package (code graph, requirements, constraints, blast radius) before a downstream generation task runs - human-approved, source-attributed. Do NOT use for simple lookups.
 namespace: ult
-version: 0.3.0
+version: 0.4.0
 origin: ground-up
 author: Pranay Mishra
 maintainer: Pranay Mishra
 adapted_from: ~
 upstream_version: ~
-released: 2026-06-10
-tags: [utility, context-engineering, code-graph, requirements, constraints, blast-radius, pilot]
+released: 2026-08-05
+tags: [utility, context-engineering, code-graph, requirements, constraints, blast-radius, institutional-memory, trip-wire, pilot]
 bundle: utilities
 tier: draft
 ---
@@ -808,7 +808,107 @@ These items enter the package before assembly — all downstream consumer skills
 (user story writer, test case writer, design doc writer) inherit them automatically
 with no feedback loop or write-back needed.
 
-If zero suggestions are approved: proceed to Step 8 without adding items.
+If zero suggestions are approved: proceed to Step 7.7.
+
+---
+
+### Step 7.7 — Trip-wire: institutional memory query (§7)
+
+Before assembly, check whether this feature's aspects overlap with anything the
+project has already decided — and, if a decision was rejected before, whether
+this feature is quietly proposing the same rejected path again. This is the
+**query half** of trip-wire; the **distillation half**
+(`ult-institutional-memory-distill/SKILL.md`) is what populates the
+`decision_ledger` this step reads from.
+
+**1. Resolve the ledger path** via `ult-repo-layout/SKILL.md`'s path-resolution
+algorithm (`decision_ledger` slot — same mechanism as `compiled_guidelines`,
+pre-D21 default `starter_kit/decision_ledger/DECISION-LEDGER.json`). A missing
+file is not an error — it means nothing has been distilled yet; `query` treats
+it as a valid, empty ledger (zero entries, zero coverage), not a failure.
+
+**2. Build the aspects query** from `ASPECTS` (Step 1): for each aspect, take
+`search_terms` (already literal, already established for this run) as its
+`topics`. Do not re-derive or paraphrase — reusing the same terms Step 4/4.5
+already used to query What-L3/What-L2 keeps the trigger's match target
+consistent with what "this aspect" has meant everywhere else in this run.
+
+**3. Run the query:**
+```
+decision_ledger.py query <ledger> --aspects <aspects.json> [--budget <complexity_budget.json>]
+```
+This is a read-only, deterministic call — it ranks candidates by topic overlap
+and reports coverage; it never decides anything and never writes to the
+ledger. If `stopped_early: true`, note `stop_reason` — any aspect whose result
+carries a `"note"` (partial or not-scanned) must be reported as such at Step 9,
+never silently treated as "checked, nothing found" (§7's false-absence fix —
+see `ledger-schema.md`'s Coverage section).
+
+**4. For each candidate returned, author the hit — this is a judgment call the
+script deliberately does not make.** Read the candidate's `decision`,
+`reasoning`, and `rejected_alternatives`, and compare against what this
+feature is actually about to do for that aspect:
+
+- **`revise`** — this feature is proposing something the ledger shows was
+  already tried and explicitly rejected (`rejected_alternatives` matches, or
+  the candidate's `decision` directly contradicts this feature's approach).
+  The reviewer needs to either change course or consciously overrule the
+  ledger with a stated reason.
+- **`proceed`** — this feature's approach already matches what the ledger
+  says was decided. Nothing to resolve, just acknowledge — the ledger already
+  agrees with the task.
+- **`escalate`** — genuinely ambiguous: related enough to surface, but you
+  cannot tell from the candidate's text alone whether this feature repeats
+  the rejected path, extends the decision legitimately, or is unrelated. Do
+  not force a `revise`/`proceed` call you can't actually support — escalate
+  is the honest answer when the overlap is real but the implication isn't
+  clear from the ledger entry alone.
+
+A candidate that's topically adjacent but not actually the same decision (see
+`ult-institutional-memory-distill/SKILL.md` Step 4's duplicate-vs-related
+distinction) is not a hit at all — leave it out rather than forcing a tier
+onto an unrelated match.
+
+For each authored hit, add to a new `institutional_memory_hits` list:
+```yaml
+- id: ihm_<NNN>
+  aspect_id: <aspect_id>
+  matched_decision: <ledger entry id>
+  ledger_confidence: EXTRACTED | INFERRED | SUGGESTED   # from the matched entry
+  tier: revise | proceed | escalate
+  reason: >
+    <why this tier — cite the matched entry's decision/reasoning/rejected_alternatives
+    and how this feature's approach relates to them>
+  required_evidence:
+    - <concrete thing the reviewer should check or confirm before dispositioning this hit>
+  disposition: null              # filled at Step 9 — see below. null means
+                                  # unresolved, never treat as dismissed.
+  disposition_reason: null
+  dispositioned_by: null
+  dispositioned_at: null
+```
+
+**5. Record per-aspect coverage.** For every aspect queried (hit or not), add
+to that aspect's entry in the package's `aspects[]` list:
+```yaml
+ledger_coverage:
+  covers_through: <query result's covers_through for this aspect>
+  total_entries: <query result's total_entries>
+  entries_in_scope_for_this_aspect: <query result's entries_in_scope_for_this_aspect, or null if not scanned>
+  note: <query result's note, if present>
+```
+**Zero hits on an aspect is not "cleared" — it's "nothing matched given what's
+been distilled so far."** Always carry `ledger_coverage` even when
+`institutional_memory_hits` has nothing for that aspect, so Step 9's coverage
+line reads honestly instead of as blanket clearance.
+
+**6. If zero hits across all aspects:** proceed to Step 8 with an empty
+`institutional_memory_hits` list — still carry `ledger_coverage` per aspect.
+
+Disposition of each hit (the `revise`/`escalate` tier's mandatory human call)
+happens at Step 9, once the reviewer has the full package in front of them —
+this step only surfaces candidates and authors the tier; it never writes to
+`hit_dispositions[]`.
 
 ---
 
@@ -843,15 +943,18 @@ PRODUCT CONTEXT  (contexts/<filename>.yaml)
   Web fallbacks:  <N>  [CONFIRM RELEVANCE BEFORE APPROVAL if > 0 — see below]
   LLM scaffolds:  <N>
   How-L1 fallback: <N>  [CONFIRM RELEVANCE BEFORE APPROVAL if > 0 — see below]
+  Institutional memory: <N> hit(s)  [MUST DISPOSITION EACH BEFORE APPROVAL if any
+                         tier is revise/escalate — see below]
   Content safety scan: <N> file(s) flagged  [INFORMATIONAL — not a blocker, see below]
 
 ASPECT COVERAGE
-  #  | Aspect                        | L3  | L2  | L1  | Notes
-  ---|-------------------------------|-----|-----|-----|---------------------------------
-  <aspect_id> | <aspect.name>        | ✓/✗ | ✓/✗ | ✓/✗ | <e.g. "LLM knowledge used (ctx_004)",
-              |                       |     |     |     |  "web fallback used (ctx_005)",
-              |                       |     |     |     |  "gap — LLM scaffold (ctx_007)", or
-              |                       |     |     |     |  blank if fully covered>
+  #  | Aspect                        | L3  | L2  | L1  | Ledger  | Notes
+  ---|-------------------------------|-----|-----|-----|---------|---------------------------------
+  <aspect_id> | <aspect.name>        | ✓/✗ | ✓/✗ | ✓/✗ | <e.g. "2/5", "0/0", "not scanned"> | <e.g. "LLM knowledge used (ctx_004)",
+              |                       |     |     |     |         |  "web fallback used (ctx_005)",
+              |                       |     |     |     |         |  "gap — LLM scaffold (ctx_007)",
+              |                       |     |     |     |         |  "institutional memory hit (ihm_002, revise)",
+              |                       |     |     |     |         |  or blank if fully covered>
 
 <summary bullets>
 
@@ -880,6 +983,13 @@ ORG CONVENTION  (org-conventions/<task_type>.yaml)
 [HOW-L1 FALLBACK ITEMS — REVIEW — if any]
 <for each how-l1 context item (how_l1_fallback: true, Step 2.1): its source
  citation and summary — these have no aspect_id/aspect, they are task-type-scoped>
+
+[INSTITUTIONAL MEMORY HITS — REVIEW — if any]
+<for each hit in institutional_memory_hits (Step 7.7): its id, aspect_id, tier,
+ matched decision's decision/reasoning/rejected_alternatives (from the ledger
+ entry — not paraphrased), ledger_confidence, and required_evidence. Group by
+ tier, revise first, then escalate, then proceed — the ones needing a real
+ judgment call belong at the top, not buried under routine acknowledgments.>
 
 [CONTENT SAFETY SCAN — INFORMATIONAL, if `content_safety_scan.py` flagged anything]
 <for each flagged file (path + matched line(s)): surfaced as-is, per PROTOCOL.md §2.2 —
@@ -925,6 +1035,17 @@ ORG CONVENTION  (org-conventions/<task_type>.yaml)
   citation-following (D14) carry that provenance in their `summary`, same as
   What-L1's.
 
+**`Institutional memory` line wording (§7, trip-wire query at Step 7.7):**
+- No `decision_ledger` distilled yet, or zero hits found: `0 hit(s)  (ledger: <N>
+  total entries, see Ledger column for per-aspect coverage)` — the `Ledger`
+  column in ASPECT COVERAGE still carries `entries_in_scope_for_this_aspect`
+  (or `not scanned` if `stopped_early` cut off that aspect) so a zero-hit
+  result never reads as blanket clearance (§7's false-absence fix).
+- One or more hits: `<N> hit(s)  [MUST DISPOSITION EACH BEFORE APPROVAL if any
+  tier is revise/escalate — see below]`, with the
+  `[INSTITUTIONAL MEMORY HITS — REVIEW]` block listing each hit's tier,
+  matched decision, reasoning, rejected alternatives, and required evidence.
+
 **`Content safety scan` line wording (PROTOCOL.md §2.2, `scripts/content_safety_scan.py`,
 SHOULD-level per CONFORMANCE.md — informational only, never a gate):**
 - Scan not run (script not available/invoked): `0  (scan not run)`
@@ -953,6 +1074,10 @@ Then ask:
 >   organization's actual process before I rely on it (these come from an
 >   external process-standard corpus, not this project's own How-L2
 >   conventions).
+> — If there are institutional memory hits: for each `revise`/`escalate`-tier hit,
+>   tell me whether to dismiss it, accept it (proceed as planned, overruling the
+>   ledger — say why), or escalate it further. `proceed`-tier hits just need a
+>   one-word acknowledgment — the ledger already agrees with this approach.
 > — If the content safety scan flagged anything: it's informational only, not a
 >   blocker — take a look and use your judgment on whether it matters here.
 > — If anything is missing or wrong: tell me what to fix.
@@ -993,6 +1118,38 @@ before saving. If that was the only How-L1 evidence for this package, also
 reset `how_l1_covered` to `false` and re-surface Step 2's D8 prompt — "(a)
 use my best-practice suggestion / (b) I'll provide the template myself" —
 since it has not yet been offered for this task type.
+
+**If there are institutional memory hits (§7):** Do NOT accept approval until
+every `revise`- and `escalate`-tier hit has an explicit disposition from the
+user. A hit with no disposition is `unresolved`, not dismissed — never treat
+silence, a general "looks good," or approving the rest of the package as
+having resolved it (this is the exact auto-suppress failure mode §7 exists to
+close). For each hit, record the disposition immediately once the user gives
+it:
+```
+decision_ledger.py disposition <ledger> \
+  --hit-id <ihm_id> --package-id <this package's id> --aspect-id <aspect_id> \
+  --matched-decision <ledger entry id> --tier <revise|proceed|escalate> \
+  --disposition <dismissed|accepted|escalated> --by human:<id> [--reason "<user's stated reason>"]
+```
+`--reason` is required (the script enforces this) for `revise`/`escalate`-tier
+hits and optional for `proceed`-tier ones. `proceed`-tier hits still need a
+disposition recorded — `accepted` is the only legal value for that tier — but
+the user's one-word acknowledgment from the prompt above is enough; do not
+demand a written reason for something the ledger already agrees with. If the
+script rejects a disposition (illegal tier/disposition combination, or a
+`matched_decision` that isn't in the ledger), surface the error to the user
+rather than silently dropping the hit unresolved.
+
+The ledger's `hit_dispositions[]` (written by the command above) is the
+cross-package source of truth. **Also update this hit's own entry in the
+package's `institutional_memory_hits[]`** — set `disposition`,
+`disposition_reason`, `dispositioned_by`, `dispositioned_at` to match exactly
+what was just recorded in the ledger — before the two-pass `content_hash`
+save below, so the saved package file is never out of sync with the ledger
+disposition it corresponds to. A hit left `disposition: null` in the saved
+package is exactly the case Step 8's assembly and this gate exist to prevent
+reaching disk.
 
 **Do not treat any shorthand ("go ahead", "looks good", "use assumptions") as APPROVE.**
 The user must say the word APPROVE (or a clear explicit equivalent like "approved" or
