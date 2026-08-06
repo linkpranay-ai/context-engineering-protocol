@@ -32,9 +32,16 @@ Built for Claude Code / GitHub Copilot, with Cursor and OpenAI Codex field-valid
 [Runtime support](#runtime-support) below). Beyond code: the same mechanism that stops an agent
 from inventing an API is the mechanism an engineering org can run its own conventions, constraints,
 and process standards through — context engineering as the substrate for a QMS in agentic mode.
-**On the roadmap:** a trip-wire layer that watches for a task walking a road the org has already
-rejected — and surfaces that history to a human before the agent repeats the mistake, instead of
-silently reinventing it. See [Roadmap](ROADMAP.md).
+**Now shipped:** a trip-wire layer (`ult-institutional-memory-distill`) that watches for a task
+walking a road the org has already rejected — and surfaces that history to a human before the agent
+repeats the mistake, instead of silently reinventing it — see [`PROTOCOL.md` §7](PROTOCOL.md#7-trip-wire--institutional-memory-decision-ledger-piloting).
+**Also shipped:** `ult-cep-retrofit`, a metaskill that brings an *existing* third-party skill library
+under this protocol without rewriting it — validated end-to-end against two real, unrelated skill
+libraries, [`mattpocock/skills`](case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md) and
+[`obra/superpowers`](case-studies/cep-retrofit-superpowers/CASE-STUDY.md), see
+[`PROTOCOL.md` §8](PROTOCOL.md#8-cep-retrofit--bringing-an-existing-skill-library-under-this-protocol).
+See [Roadmap](ROADMAP.md) for what's still open (chiefly: field-validating trip-wire against a real,
+not fixture, decision corpus).
 
 ## Why this exists
 
@@ -106,6 +113,8 @@ for the two setup paths:
 | [`ult-codegraph`](.github/skills/ult-codegraph/SKILL.md) | Generate a codebase knowledge graph with `graphify` so other skills can query cross-file relationships before touching code. |
 | [`ult-context-generate`](.github/skills/ult-context-generate/SKILL.md) | Assemble a context package (code graph, requirements, constraints, blast radius) before a downstream generation task runs — human-approved, source-attributed. |
 | [`ult-repo-layout`](.github/skills/ult-repo-layout/SKILL.md) | Register, resolve, and validate where a project's path-slots actually live via `.layout-slots.yaml` markers, so relocating a slot needs zero `SKILL.md` edits. |
+| [`ult-institutional-memory-distill`](.github/skills/ult-institutional-memory-distill/SKILL.md) | Trip-wire: distill PRs/design docs/postmortems into a persistent decision ledger, and surface prior-rejected paths to a human before a package's approval gate closes, never auto-applied or auto-suppressed. |
+| [`ult-cep-retrofit`](.github/skills/ult-cep-retrofit/SKILL.md) | Bring an existing, third-party skill library under this protocol — inventory, classify, and insert an idempotent pointer to `CONSUMING-CONTEXT-PACKAGE.md` into each relevant unit, without rewriting the library's own instructions. |
 | [`demo-consume-context`](.github/skills/demo-consume-context/SKILL.md) | Worked example that discovers, loads, and tags a context package per `CONSUMING-CONTEXT-PACKAGE.md` — proves the produce/consume/tag loop end-to-end. |
 
 Each skill's `SKILL.md` frontmatter carries `tier`/`origin`/`tags`/`bundle` per the Agent Skills
@@ -122,9 +131,9 @@ The full formal contract (addenda, multi-package edge cases, tag-discovery rules
 
 ## Roadmap
 
-What's planned next — comprehensive How-L1 validation, a trip-wire layer extending this protocol's
-discipline across time (design complete, not yet implemented), and more — is tracked in
-[`ROADMAP.md`](ROADMAP.md), roughly prioritized.
+What's planned next — comprehensive How-L1 validation, field-validating trip-wire against a real
+decision corpus (not just the disclosed fixture ledgers used in its first two case studies), and
+more — is tracked in [`ROADMAP.md`](ROADMAP.md), roughly prioritized.
 
 ## Runtime support
 
@@ -264,6 +273,25 @@ A bare-ask-only story carries no such tag, so that cost — or worse, an unflagg
 paid again independently at every one of those later stages. See each case's own "Downstream
 compounding benefit" section for the full trace and its disclosed limitations (this is a mechanical
 trace against the consuming skill's documented contract, not an actual run of any further stage).
+
+**Two further cases test whether the generative benefit above holds on skill libraries this project
+never wrote — and layer trip-wire on top for the first time.** `ult-cep-retrofit` (§8 of
+[`PROTOCOL.md`](PROTOCOL.md#8-cep-retrofit--bringing-an-existing-skill-library-under-this-protocol))
+ran its full inventory→classify→pointer flow against fresh, pinned clones of two popular,
+independently-maintained skill libraries, then took one skill from each through the same
+pristine-vs-retrofitted comparison as the table above, plus a third rung stacking a small,
+disclosed-as-fabricated trip-wire fixture on top:
+
+| Case | Library retrofitted | Full-library pass | Deep comparison | Trip-wire finding |
+|---|---|---|---|---|
+| [cep-retrofit-mattpocock-skills](case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md) | `mattpocock/skills`, MIT | 71 units, 0 misclassifications | `to-spec` vs. `Textualize/textual` | 1 of 2 fixture hits materially changed generated output |
+| [cep-retrofit-superpowers](case-studies/cep-retrofit-superpowers/CASE-STUDY.md) | `obra/superpowers`, MIT (pristine clone) | 62 units, 0 misclassifications | `writing-plans` vs. `open5gs/open5gs` | 1 of 3 fixture hits changed a bitmask value — and, caught on independent re-verification, that resolution was itself wrong: a `tier: revise` hit's `required_evidence` field turned out to be load-bearing, not decorative |
+
+Both pairs found real, grep-verified defects in the pristine (no-CEP) baseline that the retrofitted
+run avoided — duplicate AVP dictionary declarations and a fabricated test target referencing a file
+that doesn't exist. These two cases are also the first to exercise **Trip-wire** and
+**Metaskill-retrofit origin** in [`case-studies/README.md`](case-studies/README.md#feature-coverage)'s
+feature-coverage table, both previously ➖ across all seven prior cases.
 
 ## What's not yet done
 

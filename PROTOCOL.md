@@ -299,8 +299,23 @@ Codex) is **generated from it** by `catalog/export_adapters.py` — never hand-d
 
 ## 7. Trip-wire — institutional memory, decision ledger (piloting)
 
-**Implemented, but newly added and not yet field-validated against a real corpus of PRs,
-design docs, and postmortems.** Trip-wire is a distinct mechanism from every layer in §2: it
+**Implemented and exercised end-to-end in two real case studies — but still not yet field-validated
+against a real corpus of actual PRs, design docs, and postmortems.** The mechanism described below
+(the ledger schema, `decision_ledger.py`'s query/disposition/audit-trail plumbing, and Step 7.7's
+integration into `ult-context-generate`) is real and tested: both
+[`cep-retrofit-mattpocock-skills`](../case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md) and
+[`cep-retrofit-superpowers`](../case-studies/cep-retrofit-superpowers/CASE-STUDY.md) ran a real
+`decision_ledger.py query` and spliced its real output into an approved package, materially changing
+generated output in both cases. What those two runs used, though, is a small, explicitly-disclosed
+**fixture** ledger (2-3 constructed entries per case) — not a ledger distilled from a real project's
+actual history. One of those two runs also surfaced a genuinely important limit worth internalizing
+before trusting this mechanism further: a `tier: revise` hit's `required_evidence` field is
+load-bearing, not decorative — accepting a hit without independently checking its own
+`required_evidence` produced a confidently wrong value that looked more authoritative than an honest
+placeholder. Running `ult-institutional-memory-distill` against a real corpus of a real project's PRs
+and postmortems remains the open item — see [`ROADMAP.md`](ROADMAP.md) item 16.
+
+Trip-wire is a distinct mechanism from every layer in §2: it
 doesn't answer "what does the code/spec/org say," it answers "has someone already tried this,
 and what happened." It surfaces past decisions — including rejected paths — that are
 topically related to what a new context package is about to propose, so the same argument
@@ -351,6 +366,38 @@ reading the package alone sees the same disposition the ledger records. An **unr
 **What's still manual:** curating which PRs/design docs/postmortems get distilled, and judging
 each candidate's tier — the query is deterministic, the judgment isn't. Like How-L1's process
 corpus, nothing here auto-ingests a source stream on its own.
+
+## 8. CEP-retrofit — bringing an existing skill library under this protocol
+
+**Implemented and validated against two real, unrelated, previously-untouched skill libraries.**
+`ult-cep-retrofit` answers a narrower question than the rest of this document: given a skill library
+that was never written with this protocol in mind, which of its units are code-related or
+task-related enough to benefit from consuming an approved context package, and where in each unit's
+own instructions should a pointer to `CONSUMING-CONTEXT-PACKAGE.md` go — without ever silently
+vendoring, rewriting, or otherwise altering the third-party skill's own instructions?
+
+**Mechanism:** a deterministic, union-of-heuristics classification pass (`cep_retrofit.py`:
+`inventory` → `describe` → `recommend` → `check-pointer` → `find-insertion-point`) that handles both
+common skill-library shapes — a `SKILL.md`-per-directory convention and a flat one-file-per-prompt
+convention — without hardcoding either. `recommend()` proposes which of the three `CONSUMING-*.md`
+contracts a unit should point at from its own description; a human can override that recommendation
+per unit, same as every other machine-generated recommendation in this protocol never auto-applies
+without review. Frontmatter insertion is idempotent — re-running it on an already-retrofitted unit is
+a no-op, not a duplicate pointer.
+
+**What it deliberately doesn't do:** resolve where the third-party library's own copy of CEP should
+live (same-repo relative path, installed plugin, or nothing) when there's no stable relationship yet
+— Step 5 of the skill's own flow skips a unit outright rather than writing a pointer to a location
+that doesn't exist, the same never-silently-commit-to-a-wrong-parse discipline as gap detection in
+§3.2. Both validation runs below confirm this safety rail fires correctly on a fresh, unrelated clone
+rather than producing a dead pointer.
+
+**Evidence:** [`cep-retrofit-mattpocock-skills`](../case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md)
+(`mattpocock/skills`, 71 units) and
+[`cep-retrofit-superpowers`](../case-studies/cep-retrofit-superpowers/CASE-STUDY.md)
+(`obra/superpowers`, 62 units, a pristine clone rather than this repo's own already-adapted copies of
+the same skills) — 0 misclassifications across both, plus a deep with/without-CEP comparison of one
+retrofitted skill's generated output per library (§7's trip-wire mechanism exercised on top of both).
 
 ## Protocol Lifecycle
 

@@ -334,14 +334,27 @@ filename attached remain throughout the repo as provenance breadcrumbs, resolved
 the permanent resolution mechanism, not a stopgap — removing the labels entirely would lose the
 "which decision produced this behavior" trail with no replacement.
 
-## 16. Trip-wire — institutional memory for agentic work (design complete, not yet implemented)
+## 16. Trip-wire — institutional memory for agentic work (implemented; real-corpus validation still open)
 
 A persistent, project-scoped decision ledger distilled from PRs, design docs, and postmortems —
 recording not just what was decided, but what was *rejected*, and why. When a new context package
 touches a topic with a related past decision, the ledger surfaces it: a structured, source-cited
 hit an approver sees before generation runs, never auto-applied and never auto-suppressed, matching
 this protocol's existing conflicts-surface-never-auto-resolve rule ([`PROTOCOL.md §3.1`](PROTOCOL.md#31-conflict-detection--blocks)).
-Full design write-up and adversarial review targeted for the `1.2.0` cycle.
+
+**Status:** implemented as `ult-institutional-memory-distill` (`decision_ledger.py`: `add-entry`,
+`alias`, `advance-cursor`, `reject-source`, `query`, `disposition`, `show`; 33 passing tests) and
+integrated into `ult-context-generate`'s Step 7.7 — see [`PROTOCOL.md` §7](PROTOCOL.md#7-trip-wire--institutional-memory-decision-ledger-piloting).
+Exercised end-to-end in two case studies
+([`cep-retrofit-mattpocock-skills`](case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md),
+[`cep-retrofit-superpowers`](case-studies/cep-retrofit-superpowers/CASE-STUDY.md)), each seeding a
+small, explicitly-disclosed **fixture** ledger (not real project history) and running a real `query`
+against it. **What's still open:** running `ult-institutional-memory-distill`'s own distillation step
+against a real corpus of a real project's actual PRs, design docs, and postmortems — both case
+studies above used constructed data precisely because no such corpus was in scope for them, and one
+of the two found that accepting a fixture hit without checking its own `required_evidence` field can
+produce a confidently wrong answer. That's the risk a real-corpus validation pass needs to bound
+before this item can be considered fully closed.
 
 ## Not on this roadmap
 

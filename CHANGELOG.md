@@ -41,6 +41,38 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   `approved_by: - actor: human:<user>` and `generated_at`, matching the `approved_by` schema shipped
   in 0.3.0). Negative-control simple-lookup prompt correctly bypassed the rule entirely, per its own
   "Do NOT use for simple lookups" clause. Full report: [issue #35](https://github.com/linkpranay-ai/context-engineering-protocol/issues/35#issuecomment-5150441056).
+- **Trip-wire — implemented** (closes the build half of [`ROADMAP.md`](ROADMAP.md) item 16, previewed
+  as planned-only above): `ult-institutional-memory-distill` ships a real, tested decision-ledger
+  mechanism (`decision_ledger.py`: `add-entry`, `alias`, `advance-cursor`, `reject-source`, `query`,
+  `disposition`, `show`; 33 passing tests) integrated into `ult-context-generate`'s Step 7.7, per
+  [`PROTOCOL.md` §7](PROTOCOL.md#7-trip-wire--institutional-memory-decision-ledger-piloting). Every
+  `revise`/`escalate` hit requires an explicit human disposition before the package's own approval
+  gate closes — never auto-applied, never auto-suppressed, matching this protocol's existing
+  conflicts-surface-never-auto-resolve rule. **Not yet field-validated against a real corpus of actual
+  PRs/design docs/postmortems** — see the two case studies below for its first real exercise, against
+  small, explicitly-disclosed fixture ledgers rather than real project history.
+- **`ult-cep-retrofit`**: a new metaskill that brings an existing, third-party skill library under
+  this protocol — deterministic union-of-heuristics inventory across both flat-file and
+  skill-directory conventions, per-unit code/task classification, a `recommend()` step for which
+  `CONSUMING-*.md` contract fits, and idempotent frontmatter-pointer insertion, all without silently
+  vendoring or rewriting the third-party library's own instructions. 32 passing tests (2 skipped —
+  symlink privilege, Windows-only). See
+  [`PROTOCOL.md` §8](PROTOCOL.md#8-cep-retrofit--bringing-an-existing-skill-library-under-this-protocol).
+- **Two new case studies validate both of the above against real, unrelated skill libraries**:
+  [`cep-retrofit-mattpocock-skills`](case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md)
+  (`mattpocock/skills`, MIT, 71 units) and
+  [`cep-retrofit-superpowers`](case-studies/cep-retrofit-superpowers/CASE-STUDY.md) (`obra/superpowers`,
+  MIT, 62 units, a pristine clone rather than this repo's own already-adapted copies of the same
+  skills) — 0 misclassifications across a combined 133 units, plus a deep with/without-CEP comparison
+  of one retrofitted skill's generated output per library, plus trip-wire exercised on top of both.
+  Real, grep-verified defects found in the pristine (no-CEP) baseline that the retrofitted run
+  avoided in both pairs (duplicate AVP dictionary declarations; a fabricated test target). These are
+  the first two cases to close the `Trip-wire` and `Metaskill-retrofit origin` columns in
+  [`case-studies/README.md`](case-studies/README.md#feature-coverage)'s feature-coverage table, both
+  previously ➖ across all seven prior cases. One case's own scoring pass also surfaced a disclosed,
+  humbling finding — a `tier: revise` trip-wire hit's `required_evidence` field is load-bearing, not
+  decorative; accepting one without checking it produced a confidently wrong bitmask value that the
+  honest CEP-package placeholder had avoided.
 
 ### Fixed
 
@@ -52,6 +84,13 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   cleanup on the non-robocopy paths); `test_install_scripts.py`'s tree-comparison helper updated to
   match the corrected invariant (it previously required an exact file-for-file mirror, silently
   encoding the leak as correct behavior). [PR #37](https://github.com/linkpranay-ai/context-engineering-protocol/pull/37).
+- **`CONSUMING-CONTEXT-PACKAGE.md` didn't document how to consume `institutional_memory_hits[]`.**
+  A consuming skill reading an approved package had no documented contract for the field trip-wire
+  writes — discovery, disposition-echo, and citation rules were all unspecified. Fixed with a new
+  addendum giving that field the same contract shape every other package field already has;
+  `ult-context-generate`'s own reference docs updated to match. Found and fixed during the
+  two `ult-cep-retrofit` case studies' Mode 3 (trip-wire) rung, before it could produce a
+  silently-ignored field in a real consuming skill.
 
 ## [0.3.0]
 
