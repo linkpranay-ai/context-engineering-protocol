@@ -24,6 +24,14 @@
 > resolved path everywhere `contexts/` appears below. Projects with neither
 > `project_layout`, `cache.product_context_path`, nor `layout.workspace_root`
 > set are unaffected — `contexts/` remains the default.
+>
+> **Institutional-memory hits (added 2026-08-06):** `institutional_memory_hits[]`
+> (§7 in `PROTOCOL.md`, trip-wire) has been part of the context package schema
+> since it shipped, but this contract never told a consuming skill to actually
+> read it — meaning the "surfaced for free once it rides in the package" benefit
+> the schema implies wasn't real for any skill that only follows this contract.
+> Step 3 below now says so explicitly. Gap found during the `ult-cep-retrofit`
+> design review, fixed here rather than deferred.
 
 Any skill that is asked to work on a specific feature (brainstorm a design,
 write a plan, write test cases, review code, debug an issue, etc.) should
@@ -88,8 +96,8 @@ follow this before doing that work:
    > work?"
 
 3. **Load it as primary context.** Read the package's `decisions_log` /
-   `decisions`, `context_items`, `gaps_detected`, `non_regression_risks`, and
-   `summary`. If a sibling `.addenda.yaml` exists, load its entries too —
+   `decisions`, `context_items`, `gaps_detected`, `institutional_memory_hits`,
+   `non_regression_risks`, and `summary`. If a sibling `.addenda.yaml` exists, load its entries too —
    **latest `added_at` first**. When a package exists, codegraph and
    compiled-guidelines checks become **narrow/targeted** (the freshness
    spot-check below, plus targeted lookups for genuinely new topics) rather
@@ -126,13 +134,42 @@ follow this before doing that work:
    `<source>` — treat as informative, not automatically authoritative, for
    this project's own conventions").
 
-   **Aspect fields (D15/D17):** `context_items[].aspect_id` and
-   `gaps_detected[].aspect_id` are the stable integer join key into the
-   package's top-level `aspects[]` list (e.g. to check `aspects[].what_l3_covered`
+   **Institutional-memory hits (§7 in `PROTOCOL.md`, trip-wire):** any
+   `institutional_memory_hits[]` entry whose `aspect_id` matches the aspect
+   you're about to work on is a prior decision the trip-wire distillation
+   process flagged as relevant — read its `reason` (cites the matched ledger
+   entry's decision/rejected alternatives) before proceeding on that aspect,
+   and branch on its `disposition`:
+   - `dismissed` — the reviewer judged it not applicable here at approval
+     time. Informative only, no action needed — but if the work you're about
+     to do actually resembles what `reason` describes, it's worth a second
+     look before assuming the dismissal still holds.
+   - `accepted` — the reviewer explicitly proceeded despite the flagged risk,
+     with `disposition_reason` stating why. Treat this as a deliberate,
+     recorded override, not silent tolerance: don't reintroduce the same
+     risk without accounting for `disposition_reason`.
+   - `escalated`, or still `null` (unresolved): treat exactly like a
+     contradicted decision in step 5 — **STOP.** Tell the user concretely
+     which hit is unresolved (its `id`, `reason`, and `required_evidence[]`)
+     and don't proceed on the affected aspect until they disposition it. Per
+     §7's own approval gate, an approved package should never carry an
+     unresolved `revise`/`escalate`-tier hit — finding one anyway (e.g. added
+     by a later addendum) is itself a signal something upstream skipped the
+     gate, and worth saying so explicitly rather than silently treating the
+     null as a pass.
+   - A `proceed`-tier hit needs no disposition to act on, but its
+     `required_evidence[]` is still worth a quick real check before treating
+     it as settled — same spirit as step 4's freshness spot-check for facts.
+
+   **Aspect fields (D15/D17):** `context_items[].aspect_id`,
+   `gaps_detected[].aspect_id`, and `institutional_memory_hits[].aspect_id`
+   are the stable integer join key into the package's top-level `aspects[]`
+   list (e.g. to check `aspects[].what_l3_covered`
    /`.what_l2_covered`/`.what_l1_covered` for the aspect an item belongs to).
-   The sibling `.aspect` field is the human-readable name and may have been
-   edited by the user after `aspect_id` was assigned — use `.aspect` for
-   display, `.aspect_id` for matching against `aspects[]`.
+   The sibling `.aspect` field (on `context_items`/`gaps_detected`) is the
+   human-readable name and may have been edited by the user after
+   `aspect_id` was assigned — use `.aspect` for display, `.aspect_id` for
+   matching against `aspects[]`.
 
 4. **Quick freshness spot-check** — NOT a full `ult-context-generate` re-run:
    - Re-read 2–3 `context_items` whose `source` is a `file:line-range` and
