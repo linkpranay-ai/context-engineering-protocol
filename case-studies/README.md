@@ -57,10 +57,11 @@ All other cases above still show ➖ across derived-package composition, trip-wi
 metaskill-retrofit origin — an honest gap that isn't fully closed yet either: derived-package
 composition remains unimplemented everywhere. `cep-retrofit-superpowers` is the first case to
 exercise **trip-wire** and **metaskill-retrofit origin**; a second `ult-cep-retrofit` case
-(`mattpocock/skills`, previously run and then deliberately removed from this directory pending a
-Copilot cross-runtime re-run — see this file's git history for the removed case study) is expected
-to return once that re-run completes, and derived-package composition still awaits its own first
-case.
+(`mattpocock/skills`) was run and then deliberately not kept in this directory — a follow-up GitHub
+Copilot cross-runtime re-run of that same experiment surfaced a real `cep_retrofit.py` CLI bug
+(`CHANGELOG.md`'s `[Unreleased]` → Fixed), which was worth keeping, but the case-study write-up
+itself was not; see this file's git history for the removed content. No second metaskill-retrofit
+case study is currently planned. Derived-package composition still awaits its own first case.
 
 ## Synthesis
 
