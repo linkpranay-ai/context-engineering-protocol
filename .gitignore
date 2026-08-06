@@ -23,3 +23,9 @@ mcp_mirror_manifest.json
 # `graphify benchmark` on every run, never hand-edited (see
 # .github/skills/ult-codegraph/SKILL.md "No normalization step").
 graphify-out/
+
+# One-off GitHub Copilot cross-runtime experiment output (2026-08-06) - marked
+# OBSOLETE, never intended as a published case study, kept on disk for
+# reference only. See its own OBSOLETE.md for why. Ignored explicitly (not
+# just left untracked) so it can never be pushed by accident.
+case-studies/cep-retrofit-mattpocock-skills-copilot/
