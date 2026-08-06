@@ -6,6 +6,17 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
 
 ## [Unreleased]
 
+## [0.4.0]
+
+21 commits since v0.3.0. Headline: two full protocol capabilities go from planned to shipped and
+field-validated — trip-wire / institutional memory (a persistent decision ledger that surfaces
+prior-rejected paths before an agent repeats them) and `ult-cep-retrofit` (a metaskill that brings
+an existing third-party skill library under this protocol without vendoring or rewriting it),
+exercised together end-to-end against a real, unrelated 62-unit library. Also closes out runtime
+field-validation (Cursor is the fourth and last of the supported runtimes confirmed working
+end-to-end), ships an installable Claude Code plugin package, and fixes a real Windows PowerShell
+CLI-ergonomics bug found via a cross-runtime (GitHub Copilot) re-run of the retrofit experiment.
+
 ### Added
 
 - **`EVIDENCE.md`**: a headline-first, shareable Evidence page condensing the README's "Measured

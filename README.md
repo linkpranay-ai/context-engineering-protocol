@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/linkpranay-ai/context-engineering-protocol/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/linkpranay-ai/context-engineering-protocol/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/linkpranay-ai/context-engineering-protocol/releases/tag/v0.3.0)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/linkpranay-ai/context-engineering-protocol/releases/tag/v0.4.0)
 
 </p>
 
@@ -154,7 +154,7 @@ correctness.
 - A full context package was assembled end-to-end for a real, grounded feature scenario using real
   `graphify query/explain/affected` calls and a real `md_index.py`-built index.
 
-**Claude Code — one-click plugin install**: `claude-plugin/` packages the 4 real skills as an
+**Claude Code — one-click plugin install**: `claude-plugin/` packages all 7 real skills as an
 installable plugin, generated from `.github/skills/` so it can't drift from the real source. Add
 this repo as a marketplace and install directly — no review queue, works today:
 
