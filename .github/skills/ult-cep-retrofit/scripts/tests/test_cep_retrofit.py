@@ -307,6 +307,52 @@ class CliSmokeTest(unittest.TestCase):
         data = json.loads(buf.getvalue())
         self.assertTrue(data["task_related"])
 
+    def test_recommend_cli_description_file(self):
+        """--description-file reads the same text a shell would otherwise have to quote.
+
+        Regression test for a real cross-runtime finding: mattpocock/skills'
+        code-review and diagnosing-bugs both have descriptions containing embedded
+        double-quotes (e.g. `asks to "review since X"`). Passing that text inline via
+        --description on Windows PowerShell mangles/truncates it before this script
+        ever sees it, silently producing a false "neither" classification with no
+        error. --description-file sidesteps shell quoting entirely.
+        """
+        import io
+        import contextlib
+        with tempfile.TemporaryDirectory() as tmp:
+            desc_path = Path(tmp) / "description.txt"
+            _write(
+                desc_path,
+                'Use when the user wants to review a branch, a PR, work-in-progress '
+                'changes, or asks to "review since X".',
+            )
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = cep_retrofit.main(["recommend", "--description-file", str(desc_path)])
+            self.assertEqual(rc, 0)
+            data = json.loads(buf.getvalue())
+            self.assertTrue(data["task_related"])
+
+    def test_recommend_cli_description_file_missing_exits_nonzero(self):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            rc = cep_retrofit.main(
+                ["recommend", "--description-file", "/definitely/does/not/exist.txt"]
+            )
+        self.assertEqual(rc, 1)
+
+    def test_recommend_cli_rejects_both_description_flags(self):
+        with self.assertRaises(SystemExit):
+            cep_retrofit.main(
+                ["recommend", "--description", "x", "--description-file", "y.txt"]
+            )
+
+    def test_recommend_cli_rejects_neither_description_flag(self):
+        with self.assertRaises(SystemExit):
+            cep_retrofit.main(["recommend"])
+
     def test_inventory_cli_missing_root_exits_nonzero(self):
         import io
         import contextlib

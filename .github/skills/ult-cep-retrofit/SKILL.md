@@ -83,7 +83,15 @@ order). Present the confirmed inventory as a numbered list of name + one-line de
 
 Per confirmed skill, run `cep_retrofit.py recommend --description "<extracted description>"` to get
 `{"code_related": bool, "task_related": bool, "matched_code_terms": [...], "matched_task_terms":
-[...]}`. This is a **signal, not a decision**. Turn it into a recommendation grounded directly in
+[...]}`. This is a **signal, not a decision**.
+
+On Windows/PowerShell (or any shell, if the description hasn't been visually confirmed quote-free),
+prefer `cep_retrofit.py recommend --description-file <path>` instead: write the extracted
+description to a temp file and pass its path. A description containing embedded double quotes
+(e.g. `asks to "review since X"`) can be silently mangled or truncated by PowerShell's argument
+quoting before the script ever sees it, producing a false "neither" classification with no error —
+confirmed for real against a third-party library, where two real skills' descriptions both
+contained embedded quotes. `--description` and `--description-file` are mutually exclusive. Turn it into a recommendation grounded directly in
 each contract's own stated trigger, since `CONSUMING-COMPILED-GUIDELINES.md` and
 `CONSUMING-CODE-GRAPH.md` open with the identical literal sentence about their own scope (they are
 not mutually exclusive with each other):

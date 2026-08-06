@@ -42,10 +42,20 @@ Subcommands:
       line, in that order.
 
   cep_retrofit.py recommend --description "<text>"
+  cep_retrofit.py recommend --description-file <path>
       Signal only, never a decision: {"code_related": bool, "task_related": bool,
       "matched_code_terms": [...], "matched_task_terms": [...]}. The calling skill
       turns this into a human-facing recommendation per contract (design draft
-      Step 4); it is not itself a selection.
+      Step 4); it is not itself a selection. --description and --description-file
+      are mutually exclusive and one is required. Prefer --description-file on
+      Windows/PowerShell (or any shell) whenever the extracted description hasn't
+      been visually confirmed quote-free: a description containing embedded double
+      quotes (e.g. `asks to "review since X"`) can be silently mangled or truncated
+      by PowerShell's argument quoting before this script ever sees it, producing a
+      false "neither" classification with no error -- found for real via a
+      cross-runtime retrofit run against a third-party library (two skills'
+      genuine descriptions both contained embedded quotes). Writing the description
+      to a file and passing its path sidesteps shell-quoting entirely.
 
   cep_retrofit.py check-pointer <file> --contracts C1.md,C2.md
       {"C1.md": bool, "C2.md": bool} -- contract-*identity* match (the bare
@@ -349,7 +359,17 @@ def _cmd_describe(args):
 
 
 def _cmd_recommend(args):
-    print(json.dumps(recommend(args.description), indent=2))
+    if args.description_file is not None:
+        try:
+            description = Path(args.description_file).read_text(
+                encoding="utf-8-sig", errors="replace"
+            )
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+    else:
+        description = args.description
+    print(json.dumps(recommend(description), indent=2))
     return 0
 
 
@@ -398,7 +418,27 @@ def main(argv=None):
         "recommend",
         help="Signal-only code/task-relatedness of a description (never a final contract choice).",
     )
-    p_rec.add_argument("--description", required=True)
+    p_rec_src = p_rec.add_mutually_exclusive_group(required=True)
+    p_rec_src.add_argument(
+        "--description",
+        help=(
+            "Description text inline. Fragile on Windows PowerShell (and any shell) when the "
+            "text contains embedded double-quotes, e.g. a description like Use when the user "
+            'says "debug this" — PowerShell\'s argument quoting can silently truncate or split '
+            "such a string before this script ever sees it, producing a false 'neither' "
+            "classification with no error. Prefer --description-file for any description you "
+            "haven't visually confirmed is quote-free."
+        ),
+    )
+    p_rec_src.add_argument(
+        "--description-file",
+        help=(
+            "Read the description from a file instead of the command line — sidesteps all "
+            "shell-quoting hazards entirely. Recommended default: write the extracted "
+            "description to a temp file (or reuse `describe`'s own output) and pass its path "
+            "here rather than retyping the text into a shell argument."
+        ),
+    )
     p_rec.set_defaults(func=_cmd_recommend)
 
     p_chk = sub.add_parser(
