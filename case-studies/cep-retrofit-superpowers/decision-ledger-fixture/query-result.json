@@ -1,0 +1,82 @@
+{
+  "stopped_early": false,
+  "stop_reason": null,
+  "results": [
+    {
+      "aspect_id": 1,
+      "covers_through": null,
+      "total_entries": 3,
+      "entries_in_scope_for_this_aspect": 3,
+      "candidates": [
+        {
+          "entry_id": "dl_when-a-new-interface-adv_3a5b76",
+          "decision": "When a new interface advertises Supported-Features/Feature-List for the first time and has no interface-specific bit mapping yet, default the Feature-List value to 0x00000001 (baseline/Rel-8 support bit), matching the value Gx's own Feature-List-ID 1 already advertises, rather than 0 (no bits set).",
+          "reasoning": "0x00000001 as a baseline-support bit is the existing repo convention for a first Feature-List-ID entry (Gx sets Feature-List-ID 1; S6a sets Feature-List-ID 1 and 2) \u2014 advertising 0 communicates 'no features supported at all', which is a materially different (and likely wrong) signal to send to a peer during initial feature negotiation.",
+          "rejected_alternatives": [
+            "Default new interfaces' first Feature-List value to 0 until the exact bit-to-feature mapping is confirmed"
+          ],
+          "matched_topics": [
+            "avp",
+            "construction",
+            "diameter",
+            "feature",
+            "features",
+            "gy",
+            "list",
+            "supported"
+          ],
+          "confidence": "INFERRED",
+          "source": {
+            "type": "postmortem",
+            "ref": "case-study-fixture:gy-supported-features-pair2",
+            "excerpt": "Fabricated for this case study to demonstrate the trip-wire layer \u2014 not a real 3GPP-confirmed bit mapping; disclosed as such in the case study write-up."
+          }
+        },
+        {
+          "entry_id": "dl_new-diameter-avp-constru_dd466c",
+          "decision": "New Diameter AVP-construction blocks guarded by cc_request_type in SMF Gx/Gy paths must skip on OGS_DIAM_GY_CC_REQUEST_TYPE_TERMINATION_REQUEST (or the Gx equivalent) \u2014 a Termination-Request needs no feature/QoS renegotiation AVPs.",
+          "reasoning": "Established by the existing Gx Supported-Features block (gx-path.c:322), which already guards this way; keeping new interfaces consistent avoids sending renegotiation AVPs on a request whose only purpose is tearing the session down.",
+          "rejected_alternatives": [
+            "Send Supported-Features unconditionally on every CCR regardless of request type"
+          ],
+          "matched_topics": [
+            "avp",
+            "conditions",
+            "construction",
+            "diameter",
+            "guard",
+            "gx",
+            "gy"
+          ],
+          "confidence": "INFERRED",
+          "source": {
+            "type": "design-doc",
+            "ref": "case-study-fixture:gy-supported-features-pair2",
+            "excerpt": "Fabricated for this case study \u2014 mirrors the real, grep-verified gx-path.c:322 guard, generalized into a stated convention."
+          }
+        },
+        {
+          "entry_id": "dl_diameter-avp-dictionary-_44c92f",
+          "decision": "Diameter AVP dictionary handles (dict_object*) for AVPs already declared for one interface in this codebase (e.g. Feature-List-ID, Feature-List \u2014 generic 3GPP AVPs shared across Gx/Gy/S6a) must not be re-declared per-interface; a new interface adding a feature that needs an already-declared AVP only needs to add the missing handle(s), not redeclare the ones that already exist.",
+          "reasoning": "Redeclaring an already-defined global dict_object* pointer under the same name causes a duplicate-symbol link error; this codebase's existing message.c files already share several generic AVP handles this way (checked: Feature-List-ID/Feature-List exist for both Gx and Gy today, defined once each, not duplicated).",
+          "rejected_alternatives": [
+            "Each interface's message.c declares and resolves its own copy of every AVP handle it uses, even ones shared with other interfaces"
+          ],
+          "matched_topics": [
+            "avp",
+            "diameter",
+            "dictionary",
+            "gy",
+            "registration"
+          ],
+          "confidence": "INFERRED",
+          "source": {
+            "type": "design-doc",
+            "ref": "case-study-fixture:gy-supported-features-pair2",
+            "excerpt": "Fabricated for this case study \u2014 mirrors the real, grep-verified fact that lib/diameter/gy/message.h:117-118 and message.c:63-64,130-131 already declare/resolve Feature-List-ID and Feature-List."
+          }
+        }
+      ]
+    }
+  ]
+}

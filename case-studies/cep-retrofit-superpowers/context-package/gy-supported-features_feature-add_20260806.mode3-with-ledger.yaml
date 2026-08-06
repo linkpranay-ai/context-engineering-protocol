@@ -1,0 +1,260 @@
+# Mode 3 fixture: identical to context-package/gy-supported-features_feature-add_20260806.yaml
+# (content_hash 9ce47746) with one addition: an institutional_memory_hits[] block spliced in per
+# CONSUMING-CONTEXT-PACKAGE.md Step 3 (institutional-memory-hits paragraph) and the
+# context-package-schema.md ihm_<NNN> shape — same construction methodology as pair 1's own Mode 3
+# fixture (case-studies/cep-retrofit-mattpocock-skills/decision-ledger-fixture/*.mode3-with-ledger.yaml).
+# The three hits are the real output of `decision_ledger.py query` (see
+# ../decision-ledger-fixture/query-result.json in this case study) against the fabricated,
+# disclosed-as-fabricated 3-entry ledger in ../decision-ledger-fixture/ledger.json — every
+# `matched_decision` id below is a real entry id from that ledger, and every `reason` is drawn
+# directly from that entry's real `decision`/`rejected_alternatives` fields, not invented for this
+# splice. `disposition`/`disposition_reason`/`dispositioned_by`/`dispositioned_at` are filled in to
+# simulate an already-approved package, consistent with Mode 1's own package and with pair 1's Mode 3
+# fixture — this is the one part of this file authored for the case study rather than mechanically
+# emitted by a tool, disclosed as such here. `content_hash` is left unchanged from the base package
+# (9ce47746) — it identifies the base package's own evidence lineage; the institutional-memory layer
+# is a distinct, later annotation, same convention pair 1 used.
+#
+# Everything above `institutional_memory_hits:` and below it is byte-identical to the source
+# package; only the block itself, `institutional_memory_hit_count`, and one added `summary` bullet
+# differ.
+
+context_package:
+  id: gy-supported-features_feature-add_20260806
+  task: >
+    Add the Supported-Features AVP (3GPP TS 32.299 / TS 29.212 pattern) to the SMF's Gy
+    Credit-Control-Request messages, mirroring how the Gx interface already sends it, so the OCS can
+    negotiate feature support with the SMF over Gy the same way the PCRF already does over Gx.
+  scope:
+    feature: gy supported-features avp
+    task_type: feature-add
+    new_or_existing: existing
+    out_of_scope: >
+      Not touching the Gx implementation (already correct, used only as precedent) or the S6a
+      implementation (a different interface/peer, used only as a secondary cross-interface precedent).
+      Not deciding the exact Feature-List bitmask value Gy should advertise from source alone (see
+      gaps_detected below — the institutional-memory layer below resolves this one, see ihm_001).
+  aspects:
+    - aspect_id: 1
+      name: gy supported-features avp
+      what_l3_covered: true
+      what_l2_covered: false
+      what_l1_covered: false
+      llm_knowledge_used: false
+      web_fallback_used: false
+  generated_at: 2026-08-06T00:00:00Z
+  human_approved: true
+  content_hash: 9ce47746
+  what_l1_fallback_count: 0
+  llm_knowledge_count: 0
+  web_fallback_count: 0
+  conflicts_count: 0
+  llm_scaffold_count: 0
+  org_convention_ref: org-conventions/feature-add.yaml
+
+  summary:
+    - "What-L3: lib/diameter/gy/dict.c has no Supported-Features rule entry anywhere in its Gy CCR/CCA command definitions (confirmed via grep across the whole file) — the only 'Supported-Features'-adjacent text is two commented-out, unrelated 'OC-Supported-Features' lines (overload-control AVP, a different AVP family, dict.c:185,216)."
+    - "Direct precedent exists one interface over: lib/diameter/gx/dict.c has real RULE_OPTIONAL Supported-Features entries in both its CCR and CCA rule blocks (dict.c:206,257), and src/smf/gx-path.c:322-345 shows the exact real construction pattern (grouped AVP with Vendor-Id=OGS_3GPP_VENDOR_ID + Feature-List-ID=1 + Feature-List children) already working in this codebase today."
+    - "Partial scaffolding already exists in Gy: lib/diameter/gy/message.h:117-118 and message.c:63-64,130-131 already declare and dict-search the leaf 'Feature-List-ID' and 'Feature-List' AVP handles globally — but there is no 'ogs_diam_gy_supported_features' grouped-AVP handle anywhere, and neither leaf handle is referenced in gy-path.c, gy-handler.c, or gsm-sm.c (all confirmed zero matches). This is a smaller implementation lift than starting from zero, not a from-scratch AVP registration."
+    - "A second, independent precedent exists on a different interface entirely: src/hss/hss-s6a-path.c:1307-1382 sends Supported-Features twice (Feature-List-ID 1, then Feature-List-ID 2) on the S6a interface — confirms this is a repo-wide convention for AVP-capability-negotiation, not a Gx-only pattern."
+    - "No conflicts detected — nothing in the existing Gy code contradicts adding this AVP; it's a pure gap against an established repo-wide pattern."
+    - "Trip-wire (§7): 3 institutional-memory hits surfaced for this aspect, all pre-dispositioned accepted — see institutional_memory_hits below."
+
+  context_items:
+    - id: ctx_001
+      layer: what-l3
+      source: "lib/diameter/gy/dict.c (whole file, grep for Supported-Features)"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: 1
+      summary: >
+        Zero real Supported-Features rule entries anywhere in the Gy command dictionary. The only two
+        matches (lines 185, 216) are commented-out 'OC-Supported-Features' AVPs — a different,
+        unrelated overload-control AVP family, not the Supported-Features/Feature-List grouped AVP
+        this task targets.
+      what_l1_fallback: false
+
+    - id: ctx_002
+      layer: what-l3
+      source: "lib/diameter/gx/dict.c:206,257"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: 1
+      summary: >
+        Gx's dictionary has real `{ .avp_vendor = 10415, .avp_name = "Supported-Features" },
+        RULE_OPTIONAL, -1, -1` entries in both its CCR and CCA command rule blocks — the direct
+        same-codebase precedent for what a Gy CCR/CCA rule entry for the same AVP would look like.
+      what_l1_fallback: false
+
+    - id: ctx_003
+      layer: what-l3
+      source: "lib/diameter/gx/message.h:37,58; lib/diameter/gx/message.c:109-111"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: 1
+      summary: >
+        Gx defines `OGS_DIAM_GX_AVP_CODE_SUPPORTED_FEATURES (628)` and an `extern struct dict_object
+        *ogs_diam_gx_supported_features` handle (message.h:37,58), resolved at init time via
+        `CHECK_dict_search(DICT_AVP, AVP_BY_NAME_ALL_VENDORS, "Supported-Features",
+        &ogs_diam_gx_supported_features)` alongside Feature-List-ID and Feature-List
+        (message.c:109-111) — the exact three-handle pattern a Gy equivalent would need.
+      what_l1_fallback: false
+
+    - id: ctx_004
+      layer: what-l3
+      source: "src/smf/gx-path.c:322-345"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: 1
+      summary: >
+        Real, working construction of the Supported-Features grouped AVP on an outgoing CCR, guarded
+        by `if (cc_request_type != OGS_DIAM_GX_CC_REQUEST_TYPE_TERMINATION_REQUEST)`: creates the
+        Supported-Features AVP, adds a Vendor-Id child (`val.i32 = OGS_3GPP_VENDOR_ID`), then a
+        Feature-List-ID child (`val.i32 = 1`), then (not shown in this excerpt but present
+        immediately after) a Feature-List child, and finally adds the whole grouped AVP to the
+        request. This is the direct template for the equivalent Gy addition.
+      what_l1_fallback: false
+
+    - id: ctx_005
+      layer: what-l3
+      source: "lib/diameter/gy/message.h:117-118; lib/diameter/gy/message.c:63-64,130-131"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: 1
+      summary: >
+        Gy already declares and dict-searches `ogs_diam_gy_feature_list_id` and
+        `ogs_diam_gy_feature_list` (the two leaf AVP handles) — but there is no
+        `ogs_diam_gy_supported_features` grouped-AVP handle declared or searched anywhere in Gy's
+        message.h/message.c. The leaf handles exist (likely because they're generic 3GPP AVPs shared
+        across interfaces in the same freeDiameter dictionary) but are unused: grep for
+        `feature_list` across src/smf/gy-path.c, src/smf/gy-handler.c, and src/smf/gsm-sm.c returns
+        zero matches in all three files.
+      what_l1_fallback: false
+
+    - id: ctx_006
+      layer: what-l3
+      source: "src/smf/gy-path.c:635 (smf_gy_send_ccr)"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: 1
+      summary: >
+        `smf_gy_send_ccr` is the real, top-level function that builds and sends every Gy
+        Credit-Control-Request — it already builds up the request via ~30 sequential
+        `fd_msg_avp_new(...)` / `fd_msg_avp_add(...)` calls for other AVPs (Subscription-Id,
+        Multiple-Services-Credit-Control, PS-Information, etc.), immediately after the existing
+        Session-Id/new-session handling block. This is the real insertion point for a new
+        Supported-Features AVP block, following the same guard pattern as the Gx precedent
+        (skip on CC_REQUEST_TYPE_TERMINATION_REQUEST).
+      what_l1_fallback: false
+
+    - id: ctx_007
+      layer: what-l3
+      source: "src/hss/hss-s6a-path.c:1307-1382"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: 1
+      summary: >
+        A second, independent precedent on a different interface (S6a, HSS↔MME): Supported-Features
+        is sent twice per message — once with Feature-List-ID 1, once with Feature-List-ID 2 — each
+        as its own grouped AVP instance. Confirms Supported-Features-AVP-negotiation is a repo-wide
+        Diameter convention in this codebase, not something specific to the Gx↔Gy relationship.
+      what_l1_fallback: false
+
+    - id: ctx_008
+      layer: constraints
+      source: "src/smf/gy-handler.c, src/smf/gsm-sm.c (grep, whole files)"
+      type: constraint
+      constraint_class: convention
+      scope: "src/smf/gy-*, src/smf/gsm-sm.c"
+      confidence: EXTRACTED
+      summary: >
+        No existing partial implementation of Feature-List/Supported-Features handling exists in the
+        Gy response-handling path (gy-handler.c) or the session state machine (gsm-sm.c) — confirmed
+        via grep, zero matches in both files for feature_list, Feature-List, Supported-Features, or
+        supported_features. This is a from-scratch send-side addition; no receive-side (CCA) parsing
+        exists to build on either.
+      what_l1_fallback: false
+
+  conflicts_detected: []
+
+  gaps_detected:
+    - aspect_id: 1
+      layers_checked: [what-l2, what-l3]
+      what_l1_fallback_used: false
+      llm_knowledge_used: false
+      web_fallback_used: false
+      note: >
+        The exact Feature-List bitmask value(s) Gy should advertise is not derivable from grepping
+        this codebase alone (see institutional_memory_hits below — ihm_001 resolves this from the
+        institutional-memory layer instead). No performance/load-test baseline exists for Gy CCR
+        construction in this repo either.
+
+  institutional_memory_hit_count: 3
+  institutional_memory_hits:
+    - id: ihm_001
+      aspect_id: 1
+      matched_decision: dl_when-a-new-interface-adv_3a5b76
+      ledger_confidence: INFERRED
+      tier: revise
+      reason: >
+        Matched ledger entry decided that a new interface advertising Supported-Features/Feature-List
+        for the first time, with no interface-specific bit mapping yet, should default the Feature-List
+        value to 0x00000001 (baseline/Rel-8 support bit) rather than 0 — because 0 signals "no features
+        supported at all", a materially different and likely-wrong signal to send during initial
+        feature negotiation. This package's own gaps_detected left the bitmask value as an open
+        question; this hit resolves it.
+      required_evidence:
+        - "Confirm 0x00000001 is genuinely what Gx's own Feature-List-ID 1 value represents before reusing it as Gy's default, rather than assuming the numeric value alone implies the same meaning across interfaces."
+      disposition: accepted
+      disposition_reason: >
+        Reviewer confirmed: replace the placeholder `val.u32 = 0` in the Task 2 implementation with
+        `val.u32 = 0x00000001`, and remove the "this is a guess" framing from the plan's Global
+        Constraints — state it as a resolved decision with its institutional-memory citation instead.
+      dispositioned_by: "human:case-study-fixture"
+      dispositioned_at: "2026-08-06T00:00:00Z"
+
+    - id: ihm_002
+      aspect_id: 1
+      matched_decision: dl_new-diameter-avp-constru_dd466c
+      ledger_confidence: INFERRED
+      tier: proceed
+      reason: >
+        Matched ledger entry decided new Diameter AVP-construction blocks guarded by cc_request_type
+        must skip on the interface's Termination-Request value, mirroring the existing Gx
+        Supported-Features guard — directly confirms this package's own ctx_006/decisions_log entry
+        already choosing that guard.
+      required_evidence:
+        - "Confirm the Gy CC_REQUEST_TYPE_TERMINATION_REQUEST constant name matches the Gx one structurally before assuming the guard ports over unchanged."
+      disposition: accepted
+      disposition_reason: >
+        Independently corroborates the guard decision already made in context_items/decisions_log —
+        no change needed, just added confidence it's the right (and repo-wide) convention.
+      dispositioned_by: "human:case-study-fixture"
+      dispositioned_at: "2026-08-06T00:00:00Z"
+
+    - id: ihm_003
+      aspect_id: 1
+      matched_decision: dl_diameter-avp-dictionary-_44c92f
+      ledger_confidence: INFERRED
+      tier: proceed
+      reason: >
+        Matched ledger entry decided AVP dictionary handles already declared for one interface must
+        not be re-declared per-interface — directly confirms this package's own ctx_005 finding that
+        Feature-List-ID/Feature-List already exist in Gy and only the Supported-Features handle itself
+        is missing.
+      required_evidence:
+        - "Confirm no other AVP this task touches has a similar already-declared-elsewhere handle before finalizing which handles Task 1 actually needs to add."
+      disposition: accepted
+      disposition_reason: >
+        Independently corroborates ctx_005 and the package's own summary bullet — no change needed.
+      dispositioned_by: "human:case-study-fixture"
+      dispositioned_at: "2026-08-06T00:00:00Z"
+
+  open_questions: []
+
+  decisions_log:
+    - topic: "Whether to guard the new AVP the same way Gx guards it (skip on Termination-Request)"
+      decided: "Yes — follow the exact same `cc_request_type != ...TERMINATION_REQUEST` guard as gx-path.c:322, since a Termination-Request doesn't need feature renegotiation and this keeps Gy consistent with the established Gx convention (self-resolved, no live reviewer in this dogfood run)."
+
+  non_regression_risks:
+    - "smf_gy_send_ccr: must keep sending byte-identical CCR content for every AVP that already exists today; the new Supported-Features block must be purely additive."

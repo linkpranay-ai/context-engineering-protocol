@@ -21,6 +21,8 @@ deliberate negative control, chosen to show a situation where this protocol adds
 | [open5gs-gy-supported-features](open5gs-gy-supported-features/CASE-STUDY.md) | open5gs/open5gs (AGPL-3.0) | No | Repeats the consumer-benefit method above on an unrelated domain (telecom Diameter protocol stack) to check whether the generative-benefit finding holds outside UI/accessibility features — it does, and sharper, including the same fabricated accessibility concept resurfacing in a codebase with no UI at all. |
 | [ripgrep-crlf-replace-terminator](ripgrep-crlf-replace/CASE-STUDY.md) ⚠️ tooling side-quest | BurntSushi/ripgrep (Unlicense OR MIT) | No | **Not a CEP protocol case** — evaluates `ult-codegraph`/`graphify` alone (no context package, no approval gate) against naive search on a real Rust bug fix (PR #3100). `graphify explain` cheaply resolves the right symbols (~84x fewer tokens than the naive-grep-narrowed file set), but `path`/`affected` starting from the CLI flag's own definition symbol fail outright — a disclosed, structural limitation of AST-only graphs against ripgrep's one-struct-per-flag pattern, plus a real Windows deep-path environment bug found along the way. A real CEP-protocol case in a new ecosystem is still owed. |
 | [ripgrep-trim-user-stories](ripgrep-user-stories/CASE-STUDY.md) | BurntSushi/ripgrep (MIT/Unlicense) | No | A real CEP-protocol run (context package, self-approval, provenance) against a Rust CLI tool — distinct from `ripgrep-crlf-replace-terminator`'s tooling-only side-quest — using a brand-new, independently-designed consuming skill (`demo-write-user-stories`). Reproduces the generative-benefit finding a third time on a new ecosystem, and finds the hallucination-suppression benefit is conditional on how underspecified the input request is, not universal. |
+| [cep-retrofit-mattpocock-skills](cep-retrofit-mattpocock-skills/CASE-STUDY.md) | mattpocock/skills (MIT) + Textualize/textual (MIT) | No | First test of the `ult-cep-retrofit` metaskill itself: a full-library retrofit pass across a real, unrelated 71-unit skill library (0 misclassifications), plus a deep with/without-CEP comparison of one retrofitted skill (`to-spec`)'s generated output, plus a first-ever trip-wire (institutional-memory) rung on top. Closes this directory's `Trip-wire` and `Metaskill-retrofit origin` coverage gaps for the first time. |
+| [cep-retrofit-superpowers](cep-retrofit-superpowers/CASE-STUDY.md) | obra/superpowers (MIT) + open5gs/open5gs (AGPL-3.0) | No | Sibling to the case above, deliberately picking the furthest domain available (C/Diameter telecom stack vs. Python/TUI) and a skill with an opposite citation policy (`writing-plans` requires file/line citations; `to-spec` forbids them). Finds real Mode 2 defects (duplicate AVP declarations, a fabricated test target) Mode 1 avoids, and a genuinely humbling trip-wire finding: a `tier: revise` hit accepted without checking its own `required_evidence` field produces a confidently wrong value. |
 
 Both consumer-benefit cases also find that the generative benefit compounds past the user-story
 file itself: an approved context package's grounding stays available, pre-identified, to whatever
@@ -47,16 +49,21 @@ see each capability's own design draft once published) · N/A doesn't apply to t
 | open5gs-gy-supported-features | ✅ | ✅ | ✅ (0 conflicts) | ➖ | ➖ | No — same vendored `spw-write-user-story` | Generative |
 | ripgrep-crlf-replace-terminator ⚠️ tooling side-quest | N/A — no package generated | N/A | N/A | ➖ | ➖ | N/A | N/A — not a protocol case |
 | ripgrep-trim-user-stories | ✅ (self-approved, disclosed) | ✅ | ✅ (0 conflicts) | ➖ | ➖ | No — new, ground-up `demo-write-user-stories` | Generative |
+| cep-retrofit-mattpocock-skills | ✅ (reuses `textual`'s Run B package) | ✅ | ✅ (inherited: 1 What-L2-only gap, 0 conflicts) | ➖ | ✅ (3-entry fixture ledger, real `query`, 1 hit materially changed output) | Yes — metaskill-retrofitted `to-spec`, human-overridden `recommend()` signal | Generative |
+| cep-retrofit-superpowers | ✅ (freshly regenerated package, disclosed) | ✅ | ✅ (0 conflicts, 1 gap) | ➖ | ✅ (3-entry fixture ledger, real `query`, 1 hit materially changed output — and shown, on independent re-verification, to itself be wrong) | Yes — metaskill-retrofitted `writing-plans`, machine-selected `recommend()` signal | Generative |
 
-All seven cases show ➖ across the same three columns: derived-package composition, trip-wire, and
-metaskill-retrofit origin. That's an honest gap in what's been demonstrated so far, not a
-case-study omission — none of the three exist in the protocol yet. Each gets its own case once it
-ships.
+All seven cases above that column still show ➖ across derived-package composition, trip-wire, and
+metaskill-retrofit origin — an honest gap that isn't fully closed yet either: derived-package
+composition remains unimplemented everywhere. The two `cep-retrofit-*` cases are the first to
+exercise **trip-wire** and **metaskill-retrofit origin**, both for the first time; each gets its own
+case once the design ships more broadly, and derived-package composition still awaits its own first
+case.
 
 ## Synthesis
 
 [`SYNTHESIS.md`](SYNTHESIS.md) compares the first five cases above — what held across cases, what
-didn't, and what that implies for this protocol's actual claims. The two ripgrep cases were added
-later and aren't folded into that comparison yet; `ripgrep-crlf-replace-terminator` is a tooling
-side-quest rather than a protocol case anyway, and `ripgrep-trim-user-stories` is a candidate for
-the next synthesis pass.
+didn't, and what that implies for this protocol's actual claims. The two ripgrep cases and the two
+`cep-retrofit-*` cases were added later and aren't folded into that comparison yet;
+`ripgrep-crlf-replace-terminator` is a tooling side-quest rather than a protocol case anyway, and
+`ripgrep-trim-user-stories` and the two `cep-retrofit-*` cases are candidates for the next synthesis
+pass.
