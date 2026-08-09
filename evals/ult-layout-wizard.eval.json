@@ -18,7 +18,7 @@
     {
       "id": "ult-layout-wizard-03-negative",
       "type": "negative",
-      "input": "In our automated pipeline, add a step that exits non-zero if any registered path-slot no longer resolves to a real folder — this needs to run unattended with no windows or manual clicking.",
+      "input": "In our automated pipeline, add a check that exits non-zero if any registered path mapping no longer resolves to a real folder — this needs to execute unattended with no windows or manual clicking.",
       "not_expected_skill": "layout-wizard",
       "notes": "Headless/CI-only layout validation — exactly the case this skill's 'Do NOT use for headless/CI-only layout validation' clause redirects to ult-repo-layout's own validate_layout.py --validate instead."
     }
