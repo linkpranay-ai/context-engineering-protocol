@@ -1,0 +1,603 @@
+/* wizard.css - styling for ult-layout-wizard's frontend (Phase 0/1 boxes,
+   decisions, picker; Phase 2 onboarding-state screens). No build step, no
+   framework - plain CSS served as a static asset (see wizard_server.py's
+   STATIC_ASSETS closed set).
+
+   Palette (D24 §18.14 section D): taken verbatim from assets/readme/hero.svg
+   (grep-confirmed, not eyeballed) so the wizard reads as the same product as
+   the rest of CEP rather than an unstyled internal tool. Exposed as custom
+   properties below - navy for headers/panels, orange for primary actions,
+   cyan for informational accents, the two light backgrounds for page/panel
+   fill, blue-gray for muted text - with a prefers-color-scheme override
+   swapping to a dark-navy ground while keeping the same accent hues, since
+   `color-scheme: light dark` was already the stated intent before this pass. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg-start: #F7FBFE;
+  --bg-end: #EEF4F9;
+  --panel-bg: #FFFFFF;
+  --panel-alt-bg: #ECF7FD;
+  --border: #B8DEEE;
+
+  --navy-900: #152238;
+  --navy-800: #18314E;
+  --navy-700: #1A446F;
+
+  --orange: #FF6A42;
+  --orange-bright: #FF7543;
+
+  --cyan: #22C4E5;
+  --cyan-light: #8DE7FF;
+  --cyan-pale: #D9F7FF;
+
+  --text: #18314E;
+  --muted: #44586E;
+  --faint: #93ADC8;
+  --faintest: #90A7C1;
+
+  --danger: #C23B32;
+  --danger-bg: #FBEAE8;
+  --success: #237A45;
+  --success-bg: #E7F4EC;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-start: #0E1826;
+    --bg-end: #152238;
+    --panel-bg: #18314E;
+    --panel-alt-bg: #1A446F;
+    --border: #2C4A6E;
+
+    --text: #ECF7FD;
+    --muted: #8DE7FF;
+    --faint: #93ADC8;
+    --faintest: #90A7C1;
+
+    --danger-bg: #3A2220;
+    --success-bg: #17301F;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 1.75rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: linear-gradient(160deg, var(--bg-start), var(--bg-end)) fixed;
+  min-height: 100vh;
+}
+
+header {
+  margin-bottom: 1.75rem;
+}
+
+h1 {
+  margin: 0 0 0.3rem 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.subtitle {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--muted);
+}
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+#boxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.box {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  min-width: 0;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+.box h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.box h3 {
+  margin: 0.6rem 0 0.25rem 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--faint);
+}
+
+.legend {
+  grid-column: 1 / -1;
+  margin: 0 0 0.25rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.box-desc {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.box-meta {
+  margin: 0 0 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.box-layer:first-of-type h3 {
+  margin-top: 0;
+}
+
+.layer-hint {
+  margin: 0 0 0.35rem 0;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+
+.box-paths {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.box-paths .layer-empty {
+  color: var(--faint);
+  font-style: italic;
+  list-style: none;
+  margin-left: -1.1rem;
+}
+
+.box.unavailable {
+  opacity: 0.6;
+}
+
+.box.has-problems {
+  border-color: var(--danger);
+}
+
+#decisions {
+  grid-column: 1 / -1;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+#decisions h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.decisions-desc {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#decision-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.decision-empty {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.decision-row {
+  background: var(--panel-alt-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.65rem 0.85rem;
+}
+
+.decision-title {
+  margin: 0 0 0.3rem 0;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--navy-800);
+  overflow-wrap: anywhere;
+}
+
+.decision-state-badge {
+  display: inline-block;
+  margin: 0 0 0.4rem 0;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--border);
+}
+
+.state-pending .decision-state-badge {
+  background: #FF6A4226;
+  color: #B84A2E;
+}
+
+.state-staged .decision-state-badge {
+  background: var(--cyan-pale);
+  color: #0C7A93;
+}
+
+.state-confirmed .decision-state-badge {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.decision-value {
+  margin: 0 0 0.25rem 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.decision-comment {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.decision-actions button {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.65rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--navy-700);
+}
+
+.decision-actions button:hover {
+  background: var(--cyan-pale);
+  border-color: var(--cyan);
+}
+
+.apply-row {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+#apply-button {
+  font-size: 0.9rem;
+  padding: 0.45rem 1.15rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 8px;
+}
+
+#apply-button:hover:not(:disabled) {
+  background: var(--orange-bright);
+}
+
+#apply-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+#apply-message {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+#apply-message.error {
+  color: var(--danger);
+}
+
+#picker {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+#picker h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.picker-desc {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.picker-target-info {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.8rem;
+  min-height: 1.1em;
+  font-weight: 600;
+  color: var(--cyan);
+}
+
+.picker-path {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
+  color: var(--navy-700);
+}
+
+#picker-use-dir {
+  font-size: 0.85rem;
+  padding: 0.32rem 0.7rem;
+  margin-left: 0.5rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 6px;
+}
+
+#picker-use-dir:hover {
+  background: var(--orange-bright);
+}
+
+#picker-entries {
+  list-style: none;
+  margin: 0.5rem 0 0 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+#picker-entries li button {
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+#picker-entries li button:hover,
+#picker-up:not(:disabled):hover {
+  background: var(--cyan-pale);
+}
+
+#picker-up {
+  font-size: 0.85rem;
+  padding: 0.32rem 0.65rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--navy-700);
+}
+
+#picker-up:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Phase 2 (D24 §18.14) onboarding state screens - layout_broken,
+   needs_discover, and the dismissible D20-init banner. Same panel language as
+   boxes/decisions/picker above (rounded card, soft cyan border) so a screen
+   that only ever shows one of these still reads as the same product. */
+
+#state-layout-broken,
+#state-needs-discover,
+#d20-banner {
+  grid-column: 1 / -1;
+}
+
+#state-layout-broken,
+#state-needs-discover {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.1rem 1.35rem;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+#state-layout-broken h2,
+#state-needs-discover h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+#state-layout-broken {
+  border-left: 4px solid var(--danger);
+}
+
+#state-needs-discover {
+  border-left: 4px solid var(--orange);
+}
+
+.failure-list {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.6rem 0.6rem 1.6rem;
+  background: var(--danger-bg);
+  border-radius: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--danger);
+}
+
+.guide-hint {
+  margin: 0.75rem 0 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+#discover-button {
+  font-size: 0.9rem;
+  padding: 0.45rem 1.15rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 8px;
+}
+
+#discover-button:hover {
+  background: var(--orange-bright);
+}
+
+#discover-message,
+#rerun-discover-message {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+#discover-message.error,
+#rerun-discover-message.error {
+  color: var(--danger);
+}
+
+#d20-banner {
+  background: var(--cyan-pale);
+  border: 1px solid var(--cyan);
+  border-left: 4px solid var(--orange);
+  border-radius: 10px;
+  padding: 0.7rem 1.1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--navy-800);
+}
+
+#d20-banner p {
+  margin: 0;
+  font-size: 0.85rem;
+  flex: 1 1 320px;
+}
+
+.banner-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+#d20-banner-done {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.75rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 6px;
+}
+
+#d20-banner-done:hover {
+  background: var(--orange-bright);
+}
+
+button.secondary {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.7rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--navy-700);
+}
+
+button.secondary:hover {
+  background: var(--cyan-pale);
+  border-color: var(--cyan);
+}
+
+.stub-card {
+  margin-top: 0.7rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--panel-alt-bg);
+  border: 1px dashed var(--cyan);
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+
+.stub-card-desc,
+.stub-card-path {
+  margin: 0 0 0.4rem 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.stub-card-prompt {
+  margin: 0 0 0.5rem 0;
+  padding: 0.55rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+}
