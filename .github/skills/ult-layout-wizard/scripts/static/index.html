@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ult-layout-wizard</title>
+  <!-- The CSRF nonce below is injected per-session by wizard_server.py's
+       _handle_index (string substitution, never baked into this file on disk).
+       wizard.js reads it once at load and sends it back on every POST /api/stage
+       and /api/apply request (see wizard_auth.py / wizard_originhost.py). -->
+  <meta name="wizard-csrf-token" content="{{WIZARD_CSRF_TOKEN}}">
+  <link rel="stylesheet" href="/static/wizard.css">
+</head>
+<body>
+  <header>
+    <h1>ult-layout-wizard</h1>
+    <p class="subtitle">
+      Resolve each pending layout decision below, then Apply to commit them into
+      <code>context-config.yaml</code> via <code>ult-repo-layout</code>'s own
+      <code>confirm</code> step &mdash; this wizard never writes that file directly.
+    </p>
+  </header>
+
+  <main>
+    <!-- Onboarding state router (D24 §18.14 section A). wizard.js's loadState()
+         calls GET /api/state before anything else and shows exactly one of the
+         sections below (state-layout-broken, state-needs-discover, or the
+         boxes/decisions/picker trio) depending on the result. All of them start
+         hidden here so nothing flashes before that first fetch resolves. -->
+
+    <section id="state-layout-broken" aria-label="Layout configuration broken" style="display: none;">
+      <h2>Layout configuration is broken</h2>
+      <p>
+        <code>ult-repo-layout</code>'s own validation found a problem that needs to be
+        fixed before this wizard can show anything meaningful &mdash; nothing below
+        reflects real state until it's resolved.
+      </p>
+      <ul id="layout-broken-failures" class="failure-list"></ul>
+      <p class="guide-hint">
+        Fix the issue above (by hand, or by asking your coding agent to), then reload
+        this page.
+      </p>
+    </section>
+
+    <section id="state-needs-discover" aria-label="Run discover" style="display: none;">
+      <h2>Let's find this repo's layout</h2>
+      <p>
+        This repo's layout hasn't been discovered yet. <strong>Discover</strong> scans
+        the repo and proposes a decision for each layer (What, How, and any opt-in
+        dimensions) &mdash; nothing is written into <code>context-config.yaml</code>
+        until you review and Apply those decisions on the next screen.
+      </p>
+      <button type="button" id="discover-button">Run Discover</button>
+      <p id="discover-message" role="status"></p>
+    </section>
+
+    <!-- Non-blocking, dismissible - never gates which section above is shown.
+         Only ever unhidden by updateD20Banner() over decisions_pending/steady_state,
+         and only when d20_initialized is still false. -->
+    <div id="d20-banner" class="banner" role="status" style="display: none;">
+      <p>
+        This repo hasn't run <code>ult-repo-layout init</code> yet &mdash; some boxes
+        (Guidelines) may only show defaults until it has. Run
+        <code>/ult-repo-layout init</code> in your coding agent, then click Done.
+      </p>
+      <div class="banner-actions">
+        <button type="button" id="d20-banner-done">Done</button>
+        <button type="button" id="d20-banner-dismiss" class="secondary">Dismiss</button>
+      </div>
+    </div>
+
+    <section id="boxes" aria-label="Resolved context state" style="display: none;">
+      <p class="legend">
+        <strong>L2</strong> = this dimension's default, always-considered corpus.
+        <strong>L1</strong> = an opt-in fallback, searched only when L2 has no relevant
+        content for the task &mdash; off by default until enabled in
+        <code>context-config.yaml</code>.
+      </p>
+
+      <article class="box" id="box-what">
+        <h2>What</h2>
+        <p class="box-desc">Requirements / product-intent content for this task.</p>
+        <p class="box-meta"></p>
+        <div class="box-layer" data-layer="L2">
+          <h3>L2</h3>
+          <ul class="box-paths" data-layer="L2"></ul>
+        </div>
+        <div class="box-layer" data-layer="L1">
+          <h3>L1</h3>
+          <p class="layer-hint" data-layer="L1"></p>
+          <ul class="box-paths" data-layer="L1"></ul>
+        </div>
+        <!-- Guide-only "copy this prompt for your agent" card (wizard_stub_content),
+             filled in by renderStubCards() only when /api/status sends one for this
+             box - e.g. the resolved path exists but is still empty. -->
+        <div class="stub-card" style="display: none;"></div>
+      </article>
+
+      <article class="box" id="box-how">
+        <h2>How</h2>
+        <p class="box-desc">Process / implementation-approach content for this task.</p>
+        <p class="box-meta"></p>
+        <div class="box-layer" data-layer="L2">
+          <h3>L2</h3>
+          <ul class="box-paths" data-layer="L2"></ul>
+        </div>
+        <div class="box-layer" data-layer="L1">
+          <h3>L1</h3>
+          <p class="layer-hint" data-layer="L1"></p>
+          <ul class="box-paths" data-layer="L1"></ul>
+        </div>
+        <div class="stub-card" style="display: none;"></div>
+      </article>
+
+      <article class="box" id="box-guidelines">
+        <h2>Guidelines</h2>
+        <p class="box-desc">Compiled project guidelines resolved for this repo.</p>
+        <p class="box-meta"></p>
+        <div class="stub-card" style="display: none;"></div>
+      </article>
+
+      <article class="box" id="box-tripwire">
+        <h2>Trip-wire</h2>
+        <p class="box-desc">Decision-ledger status: entries, cursors, rejected sources.</p>
+        <p class="box-meta"></p>
+      </article>
+    </section>
+
+    <section id="decisions" aria-label="Layout decisions" style="display: none;">
+      <h2>Decisions</h2>
+      <p class="decisions-desc">
+        Every decision <code>discover</code> left <strong>PENDING</strong>. Confirm,
+        skip, disable, acknowledge, or pick a custom directory for each one
+        (<strong>Pick directory&hellip;</strong> uses the Browse panel below), then
+        Apply to commit everything staged into <code>context-config.yaml</code> in one
+        step. Nothing here is written until you click Apply.
+      </p>
+      <ul id="decision-list"></ul>
+      <div class="apply-row">
+        <button type="button" id="apply-button" disabled>Apply</button>
+        <button type="button" id="rerun-discover-button" class="secondary">Re-run Discover&hellip;</button>
+        <p id="apply-message" role="status"></p>
+      </div>
+      <p id="rerun-discover-message" role="status"></p>
+    </section>
+
+    <section id="picker" aria-label="Directory browser" style="display: none;">
+      <h2>Browse</h2>
+      <p class="picker-desc">
+        Directory browser rooted at this repo &mdash; click an entry to navigate into
+        it, use &uarr; Up to go back. Browsing alone never changes anything; it only
+        becomes a decision's value when you click <strong>Pick directory&hellip;</strong>
+        above and then confirm the directory below.
+      </p>
+      <p class="picker-target-info" id="picker-target-info"></p>
+      <p class="picker-path" id="picker-current-path">.</p>
+      <button type="button" id="picker-up" disabled>&uarr; Up</button>
+      <button type="button" id="picker-use-dir" style="display: none;">Use this directory</button>
+      <ul id="picker-entries"></ul>
+    </section>
+  </main>
+
+  <script src="/static/wizard.js"></script>
+</body>
+</html>

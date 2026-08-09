@@ -1,0 +1,11 @@
+---
+description: "Launch a local, localhost-only browser wizard for a project with ult-repo-layout installed (initialized or not) — guides an uninitialized or not-yet-discovered repo through Run Discover, then shows resolved layer/slot state through four labeled boxes and a directory picker, and lets you resolve pending layout decisions (confirm/skip/disable/pick-a-directory) and Apply them into context-config.yaml via ult-repo-layout's own confirm step. Do NOT use for headless/CI-only layout validation — use ult-repo-layout's discover/confirm-layers/--validate directly."
+globs:
+alwaysApply: false
+---
+
+# ult-layout-wizard
+
+This repository packages its capabilities as portable skills for AI
+coding agents. Read `.github/skills/ult-layout-wizard/SKILL.md` and follow it
+when this rule applies.

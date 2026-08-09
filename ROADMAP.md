@@ -314,6 +314,15 @@ index. Wired as an explicit optional step in `references/what-l1-fallback-query.
   `ult-repo-layout/SKILL.md` do. No reader-facing breakage today — the glossary is still one click
   away via `CONTRIBUTING.md` — but adding a direct pointer in each file would be more consistent.
   Pure polish, not blocking.
+- **`ult-layout-wizard` visual design pass.** **Status: implemented (Phase 2, D24 §18.14),** landed
+  alongside the brownfield onboarding state machine rather than Phase 1 as originally placed here —
+  the state-router work touched the same static files a second time anyway, so the two were done in
+  one pass instead of two. `scripts/static/wizard.css` now pulls its palette from this README's own
+  hero image (`assets/readme/hero.svg`): navy `#152238`/`#18314E`/`#1A446F`, orange accent
+  `#FF6A42`/`#FF7543`, cyan accent `#22C4E5`/`#8DE7FF`/`#D9F7FF`, light backgrounds
+  `#F7FBFE`/`#EEF4F9`/`#ECF7FD`, muted blue-gray text `#44586E`/`#93ADC8`/`#90A7C1`. Still
+  stdlib/no-build-step for the served assets — a palette/spacing/typography pass via CSS custom
+  properties, not a framework adoption.
 
 ## 15. Thorough internal-citation cleanup (pre-1.0 gate)
 
@@ -384,8 +393,12 @@ Some things are deliberately out of scope rather than deferred:
   per assembly rather than needing to be pruned mid-conversation.
 - **Comment-anchored live-studio UI** (from `okf-loom`'s hosted local web server with live SSE
   patching of annotations onto source). Directly conflicts with the "no hosted/managed version of
-  this protocol" stance above — this repo ships skills you run inside your own agent runtime, not a
-  web server to stand up.
+  this protocol" stance above — this repo ships skills you run inside your own agent runtime, not
+  a persistent background service. **Narrower line, stated explicitly:** a user-launched, on-demand
+  setup/status tool that starts when invoked, does its work (or shows a snapshot of current state),
+  and exits is in scope — no continuous file-watching, no background daemon, no live-patching of
+  source. See the onboarding wizard (`.github/skills/ult-layout-wizard/`, design decision D24 — see
+  `references/design-scratchpad-glossary.md`).
 - **Multiple ranked search modes / multi-bundle registry** (from `okf-gem`). No demonstrated need:
   CEP's single deterministic ranking and per-project single corpus already serve real usage. Same
   "considered, not needed in practice" disposition already applied to SelfCite/GraphRAG above —
