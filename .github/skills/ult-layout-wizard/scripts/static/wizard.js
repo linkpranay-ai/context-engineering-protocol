@@ -46,6 +46,17 @@
 // (always-shared) Run Discover button (renderNeedsDiscover, greenfield vs.
 // brownfield copy - see references/wizard-onboarding-state-machine.md), and on
 // decisions_pending/steady_state it only toggles the small dismissible banner.
+//
+// UI design pass adds the top-bar docs viewer, wired once at startup rather than
+// inside loadState() - these are CEP's own project docs, not part of the onboarding
+// flow, so they're available regardless of which of the four states above is showing:
+//   GET /api/docs      - the closed set of docs this install actually has bundled
+//   GET /api/docs/<id> - one doc rendered to HTML (wizard_markdown.render server-side)
+// Opening a doc replaces #main-content with #docs-overlay client-side only (never a
+// real navigation - the wizard's /exchange URLs are single-use, so there's no second
+// page to send a browser to). Docs this install doesn't have (e.g. a copy of this
+// skill installed standalone, without PROTOCOL.md/case-studies/ alongside it) simply
+// disable their nav button rather than erroring - see setDocsNavAvailability.
 
 (function () {
   "use strict";
@@ -570,8 +581,100 @@
     message.classList.toggle("error", Boolean(isError));
   }
 
+  // ------------------------------------------------------------------------
+  // Docs viewer (UI design pass) - see the module docstring above. Wired once
+  // at startup, independent of loadState()'s four-screen router: these are
+  // CEP's own project docs, not part of the onboarding flow.
+  // ------------------------------------------------------------------------
+
+  var docsList = [];
+
+  function setDocsNavAvailability() {
+    var byId = {};
+    docsList.forEach(function (d) {
+      byId[d.id] = d;
+    });
+    var hasCaseStudies = docsList.some(function (d) {
+      return d.kind === "case-study";
+    });
+
+    [
+      ["nav-doc-protocol", !!byId.protocol],
+      ["nav-doc-readme", !!byId.readme],
+      ["nav-doc-case-studies", hasCaseStudies],
+    ].forEach(function (pair) {
+      var button = document.getElementById(pair[0]);
+      button.disabled = !pair[1];
+      button.title = pair[1] ? "" : "Not available in this install.";
+    });
+  }
+
+  function loadDocsNav() {
+    fetchJson("/api/docs").then(function (result) {
+      if (!result.ok) {
+        return;
+      }
+      docsList = result.body.docs || [];
+      setDocsNavAvailability();
+    });
+  }
+
+  function showDocsOverlay(title) {
+    document.getElementById("docs-overlay-title").textContent = title;
+    document.getElementById("docs-overlay").style.display = "";
+    document.getElementById("main-content").style.display = "none";
+  }
+
+  function closeDocsOverlay() {
+    document.getElementById("docs-overlay").style.display = "none";
+    document.getElementById("main-content").style.display = "";
+  }
+
+  function openDoc(id) {
+    fetchJson("/api/docs/" + encodeURIComponent(id)).then(function (result) {
+      if (!result.ok) {
+        return;
+      }
+      showDocsOverlay(result.body.title);
+      document.getElementById("docs-overlay-body").innerHTML = result.body.html;
+    });
+  }
+
+  function openCaseStudiesIndex() {
+    showDocsOverlay("Case Studies");
+    var body = document.getElementById("docs-overlay-body");
+    body.innerHTML = "";
+    var list = el("ul", { class: "docs-index-list" });
+    docsList
+      .filter(function (d) {
+        return d.kind === "case-study";
+      })
+      .forEach(function (d) {
+        var button = el("button", { type: "button", text: d.title });
+        button.addEventListener("click", function () {
+          openDoc(d.id);
+        });
+        list.appendChild(el("li", null, [button]));
+      });
+    body.appendChild(list);
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     loadState();
+    loadDocsNav();
+
+    document.getElementById("nav-doc-protocol").addEventListener("click", function () {
+      openDoc("protocol");
+    });
+    document.getElementById("nav-doc-readme").addEventListener("click", function () {
+      openDoc("readme");
+    });
+    document.getElementById("nav-doc-case-studies").addEventListener("click", function () {
+      openCaseStudiesIndex();
+    });
+    document.getElementById("docs-overlay-close").addEventListener("click", function () {
+      closeDocsOverlay();
+    });
 
     document.getElementById("discover-button").addEventListener("click", function () {
       setDiscoverMessage("Running discover…");

@@ -68,28 +68,216 @@
 body {
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   margin: 0;
-  padding: 1.75rem;
+  padding: 0 1.75rem 1.75rem;
   line-height: 1.45;
   color: var(--text);
   background: linear-gradient(160deg, var(--bg-start), var(--bg-end)) fixed;
   min-height: 100vh;
 }
 
-header {
-  margin-bottom: 1.75rem;
+/* Top bar (UI design pass): a solid navy band - the same dark panel color
+   hero.svg uses behind the CEP monogram - so it reads as a real bar rather
+   than blending into the page's light gradient. Negative side margins let it
+   bleed edge-to-edge while body keeps its usual 1.75rem gutter for
+   everything below; matching padding re-aligns its own content to that same
+   gutter. */
+header.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 -1.75rem 1.75rem;
+  padding: 0.85rem 1.75rem;
+  background: var(--navy-900);
+  box-shadow: 0 2px 6px rgba(14, 24, 38, 0.25);
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.topbar-logo {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
 }
 
 h1 {
-  margin: 0 0 0.3rem 0;
-  font-size: 1.5rem;
+  margin: 0 0 0.2rem 0;
+  font-size: 1.25rem;
   font-weight: 800;
-  color: var(--navy-800);
+  color: #F7FAFF;
 }
 
 .subtitle {
   margin: 0;
   max-width: 62ch;
+  color: var(--cyan-light);
+}
+
+.topbar-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.topbar-nav-link {
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  color: #F7FAFF;
+  background: rgba(247, 250, 255, 0.08);
+  border: 1px solid rgba(247, 250, 255, 0.18);
+  border-radius: 6px;
+}
+
+.topbar-nav-link:hover:not(:disabled) {
+  background: rgba(247, 250, 255, 0.16);
+  border-color: var(--orange-bright);
+}
+
+.topbar-nav-link:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Docs overlay (UI design pass): replaces #main-content while open, rather
+   than a real page navigation - the wizard's /exchange URLs are single-use,
+   so there is no second page to navigate to (see wizard.js's openDoc()). */
+.docs-overlay {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.1rem 1.35rem;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+.docs-overlay-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+#docs-overlay-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.docs-overlay-body {
+  max-width: 78ch;
+  /* Without this, a block element with only max-width (no auto margins)
+     sits flush against the left edge of the much-wider overlay card,
+     leaving a large dead gap on the right - confirmed via screenshot
+     review. Centering reads as an intentional readable-width column
+     instead of a layout bug. */
+  margin: 0 auto;
+}
+
+.docs-overlay-body h1,
+.docs-overlay-body h2,
+.docs-overlay-body h3,
+.docs-overlay-body h4 {
+  color: var(--navy-800);
+  margin: 1.4rem 0 0.5rem;
+}
+
+.docs-overlay-body h1:first-child,
+.docs-overlay-body h2:first-child {
+  margin-top: 0;
+}
+
+.docs-overlay-body p,
+.docs-overlay-body li {
+  overflow-wrap: anywhere;
+}
+
+.docs-overlay-body pre {
+  background: var(--panel-alt-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  font-size: 0.82rem;
+}
+
+.docs-overlay-body code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--panel-alt-bg);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.docs-overlay-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.docs-overlay-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+}
+
+.docs-overlay-body th,
+.docs-overlay-body td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-overlay-body th {
+  background: var(--panel-alt-bg);
+}
+
+.docs-overlay-body blockquote {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.9rem;
+  border-left: 3px solid var(--cyan);
+  background: var(--panel-alt-bg);
   color: var(--muted);
+}
+
+.docs-overlay-body a {
+  color: var(--navy-700);
+}
+
+.docs-index-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.docs-index-list button {
+  width: 100%;
+  text-align: left;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-alt-bg);
+  color: var(--navy-700);
+}
+
+.docs-index-list button:hover {
+  background: var(--cyan-pale);
+  border-color: var(--cyan);
 }
 
 main {
@@ -616,5 +804,10 @@ button.secondary:hover {
 @media (max-width: 720px) {
   main {
     grid-template-columns: 1fr;
+  }
+
+  header.topbar {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

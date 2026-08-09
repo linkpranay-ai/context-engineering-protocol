@@ -35,6 +35,9 @@ below. See [`references/wizard-security-model.md`](references/wizard-security-mo
 [`references/wizard-onboarding-state-machine.md`](references/wizard-onboarding-state-machine.md)
 for the full design; design decision D24 in
 [`references/design-scratchpad-glossary.md`](../../../references/design-scratchpad-glossary.md).
+The docs viewer described below (top bar + in-app `PROTOCOL.md`/`README.md`/case-study
+rendering) is also part of D24; its routes' security model is in
+[`references/wizard-security-model.md`](references/wizard-security-model.md)'s §8.
 
 ## Prerequisite
 
@@ -113,6 +116,37 @@ Ctrl+C) stops the server. Nothing is left running in the background.
   for your coding agent to write the content in place. Still preview only — no route
   writes that content on the wizard's behalf; the write path above only ever commits
   *layer paths*, never layer content.
+
+## Docs viewer
+
+A top bar (CEP logo + inline nav) sits above the boxes/decisions view on every screen.
+Clicking **Protocol**, **README**, or **Case Studies** fetches CEP's own project docs
+and renders them into a full-width in-page overlay — not a real navigation; the
+wizard's exchange-token URLs are single-use, so this stays entirely client-side inside
+the one already-authenticated page load, with a close control returning to the normal
+view. A fourth nav entry, **Guide & FAQ**, is present but disabled (`title="coming
+soon"`) — a reserved slot for a user-guide/FAQ doc that doesn't exist yet.
+
+- `PROTOCOL.md` and `README.md` render directly; **Case Studies** opens an index
+  listing all 9 `case-studies/*/CASE-STUDY.md` files (title taken from each file's
+  leading `# Case Study: ...` H1, falling back to the directory slug for the one file
+  that has no H1) — clicking an entry opens that case study the same way.
+- Markdown is converted with a small hand-rolled, stdlib-only renderer
+  (`wizard_markdown.py`) sized to what these docs actually use — headers, fenced code
+  blocks, lists, tables, inline formatting/links/images, blockquotes, and a bounded raw
+  HTML passthrough for README's centered hero image and badge row. Not a general
+  CommonMark implementation.
+- Docs are read from **the wizard's own install location**, not `<repo_root>` (the
+  project being onboarded) — this is a generic tool that may run against any repo, but
+  `PROTOCOL.md`/`README.md`/case studies are CEP's own docs. A future bare install
+  missing these files degrades gracefully: the nav simply omits what isn't found,
+  never a 500.
+- Backing routes: `GET /api/docs` (list), `GET /api/docs/{id}` (one doc, closed-set —
+  `{id}` is a dict-lookup key, never a filesystem path), and
+  `GET /api/docs-assets/{rel_path}` (serves a doc's own referenced images, e.g.
+  README's hero SVG — this one *does* take a client-supplied path and is
+  containment-checked accordingly). Full security model in
+  [`references/wizard-security-model.md`](references/wizard-security-model.md)'s §8.
 
 ## Do NOT use for
 
