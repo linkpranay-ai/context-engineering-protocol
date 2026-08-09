@@ -56,17 +56,23 @@ for the full table and reasoning:
   wizard shows the failure lines and stops there rather than guessing at broken state.
 - **`needs_discover`** — the repo validates cleanly but has no discovery artifact yet; a
   guide-only intro plus a real **Run Discover** button (`POST /api/discover`) drives
-  `ult-repo-layout`'s own `discover_layers.run_discovery()` in-process.
+  `ult-repo-layout`'s own `discover_layers.run_discovery()` in-process. The intro copy
+  itself has two variants, picked by `d20_initialized` (below): a genuinely greenfield
+  repo (never ran `init`) sees a guide-only explanation of what `init` is and asks for,
+  plus a note that Discover can run before or after it; a repo that's already run
+  `init` sees today's plain Discover-scan explanation. Either way the Run Discover
+  button itself is shared and unaffected — the split is guide copy only.
 - **`decisions_pending`** — an artifact exists with at least one field still
   pending/staged; today's existing Decisions UI, described above.
 - **`steady_state`** — everything is confirmed; the full boxes/decisions/picker
   experience.
 
 Whether `ult-repo-layout init` has ever been run is tracked separately
-(`d20_initialized`) and never changes which screen above renders — it only shows a
-small, dismissible banner over `decisions_pending`/`steady_state` pointing at the
-`init` command, with a Done button that re-checks disk rather than trusting a
-self-report.
+(`d20_initialized`) and never changes which screen above renders — on
+`decisions_pending`/`steady_state` it shows a small, dismissible banner pointing at the
+`init` command with a concrete checklist of what it asks (project name + description,
+optional workspace-root opt-in), with a Done button that re-checks disk rather than
+trusting a self-report; on `needs_discover` it picks the intro variant described above.
 
 ## Launching
 
@@ -124,11 +130,17 @@ Ctrl+C) stops the server. Nothing is left running in the background.
 
 ## What's next
 
-- **Greenfield (`init`) flow** — Phase 2 covers brownfield onboarding only (a repo that
-  already exists but hasn't discovered its layout). Walking a genuinely new project
-  through `ult-repo-layout init` itself, in-browser, is deferred to a later phase; today
-  the `needs_discover` screen and the `d20_initialized` banner only ever *point at* the
-  `init` command, never run it.
+- **Greenfield (`init`) flow** — addressed at the guide-only level this skill is
+  realistically capable of: the `needs_discover` screen's intro copy and the
+  `d20_initialized` banner both give a genuinely greenfield repo a concrete
+  explanation of what `init` is and asks for (project name + description, optional
+  workspace-root opt-in). What remains permanently out of scope, not deferred: running
+  `init`/`reconcile` *from* the wizard server. Neither has a callable Python function —
+  they exist only as conversational prose in `ult-repo-layout/SKILL.md` requiring
+  free-text answers (`init`'s `project_name`/`description`) or an explicit
+  "never guess by name similarity" open-ended question (`reconcile`'s no-marker-found
+  case) that a fixed UI form cannot honestly ask. This skill points at those commands;
+  it does not — and should not — reimplement them.
 - **Paste-back content-handoff mode (§18.6)** — a different flow for handing
   wizard-selected content back to a calling process. Explicitly out of scope for the
   write path above; a distinct, later deliverable.

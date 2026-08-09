@@ -44,12 +44,38 @@
 
     <section id="state-needs-discover" aria-label="Run discover" style="display: none;">
       <h2>Let's find this repo's layout</h2>
-      <p>
-        This repo's layout hasn't been discovered yet. <strong>Discover</strong> scans
-        the repo and proposes a decision for each layer (What, How, and any opt-in
-        dimensions) &mdash; nothing is written into <code>context-config.yaml</code>
-        until you review and Apply those decisions on the next screen.
-      </p>
+
+      <!-- Two mutually-exclusive intro variants, picked by renderNeedsDiscover()
+           in wizard.js based on state.d20_initialized. Both funnel into the same
+           shared Run Discover button below - init and discover are independent
+           steps, this is guide copy only, never a gate on the button itself. -->
+      <div id="needs-discover-greenfield" style="display: none;">
+        <p>
+          This repo hasn't run <code>ult-repo-layout init</code> yet, so there's no
+          <code>context-config.yaml</code> for Discover to write proposals into.
+          <code>init</code> is a short conversational step with your coding agent
+          &mdash; it asks for this project's name and description, and (optionally)
+          whether its content lives in a separate workspace root &mdash; it never
+          guesses these from existing files. Run <code>/ult-repo-layout init</code>
+          whenever you're ready.
+        </p>
+        <p>
+          You can run <strong>Discover</strong> below before or after
+          <code>init</code> &mdash; order doesn't change what Discover finds, but
+          running <code>init</code> first gives the Guidelines box a real base
+          instead of defaults.
+        </p>
+      </div>
+
+      <div id="needs-discover-brownfield" style="display: none;">
+        <p>
+          This repo's layout hasn't been discovered yet. <strong>Discover</strong> scans
+          the repo and proposes a decision for each layer (What, How, and any opt-in
+          dimensions) &mdash; nothing is written into <code>context-config.yaml</code>
+          until you review and Apply those decisions on the next screen.
+        </p>
+      </div>
+
       <button type="button" id="discover-button">Run Discover</button>
       <p id="discover-message" role="status"></p>
     </section>
@@ -58,11 +84,18 @@
          Only ever unhidden by updateD20Banner() over decisions_pending/steady_state,
          and only when d20_initialized is still false. -->
     <div id="d20-banner" class="banner" role="status" style="display: none;">
-      <p>
-        This repo hasn't run <code>ult-repo-layout init</code> yet &mdash; some boxes
-        (Guidelines) may only show defaults until it has. Run
-        <code>/ult-repo-layout init</code> in your coding agent, then click Done.
-      </p>
+      <div class="banner-text">
+        <p>
+          This repo hasn't run <code>ult-repo-layout init</code> yet &mdash; some boxes
+          (Guidelines) may only show defaults until it has. <code>init</code> is a
+          short conversational step with your coding agent that asks:
+        </p>
+        <ul class="banner-checklist">
+          <li>This project's name and a one-line description</li>
+          <li>Whether its content lives in a separate workspace root (optional)</li>
+        </ul>
+        <p>Run <code>/ult-repo-layout init</code> in your coding agent, then click Done.</p>
+      </div>
       <div class="banner-actions">
         <button type="button" id="d20-banner-done">Done</button>
         <button type="button" id="d20-banner-dismiss" class="secondary">Dismiss</button>

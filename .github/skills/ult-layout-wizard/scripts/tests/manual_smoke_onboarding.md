@@ -41,7 +41,12 @@ whole point of step 1.
    here instead.
 2. Open the printed `http://127.0.0.1:<port>/exchange?token=...` URL in a browser.
 3. Confirm the page shows the **"Let's find this repo's layout"** screen (`#state-needs-discover`), not the boxes/decisions/picker layout — those sections should be
-   invisible (`display: none` in the DOM), not merely empty.
+   invisible (`display: none` in the DOM), not merely empty. Since this fixture has
+   never run `ult-repo-layout init` either, also confirm the **greenfield** intro
+   renders here specifically (`#needs-discover-greenfield` visible,
+   `#needs-discover-brownfield` `display: none`) — the paragraph explaining what
+   `init` is and asks for, not the plain Discover-scan copy. §4 step 5 covers the
+   brownfield variant.
 4. Open devtools → Network, reload, confirm `GET /api/state` returns
    `{"state": "needs_discover", "discovery_artifact_exists": false, ...}`.
 5. Click **Run Discover**. Confirm the button becomes disabled/shows a pending
@@ -93,6 +98,15 @@ whole point of step 1.
    self-report — and the banner disappears because `d20_initialized` is now `true`.
 4. Confirm at every point in this section that the *screen itself* (boxes/decisions
    vs. any other state) never changed because of the banner — it's additive only.
+5. `needs_discover` intro-copy split, brownfield side (§1 step 3 already checked the
+   greenfield side): reuse §1's fixture — still `needs_discover`, still showing the
+   greenfield intro — and hand-write a `.layout-slots.yaml` marker for any
+   `SLOT_REGISTRY` entry (same technique as step 3 above), without running Discover.
+   Reload; confirm the state is still `needs_discover` (no artifact yet) but the intro
+   has flipped to **brownfield** (`#needs-discover-brownfield` visible,
+   `#needs-discover-greenfield` hidden) — today's plain "hasn't been discovered yet"
+   copy. Confirm the **Run Discover** button and its behavior are identical either
+   way — only the intro paragraph above it changes.
 
 ## 5. `/api/discover` guard: staged-decision protection
 

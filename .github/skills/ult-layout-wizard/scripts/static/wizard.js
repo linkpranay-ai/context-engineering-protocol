@@ -42,7 +42,10 @@
 // Discover button), decisions_pending/steady_state (today's existing
 // boxes/decisions/picker experience, unchanged - just reachable now). A
 // d20_initialized=false flag is carried on every state but never picks the screen -
-// it only toggles a small dismissible banner over decisions_pending/steady_state.
+// on needs_discover it only swaps which of two guide-copy variants intros the
+// (always-shared) Run Discover button (renderNeedsDiscover, greenfield vs.
+// brownfield copy - see references/wizard-onboarding-state-machine.md), and on
+// decisions_pending/steady_state it only toggles the small dismissible banner.
 
 (function () {
   "use strict";
@@ -476,6 +479,20 @@
     });
   }
 
+  // Picks which of needs-discover-greenfield / needs-discover-brownfield intros
+  // this repo. Purely which paragraph explains *why* Discover hasn't run yet -
+  // the Run Discover button underneath is shared and unaffected either way.
+  function renderNeedsDiscover(state) {
+    var greenfield = document.getElementById("needs-discover-greenfield");
+    var brownfield = document.getElementById("needs-discover-brownfield");
+    if (!greenfield || !brownfield) {
+      return;
+    }
+    var isGreenfield = !state.d20_initialized;
+    greenfield.style.display = isGreenfield ? "" : "none";
+    brownfield.style.display = isGreenfield ? "none" : "";
+  }
+
   // Dismissed for the life of this page load only - reloading the page (or a
   // fresh session) shows the banner again until d20_initialized actually
   // becomes true. That's intentional: dismissing is "not now", not "never".
@@ -507,6 +524,7 @@
       }
       document.getElementById("d20-banner").style.display = "none";
       if (state.state === "needs_discover") {
+        renderNeedsDiscover(state);
         return;
       }
       // decisions_pending / steady_state: today's existing full experience,

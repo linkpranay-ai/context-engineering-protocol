@@ -526,10 +526,27 @@ main {
   color: var(--navy-800);
 }
 
+.banner-text {
+  flex: 1 1 320px;
+}
+
 #d20-banner p {
   margin: 0;
   font-size: 0.85rem;
-  flex: 1 1 320px;
+}
+
+#d20-banner p + p {
+  margin-top: 0.4rem;
+}
+
+.banner-checklist {
+  margin: 0.35rem 0;
+  padding: 0 0 0 1.2rem;
+  font-size: 0.85rem;
+}
+
+.banner-checklist li {
+  margin: 0.15rem 0;
 }
 
 .banner-actions {
