@@ -477,11 +477,30 @@ def _make_handler(ctx: _ServerContext):
                 if doc_dir_rel == "."
                 else f"/api/docs-assets/{doc_dir_rel}/"
             )
+            # Maps every other doc's own install-root-relative path back to
+            # its doc_id, so a relative Markdown link inside *this* doc (e.g.
+            # case-studies/README.md linking to "textual/CASE-STUDY.md") can
+            # become an in-app navigation instead of a dead href - see
+            # wizard_markdown.render()'s link_resolver parameter. Built fresh
+            # per request from the same closed-set scan /api/docs already
+            # returns; a path with no matching doc_id (e.g.
+            # "references/reproducibility-guide.md", deliberately outside
+            # this corpus) falls through to wizard_markdown's GitHub-link
+            # fallback instead - never a filesystem lookup on client input.
+            link_resolver_map = {
+                d.path.relative_to(wizard_docs.install_root()).as_posix(): d.doc_id
+                for d in wizard_docs.list_docs()
+            }
             self._send_json(
                 HTTPStatus.OK,
                 {
                     "title": entry.title,
-                    "html": wizard_markdown.render(markdown_text, asset_prefix=asset_prefix),
+                    "html": wizard_markdown.render(
+                        markdown_text,
+                        asset_prefix=asset_prefix,
+                        doc_dir=doc_dir_rel,
+                        link_resolver=link_resolver_map.get,
+                    ),
                 },
             )
 

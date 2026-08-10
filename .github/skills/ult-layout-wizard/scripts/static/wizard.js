@@ -64,9 +64,18 @@
 // into #main-content's own .page-header (see index.html). navigateDocs()/
 // renderDocView()/docsBack() replace the old openDoc()/openCaseStudiesIndex() pair,
 // adding a small in-overlay view history (docsBackStack) so a Back button can step
-// back out of a case study to the index, or out of any doc to whatever was open
-// before it - standing in for real browser history, which a single-use /exchange URL
-// can't use either.
+// back out of any doc to whatever was open before it - standing in for real browser
+// history, which a single-use /exchange URL can't use either.
+//
+// "Case Studies" in the top bar navigates straight to case-studies/README.md's own
+// rendered content now, not a client-built list (the old {kind: "case-studies-index"}
+// view is gone) - and every relative Markdown link inside a rendered doc (to another
+// case study, to SYNTHESIS.md/TEMPLATE.md, or to a heading anchor in PROTOCOL.md/
+// README.md) becomes a real in-app navigation too, via wizard_markdown.py's
+// link_resolver marking it with data-doc-id/-fragment instead of a real href - see
+// the delegated click listener on #docs-overlay-body below. A link that doesn't
+// resolve to a doc this install has (e.g. references/reproducibility-guide.md) is left
+// as a real GitHub link that opens in a new tab instead, so it never dead-ends the SPA.
 
 (function () {
   "use strict";
@@ -599,13 +608,15 @@
 
   var docsList = [];
 
-  // One entry per view the overlay can show: {kind: "doc", id} for a single
-  // rendered doc, or {kind: "case-studies-index"} for the index list.
-  // docsCurrentView is whatever's on screen right now (null when the overlay
-  // is closed); docsBackStack holds every view navigated away from this
-  // overlay session, in visiting order, so Back can step through them one at
-  // a time - a small in-page history, standing in for the real browser
-  // history a single-use /exchange URL can't use (see the module docstring).
+  // One entry per view the overlay can show: {kind: "doc", id, fragment}.
+  // `fragment`, when present, is a heading id to scroll to once the doc's
+  // HTML is in the DOM (set when navigating via an in-app link that pointed
+  // at an anchor - see the data-doc-id click handler below). docsCurrentView
+  // is whatever's on screen right now (null when the overlay is closed);
+  // docsBackStack holds every view navigated away from this overlay session,
+  // in visiting order, so Back can step through them one at a time - a small
+  // in-page history, standing in for the real browser history a single-use
+  // /exchange URL can't use (see the module docstring).
   var docsCurrentView = null;
   var docsBackStack = [];
 
@@ -614,14 +625,15 @@
     docsList.forEach(function (d) {
       byId[d.id] = d;
     });
-    var hasCaseStudies = docsList.some(function (d) {
-      return d.kind === "case-study";
-    });
 
     [
       ["nav-doc-protocol", !!byId.protocol],
       ["nav-doc-readme", !!byId.readme],
-      ["nav-doc-case-studies", hasCaseStudies],
+      // "Case Studies" now navigates straight to case-studies/README.md's
+      // rendered content (see nav-doc-case-studies's click handler below),
+      // not an auto-generated list - so its availability tracks that one
+      // doc, the same way the other two nav buttons track theirs.
+      ["nav-doc-case-studies", !!byId["case-studies-readme"]],
     ].forEach(function (pair) {
       var button = document.getElementById(pair[0]);
       button.disabled = !pair[1];
@@ -646,16 +658,15 @@
   // light up instead).
   function updateActiveNav() {
     var activeId = "nav-wizard";
-    if (docsCurrentView) {
-      if (docsCurrentView.kind === "doc") {
-        if (docsCurrentView.id === "protocol") {
-          activeId = "nav-doc-protocol";
-        } else if (docsCurrentView.id === "readme") {
-          activeId = "nav-doc-readme";
-        } else {
-          activeId = "nav-doc-case-studies";
-        }
-      } else if (docsCurrentView.kind === "case-studies-index") {
+    if (docsCurrentView && docsCurrentView.kind === "doc") {
+      if (docsCurrentView.id === "protocol") {
+        activeId = "nav-doc-protocol";
+      } else if (docsCurrentView.id === "readme") {
+        activeId = "nav-doc-readme";
+      } else {
+        // Every other doc id (case-studies-readme, case-studies-synthesis,
+        // case-studies-template, case-study-*) lives under the Case
+        // Studies section - there's no separate nav button for any of them.
         activeId = "nav-doc-case-studies";
       }
     }
@@ -694,38 +705,33 @@
   // Renders `view` into the overlay without touching docsBackStack - the
   // single place that actually draws a view, used both for forward
   // navigation (after navigateDocs pushes the old view) and for Back (which
-  // pops instead of pushing).
+  // pops instead of pushing). `view.kind` is always "doc" now - the
+  // Case Studies section's landing content is case-studies/README.md's own
+  // rendered HTML (doc id "case-studies-readme"), not a client-built list;
+  // see wizard_docs.py for how that doc, its supporting SYNTHESIS.md/
+  // TEMPLATE.md, and every individual case study all end up in the same
+  // fetchable doc corpus.
   function renderDocView(view) {
     docsCurrentView = view;
     updateDocsBackButton();
     updateActiveNav();
-    if (view.kind === "doc") {
-      fetchJson("/api/docs/" + encodeURIComponent(view.id)).then(function (result) {
-        if (!result.ok) {
-          return;
+    fetchJson("/api/docs/" + encodeURIComponent(view.id)).then(function (result) {
+      if (!result.ok) {
+        return;
+      }
+      showDocsOverlay(result.body.title);
+      document.getElementById("docs-overlay-body").innerHTML = result.body.html;
+      // A link rendered by wizard_markdown.py's link_resolver (e.g.
+      // case-studies/README.md's own "../README.md#measured-impact" link)
+      // may carry a fragment identifying a heading inside *this* doc -
+      // scroll it into view once the HTML above is actually in the DOM.
+      if (view.fragment) {
+        var target = document.getElementById(view.fragment);
+        if (target) {
+          target.scrollIntoView();
         }
-        showDocsOverlay(result.body.title);
-        document.getElementById("docs-overlay-body").innerHTML = result.body.html;
-      });
-      return;
-    }
-    // kind === "case-studies-index"
-    showDocsOverlay("Case Studies");
-    var body = document.getElementById("docs-overlay-body");
-    body.innerHTML = "";
-    var list = el("ul", { class: "docs-index-list" });
-    docsList
-      .filter(function (d) {
-        return d.kind === "case-study";
-      })
-      .forEach(function (d) {
-        var button = el("button", { type: "button", text: d.title });
-        button.addEventListener("click", function () {
-          navigateDocs({ kind: "doc", id: d.id });
-        });
-        list.appendChild(el("li", null, [button]));
-      });
-    body.appendChild(list);
+      }
+    });
   }
 
   // Forward navigation: if the overlay is already open, the view it's
@@ -761,7 +767,7 @@
       navigateDocs({ kind: "doc", id: "readme" });
     });
     document.getElementById("nav-doc-case-studies").addEventListener("click", function () {
-      navigateDocs({ kind: "case-studies-index" });
+      navigateDocs({ kind: "doc", id: "case-studies-readme" });
     });
     document.getElementById("nav-wizard").addEventListener("click", function () {
       closeDocsOverlay();
@@ -771,6 +777,24 @@
     });
     document.getElementById("docs-overlay-close").addEventListener("click", function () {
       closeDocsOverlay();
+    });
+    // Delegated (not per-link) since the overlay body's content is replaced
+    // wholesale on every navigation - wizard_markdown.py's link_resolver
+    // marks an in-app-navigable link with data-doc-id/-fragment instead of
+    // a real href (see its docstring: single-use exchange-token URLs can't
+    // support real page navigation), so clicking one routes through
+    // navigateDocs exactly like the old case-study list buttons did.
+    document.getElementById("docs-overlay-body").addEventListener("click", function (event) {
+      var link = event.target.closest("[data-doc-id]");
+      if (!link) {
+        return;
+      }
+      event.preventDefault();
+      navigateDocs({
+        kind: "doc",
+        id: link.dataset.docId,
+        fragment: link.dataset.docFragment || null,
+      });
     });
 
     document.getElementById("discover-button").addEventListener("click", function () {

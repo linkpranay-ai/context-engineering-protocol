@@ -32,7 +32,16 @@ from __future__ import annotations
 import html
 import posixpath
 import re
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
+
+# The project's own canonical public GitHub URL - already used verbatim in
+# this repo's own README.md badges (CI badge, version badge), not a value
+# invented for this module. Used only as the *fallback* destination for a
+# relative doc link that render() can't resolve to an in-app doc (see
+# _rewrite_link) - e.g. a case-studies/README.md link to
+# references/reproducibility-guide.md, which is intentionally outside the
+# wizard's doc corpus (see wizard_docs.py).
+_GITHUB_BLOB_BASE = "https://github.com/linkpranay-ai/context-engineering-protocol/blob/main/"
 
 _ATX_HEADER = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _FENCE_START = re.compile(r"^```\s*([\w+-]*)\s*$")
@@ -71,6 +80,93 @@ _ABSOLUTE_SRC = re.compile(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|/|#)")
 # same relative-path problem as Markdown image syntax, different syntax.
 _HTML_SRC_ATTR = re.compile(r'(\bsrc=")([^"]*)(")')
 
+# Strips everything but lowercase letters/digits/space/hyphen - the rest of
+# _slugify's job (mapping spaces to hyphens) happens separately because it
+# must NOT collapse runs of spaces first (see _slugify's docstring).
+_SLUG_STRIP = re.compile(r"[^a-z0-9 -]")
+
+
+def _slugify(text: str) -> str:
+    """Approximates GitHub's own heading-anchor algorithm well enough for
+    this module's real links to resolve: case-studies/README.md links to
+    `../PROTOCOL.md#7-trip-wire--institutional-memory-decision-ledger-piloting`
+    (heading "## 7. Trip-wire — institutional memory, decision ledger
+    (piloting)") and `../README.md#measured-impact` (heading "### Measured
+    impact") - both grep-confirmed against this exact algorithm: lowercase,
+    strip everything that isn't a-z/0-9/space/hyphen, then map each
+    individual space to a hyphen WITHOUT collapsing runs first - the em dash
+    in "Trip-wire — institutional" sits between two spaces, and removing
+    just the dash (not the spaces either side of it) is what produces the
+    target's "wire--institutional" double hyphen. Duplicate headings within
+    one doc are not de-duplicated (GitHub appends -1/-2; no doc this module
+    renders today has same-level duplicate headings, so that case doesn't
+    arise)."""
+    return _SLUG_STRIP.sub("", text.lower()).replace(" ", "-")
+
+
+def _render_link(
+    text: str,
+    href: str,
+    doc_dir: Optional[str],
+    link_resolver: Optional[Callable[[str], Optional[str]]],
+) -> str:
+    """Builds one `<a>` tag for a `[text](href)` match. `text` is already
+    HTML-escaped (it comes from `_process_inline`'s already-`html.escape`d
+    working string); `href` is the raw, un-escaped Markdown link target.
+
+    Three cases, in order:
+    1. Bare in-page anchor (`#foo`, no path) - left as an ordinary same-page
+       anchor link; nothing to resolve.
+    2. Already-absolute target (own scheme, or root-relative - the same
+       `_ABSOLUTE_SRC` rule `_rewrite_src` uses for images) - a real,
+       correct destination already, so it's left alone except for
+       `target="_blank"` - without that, clicking it would navigate the
+       single-page docs overlay away entirely (the wizard's exchange-token
+       URLs are single-use, so there's no coming back - see render()'s
+       module docstring on why this viewer is client-side-only).
+    3. Relative path - resolved against `doc_dir` (the *rendering* doc's own
+       install-root-relative directory, supplied by wizard_server.py, same
+       role `asset_prefix` plays for images but expressed as a plain path
+       instead of a URL prefix - see wizard_docs.py for how doc paths are
+       tracked). If `link_resolver` (built by wizard_server.py from
+       wizard_docs.list_docs(), a closed-set dict lookup - no filesystem
+       access from this resolved path, matching wizard_docs.py's
+       no-path-traversal-surface posture) maps the resolved path to a known
+       doc_id, the link becomes an in-app navigation trigger instead of a
+       real href (`href="#"` plus `data-doc-id`/`data-doc-fragment`,
+       consumed by wizard.js's delegated click handler) - real hrefs can't
+       work here for the same single-use-URL reason as case 2. Otherwise
+       (resolver returns None - the path is a real repo file but outside
+       the wizard's doc corpus, e.g. `references/reproducibility-guide.md`)
+       it falls back to a real link at the project's own public GitHub URL,
+       also opened in a new tab.
+    """
+    path, _, fragment = href.partition("#")
+
+    if not path:
+        return f'<a href="{html.escape(href, quote=True)}">{text}</a>'
+
+    if _ABSOLUTE_SRC.match(path):
+        return (
+            f'<a href="{html.escape(href, quote=True)}" '
+            f'target="_blank" rel="noopener">{text}</a>'
+        )
+
+    resolved = posixpath.normpath(posixpath.join(doc_dir or ".", path))
+    doc_id = link_resolver(resolved) if link_resolver else None
+    if doc_id:
+        frag_attr = f' data-doc-fragment="{html.escape(fragment, quote=True)}"' if fragment else ""
+        return (
+            f'<a href="#" data-doc-id="{html.escape(doc_id, quote=True)}"'
+            f'{frag_attr}>{text}</a>'
+        )
+
+    fallback_href = _GITHUB_BLOB_BASE + resolved + (f"#{fragment}" if fragment else "")
+    return (
+        f'<a href="{html.escape(fallback_href, quote=True)}" '
+        f'target="_blank" rel="noopener">{text}</a>'
+    )
+
 
 def _rewrite_html_line_srcs(line: str, asset_prefix: Optional[str]) -> str:
     if not asset_prefix:
@@ -98,7 +194,12 @@ def _rewrite_src(src: str, asset_prefix: Optional[str]) -> str:
     return posixpath.normpath(posixpath.join(asset_prefix, src))
 
 
-def _process_inline(text: str, asset_prefix: Optional[str] = None) -> str:
+def _process_inline(
+    text: str,
+    asset_prefix: Optional[str] = None,
+    doc_dir: Optional[str] = None,
+    link_resolver: Optional[Callable[[str], Optional[str]]] = None,
+) -> str:
     """Escapes raw text then re-introduces the small inline-markup subset this
     module supports. Order matters: code spans are pulled out first (and
     protected behind placeholders) so `**`/`_`/`[` characters inside them are
@@ -125,9 +226,7 @@ def _process_inline(text: str, asset_prefix: Optional[str] = None) -> str:
         escaped,
     )
     escaped = _LINK.sub(
-        lambda m: (
-            f'<a href="{html.escape(m.group(2), quote=True)}">{m.group(1)}</a>'
-        ),
+        lambda m: _render_link(m.group(1), m.group(2), doc_dir, link_resolver),
         escaped,
     )
     escaped = _BOLD.sub(lambda m: f"<strong>{m.group(2)}</strong>", escaped)
@@ -146,7 +245,11 @@ def _indent_level(leading_spaces: str) -> int:
 
 
 def _render_table(
-    lines: List[str], start: int, asset_prefix: Optional[str] = None
+    lines: List[str],
+    start: int,
+    asset_prefix: Optional[str] = None,
+    doc_dir: Optional[str] = None,
+    link_resolver: Optional[Callable[[str], Optional[str]]] = None,
 ) -> Tuple[str, int]:
     header_cells = [c.strip() for c in lines[start].strip().strip("|").split("|")]
     i = start + 2  # skip header + separator row
@@ -157,19 +260,24 @@ def _render_table(
 
     out = ['<table>', "<thead><tr>"]
     for cell in header_cells:
-        out.append(f"<th>{_process_inline(cell, asset_prefix)}</th>")
+        out.append(f"<th>{_process_inline(cell, asset_prefix, doc_dir, link_resolver)}</th>")
     out.append("</tr></thead><tbody>")
     for row in rows:
         out.append("<tr>")
         for cell in row:
-            out.append(f"<td>{_process_inline(cell, asset_prefix)}</td>")
+            out.append(f"<td>{_process_inline(cell, asset_prefix, doc_dir, link_resolver)}</td>")
         out.append("</tr>")
     out.append("</tbody></table>")
     return "".join(out), i
 
 
 def _render_list(
-    lines: List[str], start: int, ordered: bool, asset_prefix: Optional[str] = None
+    lines: List[str],
+    start: int,
+    ordered: bool,
+    asset_prefix: Optional[str] = None,
+    doc_dir: Optional[str] = None,
+    link_resolver: Optional[Callable[[str], Optional[str]]] = None,
 ) -> Tuple[str, int]:
     item_re = _OL_ITEM if ordered else _UL_ITEM
     tag = "ol" if ordered else "ul"
@@ -190,7 +298,7 @@ def _render_list(
             stack.pop()
             out.append(f"</{tag}>")
 
-        out.append(f"<li>{_process_inline(text, asset_prefix)}</li>")
+        out.append(f"<li>{_process_inline(text, asset_prefix, doc_dir, link_resolver)}</li>")
         i += 1
 
     while len(stack) > 1:
@@ -200,7 +308,13 @@ def _render_list(
     return "".join(out), i
 
 
-def render(markdown_text: str, *, asset_prefix: Optional[str] = None) -> str:
+def render(
+    markdown_text: str,
+    *,
+    asset_prefix: Optional[str] = None,
+    doc_dir: Optional[str] = None,
+    link_resolver: Optional[Callable[[str], Optional[str]]] = None,
+) -> str:
     """Converts one Markdown document to an HTML fragment (no <html>/<body>
     wrapper - callers embed this into the docs-overlay panel, matching how
     wizard_boxes.py hands back plain view-model data for wizard_server.py to
@@ -210,7 +324,22 @@ def render(markdown_text: str, *, asset_prefix: Optional[str] = None) -> str:
     (Markdown `![](...)`) syntax and raw HTML `<img src="...">` alike) so it
     resolves against the *source doc's own directory* instead of the
     wizard's page URL - see _rewrite_src. None (the default) renders every
-    doc exactly as it always has (every existing caller/test)."""
+    doc exactly as it always has (every existing caller/test).
+
+    `doc_dir` and `link_resolver` do the equivalent job for `[text](href)`
+    links (see _render_link): `doc_dir` is the rendering doc's own
+    install-root-relative directory (`"."` for a doc at the repo root,
+    defaulted to when doc_dir is None too), used to resolve a relative link
+    target the same way `asset_prefix` resolves a relative image src;
+    `link_resolver` maps that resolved path to a doc_id when it's one of the
+    wizard's own docs, so the link can navigate in-app instead of using a
+    real href that single-use exchange-token URLs can't support. When
+    `link_resolver` is None (or returns no match for a given path), the
+    relative link still gets *something* real rather than a guaranteed-dead
+    same-page href: a link to the resolved path at the project's own public
+    GitHub URL - see `_GITHUB_BLOB_BASE`. Absolute links (own scheme, or
+    root-relative) are untouched except for `target="_blank"` regardless of
+    either parameter - see _render_link."""
     lines = markdown_text.replace("\r\n", "\n").split("\n")
     out: List[str] = []
     i = 0
@@ -221,7 +350,7 @@ def render(markdown_text: str, *, asset_prefix: Optional[str] = None) -> str:
         if paragraph_buf:
             joined = " ".join(paragraph_buf).strip()
             if joined:
-                out.append(f"<p>{_process_inline(joined, asset_prefix)}</p>")
+                out.append(f"<p>{_process_inline(joined, asset_prefix, doc_dir, link_resolver)}</p>")
             paragraph_buf.clear()
 
     while i < n:
@@ -269,7 +398,12 @@ def render(markdown_text: str, *, asset_prefix: Optional[str] = None) -> str:
         if header_match:
             _flush_paragraph()
             level = len(header_match.group(1))
-            out.append(f"<h{level}>{_process_inline(header_match.group(2), asset_prefix)}</h{level}>")
+            heading_text = header_match.group(2)
+            slug = _slugify(heading_text)
+            out.append(
+                f'<h{level} id="{html.escape(slug, quote=True)}">'
+                f"{_process_inline(heading_text, asset_prefix, doc_dir, link_resolver)}</h{level}>"
+            )
             i += 1
             continue
 
@@ -286,19 +420,25 @@ def render(markdown_text: str, *, asset_prefix: Optional[str] = None) -> str:
             and "|" in lines[i + 1]
         ):
             _flush_paragraph()
-            table_html, i = _render_table(lines, i, asset_prefix)
+            table_html, i = _render_table(lines, i, asset_prefix, doc_dir, link_resolver)
             out.append(table_html)
             continue
 
         if _OL_ITEM.match(line):
             _flush_paragraph()
-            list_html, i = _render_list(lines, i, ordered=True, asset_prefix=asset_prefix)
+            list_html, i = _render_list(
+                lines, i, ordered=True, asset_prefix=asset_prefix,
+                doc_dir=doc_dir, link_resolver=link_resolver,
+            )
             out.append(list_html)
             continue
 
         if _UL_ITEM.match(line):
             _flush_paragraph()
-            list_html, i = _render_list(lines, i, ordered=False, asset_prefix=asset_prefix)
+            list_html, i = _render_list(
+                lines, i, ordered=False, asset_prefix=asset_prefix,
+                doc_dir=doc_dir, link_resolver=link_resolver,
+            )
             out.append(list_html)
             continue
 
@@ -313,7 +453,7 @@ def render(markdown_text: str, *, asset_prefix: Optional[str] = None) -> str:
                     break
                 bq_lines.append(m.group(1))
                 i += 1
-            inner = _process_inline(" ".join(bq_lines).strip(), asset_prefix)
+            inner = _process_inline(" ".join(bq_lines).strip(), asset_prefix, doc_dir, link_resolver)
             out.append(f"<blockquote><p>{inner}</p></blockquote>")
             continue
 

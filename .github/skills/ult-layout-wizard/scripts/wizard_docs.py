@@ -37,6 +37,14 @@ from typing import List, Optional
 # _case_study_title below, rather than guessing a title from body content.
 _CASE_STUDY_H1 = re.compile(r"^#\s*Case Study:\s*(.+?)\s*$", re.MULTILINE)
 
+# Generic "first H1" extractor for the plain (non-"Case Study:") docs added
+# alongside the individual case studies below - case-studies/README.md opens
+# with "# Case Studies", SYNTHESIS.md with "# Cross-case synthesis",
+# TEMPLATE.md with "# Case Study Template" (grep-confirmed). Same
+# missing-file-isn't-an-error posture as _case_study_title: falls back to the
+# supplied title rather than raising if the file somehow has no H1.
+_FIRST_H1 = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+
 
 @dataclass
 class DocEntry:
@@ -61,11 +69,24 @@ def _case_study_title(path: Path, fallback_slug: str) -> str:
     return match.group(1) if match else fallback_slug
 
 
+def _first_h1_title(path: Path, fallback: str) -> str:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return fallback
+    match = _FIRST_H1.search(text)
+    return match.group(1) if match else fallback
+
+
 def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
     """Ordered list of every doc currently available to serve: Protocol,
-    README, then one entry per case-studies/*/CASE-STUDY.md sorted by
-    directory slug. `root` defaults to install_root() - overridable for
-    tests only, never by a request."""
+    README, case-studies/README.md (the Case Studies section's landing doc -
+    the wizard's top nav links here, not to an auto-generated list), its two
+    supporting docs (SYNTHESIS.md, TEMPLATE.md - reachable only via links
+    inside case-studies/README.md, not their own nav button), then one entry
+    per case-studies/*/CASE-STUDY.md sorted by directory slug. `root`
+    defaults to install_root() - overridable for tests only, never by a
+    request."""
     root = root or install_root()
     docs: List[DocEntry] = []
 
@@ -78,6 +99,22 @@ def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
         docs.append(DocEntry("readme", "README", "doc", readme))
 
     case_studies_dir = root / "case-studies"
+
+    cs_readme = case_studies_dir / "README.md"
+    if cs_readme.is_file():
+        title = _first_h1_title(cs_readme, fallback="Case Studies")
+        docs.append(DocEntry("case-studies-readme", title, "doc", cs_readme))
+
+    cs_synthesis = case_studies_dir / "SYNTHESIS.md"
+    if cs_synthesis.is_file():
+        title = _first_h1_title(cs_synthesis, fallback="Cross-case synthesis")
+        docs.append(DocEntry("case-studies-synthesis", title, "doc", cs_synthesis))
+
+    cs_template = case_studies_dir / "TEMPLATE.md"
+    if cs_template.is_file():
+        title = _first_h1_title(cs_template, fallback="Case Study Template")
+        docs.append(DocEntry("case-studies-template", title, "doc", cs_template))
+
     if case_studies_dir.is_dir():
         for child in sorted(case_studies_dir.iterdir(), key=lambda p: p.name.casefold()):
             # An OBSOLETE.md marker is this repo's own existing convention for a

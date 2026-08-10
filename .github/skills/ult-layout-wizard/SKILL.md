@@ -127,15 +127,21 @@ the one already-authenticated page load, with a close control returning to the n
 view. A fourth nav entry, **Guide & FAQ**, is present but disabled (`title="coming
 soon"`) — a reserved slot for a user-guide/FAQ doc that doesn't exist yet.
 
-- `PROTOCOL.md` and `README.md` render directly; **Case Studies** opens an index
-  listing all 9 `case-studies/*/CASE-STUDY.md` files (title taken from each file's
-  leading `# Case Study: ...` H1, falling back to the directory slug for the one file
-  that has no H1) — clicking an entry opens that case study the same way.
+- `PROTOCOL.md` and `README.md` render directly; **Case Studies** renders
+  `case-studies/README.md` itself — the real landing doc, not a client-built index —
+  so it's automatically current with whatever's published there. Every relative
+  Markdown link inside it (to an individual `case-studies/*/CASE-STUDY.md`, to
+  `SYNTHESIS.md`/`TEMPLATE.md`, or to a heading anchor in `PROTOCOL.md`/`README.md`)
+  becomes a real in-app navigation; a link to something outside the wizard's doc
+  corpus (e.g. `references/reproducibility-guide.md`) falls back to a real link at the
+  project's public GitHub URL, opened in a new tab so it never dead-ends the overlay.
+  Case-study titles come from each file's leading `# Case Study: ...` H1, falling back
+  to the directory slug for the one file that has no H1.
 - Markdown is converted with a small hand-rolled, stdlib-only renderer
-  (`wizard_markdown.py`) sized to what these docs actually use — headers, fenced code
-  blocks, lists, tables, inline formatting/links/images, blockquotes, and a bounded raw
-  HTML passthrough for README's centered hero image and badge row. Not a general
-  CommonMark implementation.
+  (`wizard_markdown.py`) sized to what these docs actually use — headers (with
+  GitHub-style anchor `id`s for `#fragment` links), fenced code blocks, lists, tables,
+  inline formatting/links/images, blockquotes, and a bounded raw HTML passthrough for
+  README's centered hero image and badge row. Not a general CommonMark implementation.
 - Docs are read from **the wizard's own install location**, not `<repo_root>` (the
   project being onboarded) — this is a generic tool that may run against any repo, but
   `PROTOCOL.md`/`README.md`/case studies are CEP's own docs. A future bare install

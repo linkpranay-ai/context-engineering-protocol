@@ -37,6 +37,55 @@ class TestListDocs(unittest.TestCase):
         docs = wd.list_docs(self.root)
         self.assertEqual([d.doc_id for d in docs], ["protocol"])
 
+    def test_case_studies_readme_synthesis_template_discovered_with_titles(self):
+        # These three are the Case Studies section's landing doc and its two
+        # supporting docs - reachable only via links inside the README, not
+        # their own top-nav buttons (see wizard_docs.list_docs's docstring).
+        cs_dir = self.root / "case-studies"
+        cs_dir.mkdir(parents=True)
+        (cs_dir / "README.md").write_text("# Case Studies\n\nbody", encoding="utf-8")
+        (cs_dir / "SYNTHESIS.md").write_text(
+            "# Cross-case synthesis\n\nbody", encoding="utf-8"
+        )
+        (cs_dir / "TEMPLATE.md").write_text(
+            "# Case Study Template\n\nbody", encoding="utf-8"
+        )
+        docs = wd.list_docs(self.root)
+        by_id = {d.doc_id: d for d in docs}
+        self.assertEqual(by_id["case-studies-readme"].title, "Case Studies")
+        self.assertEqual(by_id["case-studies-readme"].kind, "doc")
+        self.assertEqual(by_id["case-studies-synthesis"].title, "Cross-case synthesis")
+        self.assertEqual(by_id["case-studies-template"].title, "Case Study Template")
+        # Ordering: readme/synthesis/template come before any individual
+        # case-study-* entry.
+        ids = [d.doc_id for d in docs]
+        self.assertEqual(
+            ids,
+            ["case-studies-readme", "case-studies-synthesis", "case-studies-template"],
+        )
+
+    def test_case_studies_readme_falls_back_to_default_title_without_h1(self):
+        cs_dir = self.root / "case-studies"
+        cs_dir.mkdir(parents=True)
+        (cs_dir / "README.md").write_text("no heading here", encoding="utf-8")
+        docs = wd.list_docs(self.root)
+        self.assertEqual(docs[0].title, "Case Studies")
+
+    def test_case_studies_readme_synthesis_template_omitted_when_missing(self):
+        # A case-studies/ dir with only individual case studies (no README/
+        # SYNTHESIS/TEMPLATE) must not error or synthesize fake entries.
+        cs_dir = self.root / "case-studies" / "aaa-first"
+        cs_dir.mkdir(parents=True)
+        (cs_dir / "CASE-STUDY.md").write_text(
+            "# Case Study: Aaa First\n\nbody", encoding="utf-8"
+        )
+        docs = wd.list_docs(self.root)
+        ids = [d.doc_id for d in docs]
+        self.assertNotIn("case-studies-readme", ids)
+        self.assertNotIn("case-studies-synthesis", ids)
+        self.assertNotIn("case-studies-template", ids)
+        self.assertEqual(ids, ["case-study-aaa-first"])
+
     def test_case_studies_discovered_and_sorted(self):
         cs_dir = self.root / "case-studies"
         for slug, title in [("zzz-last", "Zzz Last"), ("aaa-first", "Aaa First")]:

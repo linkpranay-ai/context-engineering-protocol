@@ -276,3 +276,20 @@ same level `STATIC_ASSETS` already assumes for `wizard.css`/`wizard.js`. That
 assumption does not extend to `/api/docs-assets`'s `<rel_path>`, which is why it alone
 gets the full containment check above rather than inheriting the closed-set posture of
 its two sibling routes.
+
+**In-app link resolution (Case Studies landing doc).** `case-studies/README.md` is now
+one of the docs served by `GET /api/docs/<id>` (id `case-studies-readme`), alongside
+its two supporting docs (`case-studies-synthesis`, `case-studies-template`) — same
+closed-set scan, same trust level, nothing new there. What's new is that
+`_handle_api_doc_detail` also builds a `link_resolver` dict — every other doc's own
+`install_root()`-relative path mapped to its `doc_id` — and passes it into
+`wizard_markdown.render()` so a relative Markdown link inside the doc being rendered
+(e.g. `case-studies/README.md`'s link to `textual/CASE-STUDY.md`) can become an in-app
+navigation (`data-doc-id`, handled client-side by `wizard.js`) instead of a dead href.
+This adds no new surface: resolution is a pure in-memory dict lookup built from the
+same closed-set scan `/api/docs`/`/api/docs/<id>` already trust, never a filesystem
+access driven by the link text itself — a link that doesn't resolve (e.g.
+`references/reproducibility-guide.md`, deliberately outside the doc corpus) falls back
+to a real link at the project's own public GitHub URL rather than attempting any local
+lookup with it. No `wizard_containment` involvement, same reasoning as `/api/docs`
+above.

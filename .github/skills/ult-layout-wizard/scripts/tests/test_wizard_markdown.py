@@ -14,12 +14,32 @@ import wizard_markdown as wm  # noqa: E402
 
 class TestHeaders(unittest.TestCase):
     def test_h1_through_h3(self):
-        self.assertEqual(wm.render("# One"), "<h1>One</h1>")
-        self.assertEqual(wm.render("## Two"), "<h2>Two</h2>")
-        self.assertEqual(wm.render("### Three"), "<h3>Three</h3>")
+        # Every heading now carries a GitHub-style anchor id (see _slugify) -
+        # so in-app links to `#some-heading` (case-studies/README.md's links
+        # into PROTOCOL.md/README.md) have a real element to scroll to.
+        self.assertEqual(wm.render("# One"), '<h1 id="one">One</h1>')
+        self.assertEqual(wm.render("## Two"), '<h2 id="two">Two</h2>')
+        self.assertEqual(wm.render("### Three"), '<h3 id="three">Three</h3>')
 
     def test_header_strips_trailing_hashes(self):
-        self.assertEqual(wm.render("## Title ##"), "<h2>Title</h2>")
+        self.assertEqual(wm.render("## Title ##"), '<h2 id="title">Title</h2>')
+
+    def test_heading_anchor_slug_matches_real_repo_links(self):
+        # Grep-confirmed against this exact repo: case-studies/README.md
+        # links to `../PROTOCOL.md#7-trip-wire--institutional-memory-decision-
+        # ledger-piloting` for this exact heading text, and
+        # `../README.md#measured-impact` for "### Measured impact". The em
+        # dash sits between two spaces, and only the dash character is
+        # stripped (not either space) - that's what produces the double
+        # hyphen in "wire--institutional".
+        result = wm.render(
+            "## 7. Trip-wire — institutional memory, decision ledger (piloting)"
+        )
+        self.assertIn(
+            'id="7-trip-wire--institutional-memory-decision-ledger-piloting"',
+            result,
+        )
+        self.assertIn('id="measured-impact"', wm.render("### Measured impact"))
 
 
 class TestParagraphsAndInline(unittest.TestCase):
@@ -41,10 +61,70 @@ class TestParagraphsAndInline(unittest.TestCase):
         self.assertEqual(wm.render("`**not bold**`"), "<p><code>**not bold**</code></p>")
 
     def test_link(self):
+        # target="_blank" is deliberate: an absolute link left to navigate in
+        # the same tab would take a single-use /exchange URL with it - see
+        # _render_link's docstring, case 2.
         self.assertEqual(
             wm.render("[CEP](https://example.com)"),
-            '<p><a href="https://example.com">CEP</a></p>',
+            '<p><a href="https://example.com" target="_blank" rel="noopener">CEP</a></p>',
         )
+
+    def test_bare_anchor_link_untouched(self):
+        self.assertEqual(
+            wm.render("[jump](#section)"),
+            '<p><a href="#section">jump</a></p>',
+        )
+
+    def test_relative_link_resolves_via_link_resolver(self):
+        resolver = {"case-studies/textual/CASE-STUDY.md": "case-study-textual"}.get
+        result = wm.render(
+            "[Textual](textual/CASE-STUDY.md)",
+            doc_dir="case-studies",
+            link_resolver=resolver,
+        )
+        self.assertEqual(
+            result,
+            '<p><a href="#" data-doc-id="case-study-textual">Textual</a></p>',
+        )
+
+    def test_relative_link_with_fragment_carries_data_doc_fragment(self):
+        resolver = {"README.md": "readme"}.get
+        result = wm.render(
+            "[Impact](../README.md#measured-impact)",
+            doc_dir="case-studies",
+            link_resolver=resolver,
+        )
+        self.assertEqual(
+            result,
+            '<p><a href="#" data-doc-id="readme" data-doc-fragment="measured-impact">Impact</a></p>',
+        )
+
+    def test_relative_link_unresolved_falls_back_to_github(self):
+        # link_resolver returning None (path is a real repo file, just
+        # outside the wizard's doc corpus) still gets a real, working link -
+        # never a dead same-page href.
+        result = wm.render(
+            "[Guide](../references/reproducibility-guide.md)",
+            doc_dir="case-studies",
+            link_resolver=lambda _resolved: None,
+        )
+        self.assertEqual(
+            result,
+            '<p><a href="https://github.com/linkpranay-ai/context-engineering-protocol/'
+            'blob/main/references/reproducibility-guide.md" target="_blank" '
+            'rel="noopener">Guide</a></p>',
+        )
+
+    def test_relative_link_with_no_resolver_falls_back_to_github(self):
+        # link_resolver=None (the default, matching every pre-existing caller
+        # and test) behaves the same as a resolver that never matches.
+        result = wm.render("[Guide](references/reproducibility-guide.md)")
+        self.assertIn(
+            'href="https://github.com/linkpranay-ai/context-engineering-protocol/'
+            'blob/main/references/reproducibility-guide.md"',
+            result,
+        )
+        self.assertIn('target="_blank"', result)
 
     def test_raw_angle_brackets_escaped(self):
         self.assertEqual(wm.render("a <placeholder> here"), "<p>a &lt;placeholder&gt; here</p>")
@@ -130,7 +210,10 @@ class TestImages(unittest.TestCase):
             "[docs](https://example.com/docs)"
         )
         self.assertIn('<img src="https://example.com/badge.svg" alt="badge">', result)
-        self.assertIn('<a href="https://example.com/docs">docs</a>', result)
+        self.assertIn(
+            '<a href="https://example.com/docs" target="_blank" rel="noopener">docs</a>',
+            result,
+        )
 
 
 class TestRawHtmlBlocks(unittest.TestCase):
@@ -171,8 +254,8 @@ class TestRealDocFixture(unittest.TestCase):
         # convention - that stripping happens one layer up, in
         # wizard_docs._case_study_title(). The renderer just renders the H1
         # as written.
-        self.assertIn("<h1>Case Study: Example</h1>", result)
-        self.assertIn("<h2>Summary</h2>", result)
+        self.assertIn('<h1 id="case-study-example">Case Study: Example</h1>', result)
+        self.assertIn('<h2 id="summary">Summary</h2>', result)
         self.assertIn("<table>", result)
         self.assertIn("<code>graphify</code>", result)
 
