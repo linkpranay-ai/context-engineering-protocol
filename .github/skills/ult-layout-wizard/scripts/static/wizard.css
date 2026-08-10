@@ -109,16 +109,28 @@ header.topbar {
 }
 
 h1 {
-  margin: 0 0 0.2rem 0;
+  margin: 0;
   font-size: 1.25rem;
   font-weight: 800;
   color: #F7FAFF;
+  line-height: 1.2;
 }
 
+/* Small and single-line by design (not the full hero.svg tagline size) -
+   at typical laptop widths this keeps .topbar-brand's text block close to
+   the logo's own 32px height, so align-items:center on .topbar-brand lines
+   the logo up with the heading rather than with the mid-point of a tall
+   two-line stack. Ellipsis instead of wrapping so a long line never grows
+   that stack back to two lines; dropped entirely below 860px (see media
+   query) rather than fighting for space against the nav once it's tight. */
 .tagline {
-  margin: 0;
-  max-width: 62ch;
+  margin: 0.15rem 0 0 0;
+  font-size: 0.72rem;
   color: var(--cyan-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46ch;
 }
 
 .topbar-nav {
@@ -179,8 +191,12 @@ h1 {
 
 .page-subtitle {
   margin: 0;
-  max-width: 62ch;
   color: var(--muted);
+  /* No ch cap: every section below (banners, boxes, decisions, picker) is
+     now the same full width of #main-content (see main{}), so a narrower
+     prose column here would read as a stray inconsistency, not a deliberate
+     readability choice - it's one short paragraph, not a long-form block
+     that needs a capped line length. */
 }
 
 /* Docs overlay (UI design pass): replaces #main-content while open, rather
@@ -328,14 +344,34 @@ h1 {
   border-color: var(--cyan);
 }
 
+/* Single column, one consistent content width for every top-level section
+   (page-header, banners, #boxes, #decisions, #picker) - this used to be a
+   2fr/1fr grid that every direct child auto-placed into unless it opted out
+   with grid-column:1/-1. Some sections opted out and some didn't, which is
+   exactly why boxes/decisions/picker used to render at different widths
+   (2/3, full, 2/3) instead of lining up. A plain vertical stack has no such
+   trap: every child is automatically full width of this container, full
+   stop. max-width+margin:auto caps the reading/working width on very wide
+   monitors (this is a dashboard, not prose, but an uncapped 2500px-wide row
+   of cards still looks broken) while the dark topbar above keeps its own
+   independent edge-to-edge bleed. */
 main {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 1.5rem;
-  align-items: start;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
-#boxes {
+/* #boxes is a plain block, not a grid: .legend (a full-width intro line) and
+   .boxes-grid (the actual 4-up row) are kept as separate elements on purpose.
+   Putting the legend inside the grid as a grid-column:1/-1 item used to force
+   an extra implicit column (auto-fit only collapses tracks with NO item
+   touching them, and the spanning legend touched every track) - that phantom
+   column ate space the 4 real boxes should have stretched into, so the row
+   fell short of the page's other full-width sections instead of lining up
+   with them. Keeping the legend out of the grid entirely avoids the trap. */
+.boxes-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
@@ -367,8 +403,7 @@ main {
 }
 
 .legend {
-  grid-column: 1 / -1;
-  margin: 0 0 0.25rem 0;
+  margin: 0 0 0.75rem 0;
   font-size: 0.8rem;
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -425,7 +460,6 @@ main {
 }
 
 #decisions {
-  grid-column: 1 / -1;
   background: var(--panel-bg);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -675,12 +709,6 @@ main {
    that only ever shows one of these still reads as the same product. */
 
 #state-layout-broken,
-#state-needs-discover,
-#d20-banner {
-  grid-column: 1 / -1;
-}
-
-#state-layout-broken,
 #state-needs-discover {
   background: var(--panel-bg);
   border: 1px solid var(--border);
@@ -849,13 +877,27 @@ button.secondary:hover {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 720px) {
-  main {
-    grid-template-columns: 1fr;
+/* Drop the tagline before it ever has to wrap (see .tagline's own comment) -
+   at this width the nav row alone is already competing for space with the
+   brand block, so a subtitle is the first thing to go, not the last. */
+@media (max-width: 860px) {
+  .tagline {
+    display: none;
   }
+}
 
+@media (max-width: 720px) {
   header.topbar {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .topbar-nav {
+    width: 100%;
+  }
+
+  .topbar-nav-link {
+    font-size: 0.78rem;
+    padding: 0.35rem 0.6rem;
   }
 }

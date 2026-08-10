@@ -197,53 +197,55 @@
         <code>context-config.yaml</code>.
       </p>
 
-      <article class="box" id="box-what">
-        <h2>What</h2>
-        <p class="box-desc">Requirements / product-intent content for this task.</p>
-        <p class="box-meta"></p>
-        <div class="box-layer" data-layer="L2">
-          <h3>L2</h3>
-          <ul class="box-paths" data-layer="L2"></ul>
-        </div>
-        <div class="box-layer" data-layer="L1">
-          <h3>L1</h3>
-          <p class="layer-hint" data-layer="L1"></p>
-          <ul class="box-paths" data-layer="L1"></ul>
-        </div>
-        <!-- Guide-only "copy this prompt for your agent" card (wizard_stub_content),
-             filled in by renderStubCards() only when /api/status sends one for this
-             box - e.g. the resolved path exists but is still empty. -->
-        <div class="stub-card" style="display: none;"></div>
-      </article>
+      <div class="boxes-grid">
+        <article class="box" id="box-what">
+          <h2>What</h2>
+          <p class="box-desc">Requirements / product-intent content for this task.</p>
+          <p class="box-meta"></p>
+          <div class="box-layer" data-layer="L2">
+            <h3>L2</h3>
+            <ul class="box-paths" data-layer="L2"></ul>
+          </div>
+          <div class="box-layer" data-layer="L1">
+            <h3>L1</h3>
+            <p class="layer-hint" data-layer="L1"></p>
+            <ul class="box-paths" data-layer="L1"></ul>
+          </div>
+          <!-- Guide-only "copy this prompt for your agent" card (wizard_stub_content),
+               filled in by renderStubCards() only when /api/status sends one for this
+               box - e.g. the resolved path exists but is still empty. -->
+          <div class="stub-card" style="display: none;"></div>
+        </article>
 
-      <article class="box" id="box-how">
-        <h2>How</h2>
-        <p class="box-desc">Process / implementation-approach content for this task.</p>
-        <p class="box-meta"></p>
-        <div class="box-layer" data-layer="L2">
-          <h3>L2</h3>
-          <ul class="box-paths" data-layer="L2"></ul>
-        </div>
-        <div class="box-layer" data-layer="L1">
-          <h3>L1</h3>
-          <p class="layer-hint" data-layer="L1"></p>
-          <ul class="box-paths" data-layer="L1"></ul>
-        </div>
-        <div class="stub-card" style="display: none;"></div>
-      </article>
+        <article class="box" id="box-how">
+          <h2>How</h2>
+          <p class="box-desc">Process / implementation-approach content for this task.</p>
+          <p class="box-meta"></p>
+          <div class="box-layer" data-layer="L2">
+            <h3>L2</h3>
+            <ul class="box-paths" data-layer="L2"></ul>
+          </div>
+          <div class="box-layer" data-layer="L1">
+            <h3>L1</h3>
+            <p class="layer-hint" data-layer="L1"></p>
+            <ul class="box-paths" data-layer="L1"></ul>
+          </div>
+          <div class="stub-card" style="display: none;"></div>
+        </article>
 
-      <article class="box" id="box-guidelines">
-        <h2>Guidelines</h2>
-        <p class="box-desc">Compiled project guidelines resolved for this repo.</p>
-        <p class="box-meta"></p>
-        <div class="stub-card" style="display: none;"></div>
-      </article>
+        <article class="box" id="box-guidelines">
+          <h2>Guidelines</h2>
+          <p class="box-desc">Compiled project guidelines resolved for this repo.</p>
+          <p class="box-meta"></p>
+          <div class="stub-card" style="display: none;"></div>
+        </article>
 
-      <article class="box" id="box-tripwire">
-        <h2>Trip-wire</h2>
-        <p class="box-desc">Decision-ledger status: entries, cursors, rejected sources.</p>
-        <p class="box-meta"></p>
-      </article>
+        <article class="box" id="box-tripwire">
+          <h2>Trip-wire</h2>
+          <p class="box-desc">Decision-ledger status: entries, cursors, rejected sources.</p>
+          <p class="box-meta"></p>
+        </article>
+      </div>
     </section>
 
     <section id="decisions" aria-label="Layout decisions" style="display: none;">
