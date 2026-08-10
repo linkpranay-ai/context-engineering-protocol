@@ -85,6 +85,12 @@ _HTML_SRC_ATTR = re.compile(r'(\bsrc=")([^"]*)(")')
 # must NOT collapse runs of spaces first (see _slugify's docstring).
 _SLUG_STRIP = re.compile(r"[^a-z0-9 -]")
 
+# A `|` NOT preceded by a backslash - used to split table rows on real cell
+# boundaries while leaving an escaped `\|` (the standard GFM way to write a
+# literal pipe inside a cell, e.g. PROTOCOL.md's Constraints row: `` `compliance
+# \| convention \| scheduling` ``) as literal content. See _split_table_row.
+_UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+
 
 def _slugify(text: str) -> str:
     """Approximates GitHub's own heading-anchor algorithm well enough for
@@ -244,6 +250,26 @@ def _indent_level(leading_spaces: str) -> int:
     return len(leading_spaces) // 2
 
 
+def _split_table_row(line: str) -> List[str]:
+    """Splits one Markdown table row into cells on unescaped `|` only.
+
+    A naive `str.split("|")` also splits on a backslash-escaped `\\|` - the
+    standard GFM way to put a literal pipe inside a cell, e.g. PROTOCOL.md's
+    Constraints row: `` `constraint_class: compliance \\| convention \\|
+    scheduling` ``. Each escaped pipe there was being read as an extra cell
+    boundary, shifting every following cell one column to the right (visibly
+    wrong table rendering, caught via screenshot review). _UNESCAPED_PIPE
+    skips those; the trailing .replace() then turns the surviving `\\|` back
+    into a literal `|` for display.
+    """
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|") and not stripped.endswith("\\|"):
+        stripped = stripped[:-1]
+    return [cell.strip().replace("\\|", "|") for cell in _UNESCAPED_PIPE.split(stripped)]
+
+
 def _render_table(
     lines: List[str],
     start: int,
@@ -251,11 +277,11 @@ def _render_table(
     doc_dir: Optional[str] = None,
     link_resolver: Optional[Callable[[str], Optional[str]]] = None,
 ) -> Tuple[str, int]:
-    header_cells = [c.strip() for c in lines[start].strip().strip("|").split("|")]
+    header_cells = _split_table_row(lines[start])
     i = start + 2  # skip header + separator row
     rows: List[List[str]] = []
     while i < len(lines) and "|" in lines[i] and lines[i].strip():
-        rows.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
+        rows.append(_split_table_row(lines[i]))
         i += 1
 
     out = ['<table>', "<thead><tr>"]

@@ -191,6 +191,24 @@ class TestTables(unittest.TestCase):
         result = wm.render("| A |\n|---|\n| **bold** |")
         self.assertIn("<td><strong>bold</strong></td>", result)
 
+    def test_table_cell_with_escaped_pipe_does_not_split_column(self):
+        # Regression for PROTOCOL.md's Constraints row: a code span containing
+        # `\|`-escaped literal pipes (`constraint_class: compliance \| convention
+        # \| scheduling`) must render as ONE cell with real `|` characters, not
+        # get split into extra cells that shift every later column over.
+        result = wm.render(
+            "| A | B |\n"
+            "|---|---|\n"
+            "| `x \\| y \\| z` | second |"
+        )
+        self.assertIn("<td><code>x | y | z</code></td>", result)
+        self.assertIn("<td>second</td>", result)
+        # Exactly one header row (thead) + one body row (tbody) - if the
+        # escaped pipes were still splitting cells, the body row would carry
+        # extra <td>s instead of a second <tr>, so this also guards the bug.
+        self.assertEqual(result.count("<tr>"), 2)
+        self.assertEqual(result.count("<td>"), 2)
+
 
 class TestImages(unittest.TestCase):
     def test_image_syntax(self):
