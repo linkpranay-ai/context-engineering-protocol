@@ -80,6 +80,17 @@ def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
     case_studies_dir = root / "case-studies"
     if case_studies_dir.is_dir():
         for child in sorted(case_studies_dir.iterdir(), key=lambda p: p.name.casefold()):
+            # An OBSOLETE.md marker is this repo's own existing convention for a
+            # case-study directory that's kept on disk (for reference during some
+            # investigation) but deliberately not published - see
+            # case-studies/cep-retrofit-mattpocock-skills-copilot/OBSOLETE.md,
+            # which is itself .gitignore'd for the same reason. Honoring that
+            # marker here (rather than hardcoding a directory-name exclusion)
+            # means any future directory marked the same way is skipped too,
+            # with the exclusion documented right next to the content it
+            # excludes instead of hidden in this scan.
+            if (child / "OBSOLETE.md").is_file():
+                continue
             cs_path = child / "CASE-STUDY.md"
             if not cs_path.is_file():
                 continue

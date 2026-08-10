@@ -57,6 +57,16 @@
 // page to send a browser to). Docs this install doesn't have (e.g. a copy of this
 // skill installed standalone, without PROTOCOL.md/case-studies/ alongside it) simply
 // disable their nav button rather than erroring - see setDocsNavAvailability.
+//
+// Revised: the top bar itself now carries CEP's shared project identity (logo, full
+// name, tagline), not this tool's own title - "Wizard" is just another nav button
+// next to Protocol/README/Case Studies, and this tool's title+guide copy moved down
+// into #main-content's own .page-header (see index.html). navigateDocs()/
+// renderDocView()/docsBack() replace the old openDoc()/openCaseStudiesIndex() pair,
+// adding a small in-overlay view history (docsBackStack) so a Back button can step
+// back out of a case study to the index, or out of any doc to whatever was open
+// before it - standing in for real browser history, which a single-use /exchange URL
+// can't use either.
 
 (function () {
   "use strict";
@@ -589,6 +599,16 @@
 
   var docsList = [];
 
+  // One entry per view the overlay can show: {kind: "doc", id} for a single
+  // rendered doc, or {kind: "case-studies-index"} for the index list.
+  // docsCurrentView is whatever's on screen right now (null when the overlay
+  // is closed); docsBackStack holds every view navigated away from this
+  // overlay session, in visiting order, so Back can step through them one at
+  // a time - a small in-page history, standing in for the real browser
+  // history a single-use /exchange URL can't use (see the module docstring).
+  var docsCurrentView = null;
+  var docsBackStack = [];
+
   function setDocsNavAvailability() {
     var byId = {};
     docsList.forEach(function (d) {
@@ -619,6 +639,44 @@
     });
   }
 
+  // Highlights whichever top-bar nav button matches what's on screen right
+  // now: Wizard when the overlay is closed, the matching doc button when a
+  // top-level doc is open, Case Studies for both the index and any case
+  // study opened from it (there's no separate per-case-study nav button to
+  // light up instead).
+  function updateActiveNav() {
+    var activeId = "nav-wizard";
+    if (docsCurrentView) {
+      if (docsCurrentView.kind === "doc") {
+        if (docsCurrentView.id === "protocol") {
+          activeId = "nav-doc-protocol";
+        } else if (docsCurrentView.id === "readme") {
+          activeId = "nav-doc-readme";
+        } else {
+          activeId = "nav-doc-case-studies";
+        }
+      } else if (docsCurrentView.kind === "case-studies-index") {
+        activeId = "nav-doc-case-studies";
+      }
+    }
+    ["nav-wizard", "nav-doc-protocol", "nav-doc-readme", "nav-doc-case-studies"].forEach(
+      function (id) {
+        document
+          .getElementById(id)
+          .classList.toggle("topbar-nav-link-active", id === activeId);
+      }
+    );
+  }
+
+  function docsOverlayIsOpen() {
+    return document.getElementById("docs-overlay").style.display !== "none";
+  }
+
+  function updateDocsBackButton() {
+    document.getElementById("docs-overlay-back").style.display =
+      docsBackStack.length > 0 ? "" : "none";
+  }
+
   function showDocsOverlay(title) {
     document.getElementById("docs-overlay-title").textContent = title;
     document.getElementById("docs-overlay").style.display = "";
@@ -628,19 +686,30 @@
   function closeDocsOverlay() {
     document.getElementById("docs-overlay").style.display = "none";
     document.getElementById("main-content").style.display = "";
+    docsCurrentView = null;
+    docsBackStack = [];
+    updateActiveNav();
   }
 
-  function openDoc(id) {
-    fetchJson("/api/docs/" + encodeURIComponent(id)).then(function (result) {
-      if (!result.ok) {
-        return;
-      }
-      showDocsOverlay(result.body.title);
-      document.getElementById("docs-overlay-body").innerHTML = result.body.html;
-    });
-  }
-
-  function openCaseStudiesIndex() {
+  // Renders `view` into the overlay without touching docsBackStack - the
+  // single place that actually draws a view, used both for forward
+  // navigation (after navigateDocs pushes the old view) and for Back (which
+  // pops instead of pushing).
+  function renderDocView(view) {
+    docsCurrentView = view;
+    updateDocsBackButton();
+    updateActiveNav();
+    if (view.kind === "doc") {
+      fetchJson("/api/docs/" + encodeURIComponent(view.id)).then(function (result) {
+        if (!result.ok) {
+          return;
+        }
+        showDocsOverlay(result.body.title);
+        document.getElementById("docs-overlay-body").innerHTML = result.body.html;
+      });
+      return;
+    }
+    // kind === "case-studies-index"
     showDocsOverlay("Case Studies");
     var body = document.getElementById("docs-overlay-body");
     body.innerHTML = "";
@@ -652,25 +721,53 @@
       .forEach(function (d) {
         var button = el("button", { type: "button", text: d.title });
         button.addEventListener("click", function () {
-          openDoc(d.id);
+          navigateDocs({ kind: "doc", id: d.id });
         });
         list.appendChild(el("li", null, [button]));
       });
     body.appendChild(list);
   }
 
+  // Forward navigation: if the overlay is already open, the view it's
+  // currently showing goes onto the back stack first, so Back can return to
+  // it - whether this navigation came from the top bar (e.g. clicking
+  // README while a case study is open) or from inside the overlay itself
+  // (e.g. clicking a case study from the index).
+  function navigateDocs(view) {
+    if (docsOverlayIsOpen() && docsCurrentView) {
+      docsBackStack.push(docsCurrentView);
+    }
+    renderDocView(view);
+  }
+
+  function docsBack() {
+    if (docsBackStack.length === 0) {
+      closeDocsOverlay();
+      return;
+    }
+    renderDocView(docsBackStack.pop());
+    updateDocsBackButton();
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     loadState();
     loadDocsNav();
+    updateActiveNav();
 
     document.getElementById("nav-doc-protocol").addEventListener("click", function () {
-      openDoc("protocol");
+      navigateDocs({ kind: "doc", id: "protocol" });
     });
     document.getElementById("nav-doc-readme").addEventListener("click", function () {
-      openDoc("readme");
+      navigateDocs({ kind: "doc", id: "readme" });
     });
     document.getElementById("nav-doc-case-studies").addEventListener("click", function () {
-      openCaseStudiesIndex();
+      navigateDocs({ kind: "case-studies-index" });
+    });
+    document.getElementById("nav-wizard").addEventListener("click", function () {
+      closeDocsOverlay();
+    });
+    document.getElementById("docs-overlay-back").addEventListener("click", function () {
+      docsBack();
     });
     document.getElementById("docs-overlay-close").addEventListener("click", function () {
       closeDocsOverlay();

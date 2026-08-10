@@ -65,6 +65,27 @@ class TestListDocs(unittest.TestCase):
         empty_dir.mkdir(parents=True)
         self.assertEqual(wd.list_docs(self.root), [])
 
+    def test_directory_with_obsolete_marker_is_skipped(self):
+        # Mirrors case-studies/cep-retrofit-mattpocock-skills-copilot/ in this
+        # repo: a real CASE-STUDY.md sitting next to an OBSOLETE.md sentinel
+        # must not appear in the docs list, regardless of content quality.
+        obsolete_dir = self.root / "case-studies" / "cep-retrofit-something-copilot"
+        obsolete_dir.mkdir(parents=True)
+        (obsolete_dir / "CASE-STUDY.md").write_text(
+            "# Case Study: Something\n\nbody", encoding="utf-8"
+        )
+        (obsolete_dir / "OBSOLETE.md").write_text(
+            "# OBSOLETE - not part of this repo, do not publish\n", encoding="utf-8"
+        )
+        published_dir = self.root / "case-studies" / "aaa-still-published"
+        published_dir.mkdir(parents=True)
+        (published_dir / "CASE-STUDY.md").write_text(
+            "# Case Study: Still Published\n\nbody", encoding="utf-8"
+        )
+        docs = wd.list_docs(self.root)
+        case_studies = [d for d in docs if d.kind == "case-study"]
+        self.assertEqual([d.title for d in case_studies], ["Still Published"])
+
     def test_find_doc_returns_none_for_unknown_id(self):
         self.assertIsNone(wd.find_doc("nonexistent", self.root))
 

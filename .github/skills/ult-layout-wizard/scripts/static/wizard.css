@@ -113,7 +113,7 @@ h1 {
   color: #F7FAFF;
 }
 
-.subtitle {
+.tagline {
   margin: 0;
   max-width: 62ch;
   color: var(--cyan-light);
@@ -146,6 +146,41 @@ h1 {
   opacity: 0.4;
 }
 
+/* Marks whichever nav entry matches the screen currently showing (the
+   Wizard screen itself, or an open doc/overlay) - toggled in wizard.js.
+   Solid orange rather than the translucent hover tint so "where am I" reads
+   at a glance instead of looking like a hover state that got stuck. */
+.topbar-nav-link-active {
+  background: var(--orange);
+  border-color: var(--orange-bright);
+}
+
+.topbar-nav-link-active:hover:not(:disabled) {
+  background: var(--orange-bright);
+}
+
+/* This tool's own title + guide copy (D24 UI design pass, revised) - moved
+   down from the top bar, which now carries CEP's shared project identity
+   instead (see index.html's comment on <main>). Plain light-page colors,
+   unlike the old .subtitle/h1 pair this replaces which were styled for the
+   topbar's dark navy background. */
+.page-header {
+  margin-bottom: 1.1rem;
+}
+
+.page-title {
+  margin: 0 0 0.2rem 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.page-subtitle {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--muted);
+}
+
 /* Docs overlay (UI design pass): replaces #main-content while open, rather
    than a real page navigation - the wizard's /exchange URLs are single-use,
    so there is no second page to navigate to (see wizard.js's openDoc()). */
@@ -165,6 +200,17 @@ h1 {
   margin-bottom: 0.85rem;
   padding-bottom: 0.6rem;
   border-bottom: 1px solid var(--border);
+}
+
+/* Groups Back + title as one flex item so .docs-overlay-bar keeps its
+   original two-item space-between layout (this group at the start, Close at
+   the end) - Back's own display is toggled in wizard.js, hidden whenever
+   there's nowhere to go back to (see docsBackStack). */
+.docs-overlay-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
 }
 
 #docs-overlay-title {

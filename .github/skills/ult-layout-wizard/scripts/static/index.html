@@ -12,6 +12,14 @@
   <link rel="stylesheet" href="/static/wizard.css">
 </head>
 <body>
+  <!-- Top bar (D24 UI design pass, revised): carries CEP's own project
+       identity - logo, full name, tagline (text verbatim from
+       assets/readme/hero.svg's "Context Engineering Protocol" lockup, same
+       verbatim-sourcing discipline the rest of this pass already uses for
+       color) - not this specific tool's title. ult-layout-wizard's own name
+       and guide copy live down in #main-content's page header instead (see
+       .page-header below); the top bar is shared chrome, the same on every
+       screen this install could show, tool-specific or not. -->
   <header class="topbar">
     <div class="topbar-brand">
       <!-- Compact CEP monogram badge - a square icon (not the full hero.svg
@@ -32,11 +40,10 @@
         </defs>
       </svg>
       <div>
-        <h1>ult-layout-wizard</h1>
-        <p class="subtitle">
-          Resolve each pending layout decision below, then Apply to commit them into
-          <code>context-config.yaml</code> via <code>ult-repo-layout</code>'s own
-          <code>confirm</code> step &mdash; this wizard never writes that file directly.
+        <h1>Context Engineering Protocol</h1>
+        <p class="tagline">
+          Human-approved, source-attributed context package before an AI agent writes
+          a line of code.
         </p>
       </div>
     </div>
@@ -44,28 +51,51 @@
     <!-- Docs nav (UI design pass): populated from GET /api/docs by
          loadDocsNav() in wizard.js. Protocol/README are fixed entries; Case
          Studies opens an index of every case-studies/*/CASE-STUDY.md found.
-         Guide & FAQ has no content yet - disabled until it's written. -->
+         Guide & FAQ has no content yet - disabled until it's written. Wizard
+         is this tool's own screen - a peer nav entry, not a special corner
+         control, so leaving docs and coming back both work the same way
+         (click a nav button) instead of relying on the overlay's own Close. -->
     <nav class="topbar-nav" aria-label="CEP documentation">
       <button type="button" class="topbar-nav-link" id="nav-doc-protocol">Protocol</button>
       <button type="button" class="topbar-nav-link" id="nav-doc-readme">README</button>
       <button type="button" class="topbar-nav-link" id="nav-doc-case-studies">Case Studies</button>
       <button type="button" class="topbar-nav-link" disabled title="Not written yet">Guide &amp; FAQ</button>
+      <button type="button" class="topbar-nav-link" id="nav-wizard">Wizard</button>
     </nav>
   </header>
 
   <!-- Docs overlay (UI design pass): a full-width panel that replaces the
-       main view while open, populated by wizard.js's openDoc()/renderCaseStudiesIndex().
+       main view while open, populated by wizard.js's navigateDocs()/renderDocView().
        Client-side only, deliberately - the wizard's /exchange URLs are
-       single-use, so this can never be a real page navigation. -->
+       single-use, so this can never be a real page navigation. Back steps
+       one level back through whatever was visited this overlay session
+       (e.g. Case Studies index -> a case study -> Back returns to the
+       index); Close always exits to the Wizard screen regardless of depth. -->
   <div id="docs-overlay" class="docs-overlay" style="display: none;" aria-label="Documentation viewer">
     <div class="docs-overlay-bar">
-      <h2 id="docs-overlay-title"></h2>
+      <div class="docs-overlay-bar-left">
+        <button type="button" id="docs-overlay-back" class="secondary" style="display: none;">&larr; Back</button>
+        <h2 id="docs-overlay-title"></h2>
+      </div>
       <button type="button" id="docs-overlay-close" class="secondary">&times; Close</button>
     </div>
     <div id="docs-overlay-body" class="docs-overlay-body"></div>
   </div>
 
   <main id="main-content">
+    <!-- This tool's own title + guide copy - moved down from the top bar
+         (D24 UI design pass, revised), which now carries CEP's shared
+         project identity instead. h2, not h1: "Context Engineering
+         Protocol" above is the page's one h1. -->
+    <div class="page-header">
+      <h2 class="page-title">ult-layout-wizard</h2>
+      <p class="page-subtitle">
+        Resolve each pending layout decision below, then Apply to commit them into
+        <code>context-config.yaml</code> via <code>ult-repo-layout</code>'s own
+        <code>confirm</code> step &mdash; this wizard never writes that file directly.
+      </p>
+    </div>
+
     <!-- Onboarding state router (D24 §18.14 section A). wizard.js's loadState()
          calls GET /api/state before anything else and shows exactly one of the
          sections below (state-layout-broken, state-needs-discover, or the
