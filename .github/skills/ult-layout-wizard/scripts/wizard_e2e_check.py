@@ -86,6 +86,25 @@ def stamp_minimal_install(repo_root: Path) -> None:
         SELF_REPO_LAYOUT_SKILL / "scripts" / "discover_layers.py",
         scripts_dir / "discover_layers.py",
     )
+    # discover_layers.py imports this (extracted alongside confirm_layers.py's shared
+    # vocabulary, D24 v5 SS18 Phase 1 prep) - without it, discover_layers fails to
+    # import on any *external* target repo (it never fails on this repo itself, since
+    # here the two files already sit side by side), which crashes the request handler
+    # mid-response and surfaces client-side as http.client.RemoteDisconnected, not as
+    # any obvious import error. Keep this copy in lockstep with
+    # test_wizard_server.py's _make_valid_target_repo fixture, which this function's
+    # own docstring already promises to mirror.
+    _copy_if_distinct(
+        SELF_REPO_LAYOUT_SKILL / "scripts" / "layout_decision_grammar.py",
+        scripts_dir / "layout_decision_grammar.py",
+    )
+    # wizard_layout_source.LayoutSource's module import also reaches for
+    # confirm_layers.py directly (not just discover_layers.py) - same failure mode as
+    # the layout_decision_grammar.py gap above if it's missing on the target repo.
+    _copy_if_distinct(
+        SELF_REPO_LAYOUT_SKILL / "scripts" / "confirm_layers.py",
+        scripts_dir / "confirm_layers.py",
+    )
     (repo_root / ".github" / "skills" / "ult-context-generate").mkdir(
         parents=True, exist_ok=True
     )
