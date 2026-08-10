@@ -101,8 +101,10 @@ header.topbar {
 }
 
 .topbar-logo {
+  /* Real CEP ribbon wordmark (see index.html's comment) - natural aspect
+     ~2.51:1, so this is a wide box, not the old 32x32 square. */
   flex-shrink: 0;
-  width: 32px;
+  width: 80px;
   height: 32px;
 }
 
