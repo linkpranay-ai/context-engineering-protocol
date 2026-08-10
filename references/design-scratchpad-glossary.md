@@ -38,7 +38,7 @@ level of detail the citing file itself already implies.
 | D21 | Workspace-root consolidation — the `layout.workspace_root` config key, scaffold-not-copy, four-bucket layout. See §16. |
 | D22 | Multi-root What-L2 — a deferred follow-on, not yet implemented. |
 | D23 | Layer-path discovery for brownfield adoption — the `discover`/`confirm-layers` phases. See §17. |
-| D24 | Browser onboarding wizard — a local, user-launched, on-demand status/setup tool (`ult-layout-wizard`) that reads already-resolved `ult-repo-layout` state through labeled boxes and a directory picker. Phase 0 (this release) is read-only. See §18. |
+| D24 | Browser onboarding wizard — a local, user-launched, on-demand status/setup tool (`ult-layout-wizard`) that reads already-resolved `ult-repo-layout` state through labeled boxes and a directory picker, with a gated write path (stage/apply/discover) for committing layout decisions. See §18. |
 
 ## Sections (§14–§18)
 
