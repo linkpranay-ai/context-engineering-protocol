@@ -11,7 +11,7 @@ citation makes sense without the source document.
 Nothing here reproduces the scratchpad's actual content — each entry is the one-line gist, same
 level of detail the citing file itself already implies.
 
-## Decisions (D1–D23)
+## Decisions (D1–D24)
 
 | ID | What it decided |
 | --- | --- |
@@ -38,8 +38,9 @@ level of detail the citing file itself already implies.
 | D21 | Workspace-root consolidation — the `layout.workspace_root` config key, scaffold-not-copy, four-bucket layout. See §16. |
 | D22 | Multi-root What-L2 — a deferred follow-on, not yet implemented. |
 | D23 | Layer-path discovery for brownfield adoption — the `discover`/`confirm-layers` phases. See §17. |
+| D24 | Browser onboarding wizard — a local, user-launched, on-demand status/setup tool (`ult-layout-wizard`) that reads already-resolved `ult-repo-layout` state through labeled boxes and a directory picker. Phase 0 (this release) is read-only. See §18. |
 
-## Sections (§14–§17)
+## Sections (§14–§18)
 
 | Section | Title | Notable subsections cited elsewhere |
 | --- | --- | --- |
@@ -47,6 +48,7 @@ level of detail the citing file itself already implies.
 | §15 | Project layout and path-dependency configuration (D20) | §15.2 slot registry scope; §15.3 `.layout-slots.yaml` marker format; §15.5 path resolution algorithm; §15.6 `layout.on_missing_write_path`; §15.7 `ult-repo-layout` init/reconcile/discover modes |
 | §16 | Workspace-root consolidation (D21) | §16.2 `layout.workspace_root` config key and resolution precedence; §16.4 slot-default re-rooting; §16.5 What-L2 redefinition (corpus root = workspace root); §16.6 scaffold-not-copy; §16.7 SDLC-directory remapping and `what_l2.include_roots`; §16.8 `layout-slots-registry.yaml` |
 | §17 | Layer-path discovery for brownfield adoption (D23) | §17.1 why a parallel mechanism, not a slot fold-in; §17.2 the `discover` layer-discovery phase; §17.3 the `context-layout-discovery.md` artifact; §17.4 per-layer discovery heuristics; §17.5 `confirm-layers` commit step; §17.6 drift detection |
+| §18 | Browser onboarding wizard (D24) | §18.1 the four labeled boxes (What/How/Guidelines/Trip-wire) and journeys converging on them; §18.2 thin local server, not hosted/persistent, ROADMAP carve-out; §18.2b path-containment and write-path security model; §18.3 two-source read model (marker-derived slots + layer keys), fresh-per-request; §18.4 what's ported vs. dropped from the internal `ult-scaffold-repo` source; §18.6 content-generation handoff modes (agent-writes-in-place / paste-back); §18.7 server-rendered picker, no drag-and-drop; §18.9 open questions closed (Q-a naming, Q-f front-door stance, Q-g Radisys-scrub gate); §18.10 phased rollout and Phase 0 exit criteria |
 
 `ult-repo-layout/SKILL.md`'s own "Path resolution algorithm (§15.5 + §16.2)" section is this repo's
 real implementation of the two rows above with matching numbers — that heading is the actual

@@ -53,6 +53,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import validate_layout as vl  # noqa: E402
+from layout_decision_grammar import (  # noqa: E402
+    COLLISION_TITLE,
+    HOW_L1_TITLE,
+    HOW_L2_TITLE,
+    TITLE_TO_BASE_KEY,
+    WHAT_L1_TITLE,
+    WHAT_L2_TITLE,
+)
 
 # ---------------------------------------------------------------------------
 # §17.4 constants
@@ -104,23 +112,12 @@ MEDIUM_CONFIDENCE_FILE_FLOOR = 3
 # qualifies regardless of file count) or a genuinely well-populated one.
 MIN_DOC_COUNT_FOR_UNNAMED_MATCH = 2
 
-# Section titles - named constants so confirm_layers.py can import them
-# rather than duplicating the literal strings.
-WHAT_L2_TITLE = "What-L2 - project's own requirements/spec docs"
-HOW_L2_TITLE = "How-L2 - this project's own compiled conventions"
-WHAT_L1_TITLE = "What-L1 - external reference material (standards/specs this project didn't author)"
-HOW_L1_TITLE = "How-L1 - org-wide process standards"
-COLLISION_TITLE = "Cross-layer path collisions (S30)"
-
-# Maps each primary layer section's title to its dotted context-config.yaml
-# base key - confirm_layers.py uses this to resolve a section's decision
-# fields to config keys without a second lookup table.
-TITLE_TO_BASE_KEY = {
-    WHAT_L2_TITLE: "layers.what_l2",
-    HOW_L2_TITLE: "how_dimension.how_l2",
-    WHAT_L1_TITLE: "layers.what_l1",
-    HOW_L1_TITLE: "how_dimension.how_l1",
-}
+# Section titles and TITLE_TO_BASE_KEY moved to layout_decision_grammar.py
+# (D24 Phase 1, factored out so ult-layout-wizard can import the same
+# vocabulary without reaching into this module) - imported above, re-exported
+# under these same names here so every existing `dl.WHAT_L2_TITLE`-style
+# reference (this module's own code below, confirm_layers.py, and the test
+# suites) keeps working unchanged.
 
 
 # ---------------------------------------------------------------------------

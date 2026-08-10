@@ -27,8 +27,14 @@ jobs:
       - name: Run ult-cep-retrofit test suite
         run: python -m unittest discover -s .github/skills/ult-cep-retrofit/scripts/tests -p "test_*.py" -v
 
+      - name: Run ult-layout-wizard test suite
+        run: python -m unittest discover -s .github/skills/ult-layout-wizard/scripts/tests -p "test_*.py" -v
+
       - name: Check skill eval-trigger accuracy
         run: python catalog/check_eval_triggers.py
+
+      - name: Check ult-layout-wizard for un-scrubbed Radisys/telecom references (D24 §18.9 Q-g)
+        run: python catalog/check_radisys_scrub.py
 
       - name: Check NOTICE is up to date with adapted_from frontmatter
         run: python catalog/generate_notice.py --check
@@ -38,3 +44,69 @@ jobs:
 
       - name: Check Claude Code plugin package is up to date
         run: python catalog/export_claude_plugin.py --check
+
+  test-windows:
+    # First windows-latest leg in this repo's CI history (D24 §18.2b / Risk R1).
+    # Scoped to ult-layout-wizard only, not a full-matrix duplication of the
+    # ubuntu-latest job above: os.path.isjunction()-adjacent reparse-tag inspection
+    # (wizard_containment.py) is a genuinely Windows-only code path, and this is the
+    # first point in the repo where that stops being theoretical. Every other skill
+    # suite and catalog/ check is platform-independent and stays ubuntu-only.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Run ult-layout-wizard test suite (Windows)
+        run: python -m unittest discover -s .github/skills/ult-layout-wizard/scripts/tests -p "test_*.py" -v
+
+  wizard-e2e:
+    # D24 §18.10 exit criterion 3: "at least two real, named eval cases against real
+    # external repos" plus this repo as a third in-house sanity case. Each of the
+    # three target repos gets a minimal, CI-scratch-only ult-repo-layout install
+    # stamped in first (wizard_e2e_check.py's own docstring explains why - preflight
+    # refuses to start against an uninitialized repo, this one included) and is then
+    # driven over real HTTP via stdlib urllib.request - no browser, matching this
+    # project's stdlib-only posture. The two external repos are pinned to a fixed SHA
+    # (updated deliberately, not by drift) so this job fails on the wizard's own
+    # behavior changing, not on an upstream repo's unrelated new commit landing
+    # underneath it (Risk R2). Expect near-empty What/How boxes and
+    # unavailable Guidelines/Trip-wire for both external repos - neither was written
+    # with CEP in mind, so that is the correct result being validated here, not a
+    # failure (Risk R6) - see this job's own step output for the actual per-repo
+    # numbers each run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Run wizard against context-engineering-oss itself (in-house sanity case)
+        run: |
+          python .github/skills/ult-layout-wizard/scripts/wizard_e2e_check.py \
+            . --label "context-engineering-oss (self)" --stamp-minimal-install
+
+      - name: Clone mattpocock/skills (pinned SHA)
+        run: |
+          git clone --quiet https://github.com/mattpocock/skills.git /tmp/ext-mattpocock-skills
+          git -C /tmp/ext-mattpocock-skills checkout --quiet 84fdeffd12f2ee307994d1eb6feb48173b6e0502
+
+      - name: Run wizard against mattpocock/skills (real external repo, case 1)
+        run: |
+          python .github/skills/ult-layout-wizard/scripts/wizard_e2e_check.py \
+            /tmp/ext-mattpocock-skills --label "mattpocock/skills (external)" --stamp-minimal-install
+
+      - name: Clone obra/superpowers (pinned SHA)
+        run: |
+          git clone --quiet https://github.com/obra/superpowers.git /tmp/ext-obra-superpowers
+          git -C /tmp/ext-obra-superpowers checkout --quiet 44c9b2d6e889982ac18c27d05a19fefe335194e1
+
+      - name: Run wizard against obra/superpowers (real external repo, case 2)
+        run: |
+          python .github/skills/ult-layout-wizard/scripts/wizard_e2e_check.py \
+            /tmp/ext-obra-superpowers --label "obra/superpowers (external)" --stamp-minimal-install

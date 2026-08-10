@@ -239,3 +239,57 @@ same boundary for the first time, they don't widen it. Anyone who could already 
 `/api/status` inside this session could already read `context-config.yaml` directly off
 disk; the write path lets that same person write it through a validated, atomic,
 hash-checked path instead of hand-editing YAML, nothing more.
+
+## 8. Docs viewer read routes (D24 UI design pass)
+
+Three new `GET` routes serve CEP's own project docs (`PROTOCOL.md`, `README.md`,
+`case-studies/*/CASE-STUDY.md`) into the in-app docs overlay — all still session-gated
+(`_require_session()`), all still read-only, but the last one has a materially
+different trust model from the other two:
+
+- **`GET /api/docs`, `GET /api/docs/<id>`** — closed-set by construction, the same
+  posture `STATIC_ASSETS` already uses for `wizard.css`/`wizard.js` (§5 is about paths
+  resolved from client input; these routes have none). `<id>` is never a path — it's a
+  dict-lookup key against a list `wizard_docs.list_docs()` builds itself by scanning
+  `wizard_docs.install_root()`. Any `<id>` not already in that scan is a plain 404, not
+  a filesystem lookup gone wrong. No `wizard_containment` call is needed or made here,
+  same reasoning `wizard_docs.py`'s own module docstring gives for why it's unlike
+  `wizard_picker.py`.
+- **`GET /api/docs-assets/<rel_path>`** — the one exception. A rendered doc can
+  reference its own relative images (`README.md`'s hero SVG, resolved by
+  `wizard_markdown.render(..., asset_prefix=...)` into a URL under this route — see that
+  module's docstring), and the browser then requests whatever `src` the renderer
+  emitted — so `<rel_path>` genuinely is client-supplied, shaped exactly like
+  `wizard_picker.py`'s `rel_path`. It gets the same treatment: `unquote()`'d, then
+  `wizard_containment.check_containment(wizard_docs.install_root(), decoded)` — full
+  symlink/junction/reparse-tag walking, not string-prefix matching, identical machinery
+  to §5. **The affirmed root is `wizard_docs.install_root()` (where this skill is
+  installed), not `<repo_root>`** (the project being onboarded) — a different root than
+  every other containment check in this file, because these are CEP's own docs, not the
+  target repo's. A `ContainmentError` and a missing file both 404 identically, matching
+  this file's running theme of non-distinguishing failure (§3.2, §5).
+
+Trust model note: the Markdown/HTML *content* itself is never sanitized against
+injection (see `wizard_markdown.py`'s module docstring) — it's rendered on the
+assumption that `PROTOCOL.md`/`README.md`/case-study files are repo-controlled, the
+same level `STATIC_ASSETS` already assumes for `wizard.css`/`wizard.js`. That
+assumption does not extend to `/api/docs-assets`'s `<rel_path>`, which is why it alone
+gets the full containment check above rather than inheriting the closed-set posture of
+its two sibling routes.
+
+**In-app link resolution (Case Studies landing doc).** `case-studies/README.md` is now
+one of the docs served by `GET /api/docs/<id>` (id `case-studies-readme`), alongside
+its two supporting docs (`case-studies-synthesis`, `case-studies-template`) — same
+closed-set scan, same trust level, nothing new there. What's new is that
+`_handle_api_doc_detail` also builds a `link_resolver` dict — every other doc's own
+`install_root()`-relative path mapped to its `doc_id` — and passes it into
+`wizard_markdown.render()` so a relative Markdown link inside the doc being rendered
+(e.g. `case-studies/README.md`'s link to `textual/CASE-STUDY.md`) can become an in-app
+navigation (`data-doc-id`, handled client-side by `wizard.js`) instead of a dead href.
+This adds no new surface: resolution is a pure in-memory dict lookup built from the
+same closed-set scan `/api/docs`/`/api/docs/<id>` already trust, never a filesystem
+access driven by the link text itself — a link that doesn't resolve (e.g.
+`references/reproducibility-guide.md`, deliberately outside the doc corpus) falls back
+to a real link at the project's own public GitHub URL rather than attempting any local
+lookup with it. No `wizard_containment` involvement, same reasoning as `/api/docs`
+above.

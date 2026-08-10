@@ -22,23 +22,28 @@ every resolved field, or none of them (atomicity - second adversarial
 review, M3).
 """
 import argparse
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import discover_layers as dl
 import validate_layout as vl
-
-FIELD_LINE_RE = re.compile(
-    r"^(decision|enable|include_roots_decision|exclude_decision|collision_decision):\s*(.*)$"
+from layout_decision_grammar import (
+    CONFIRMED_STAMP_RE,
+    FIELD_LINE_RE,
+    PLACEHOLDER_RE,
+    TITLE_TO_BASE_KEY,
+    parse_comment_clauses,
+    parse_dotted_path,
 )
-# Matched against a Field's already-`#`-stripped .comment text, not the raw
-# line - parse_artifact() splits off everything after the first `#` before
-# a comment ever reaches here.
-CONFIRMED_STAMP_RE = re.compile(r"^CONFIRMED\s+(\S+)\s*$")
-PLACEHOLDER_RE = re.compile(r"<[^<>]*>")
-DOTTED_INDEX_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\[(\d+)\]$")
+
+# The regex/vocabulary constants above (and parse_comment_clauses,
+# parse_dotted_path, TITLE_TO_BASE_KEY below) used to be defined here and
+# duplicated inside discover_layers.py; both now import them from
+# layout_decision_grammar.py instead (D24 Phase 1) - this module keeps the
+# artifact-parsing/field-resolution/config-write engine, which is what
+# actually needs discover_layers.py's rendering conventions to stay in sync
+# with, not the shared vocabulary itself.
+_parse_comment_clauses = parse_comment_clauses
 
 
 class FieldError(Exception):
@@ -122,26 +127,6 @@ class Field:
                 f"{user_verb} requires an explicit argument, e.g. `{user_verb}: <value>`",
             )
         self.verb, self.arg = user_verb, default_arg
-
-
-def _parse_comment_clauses(comment):
-    """Parse a field's trailing comment into {VERB: arg_or_None}. Each
-    `|`-separated clause is either a bare verb or `VERB: <arg>`; any trailing
-    prose after the verb (or after its colon's argument) that isn't part of
-    the argument itself is explanatory only and is discarded - e.g. the H-2
-    decision lines in discover_layers.py end each SKIP clause with a
-    parenthetical note that must not be mistaken for part of an argument."""
-    clauses = [c.strip() for c in comment.split("|") if c.strip()]
-    allowed = {}
-    for clause in clauses:
-        m = re.match(r"^([A-Za-z][A-Za-z_]*)\s*:\s*(.+)$", clause)
-        if m:
-            verb, arg = m.group(1), m.group(2).strip()
-        else:
-            verb = clause.split()[0]
-            arg = None
-        allowed.setdefault(verb, arg)
-    return allowed
 
 
 def parse_artifact(text):
@@ -324,16 +309,7 @@ def set_list_item(lines, dotted_parts, index, value):
         lines[target] = f"{item_indent}- {value}"
 
 
-def parse_dotted_path(path_str):
-    """`"layers.what_l2.include_roots[0]"` -> (["layers","what_l2","include_roots"], 0);
-    `"how_dimension.how_l1.path"` -> (["how_dimension","how_l1","path"], None)."""
-    parts = path_str.strip().split(".")
-    m = DOTTED_INDEX_RE.match(parts[-1])
-    if m:
-        parts[-1] = m.group(1)
-        return parts, int(m.group(2))
-    return parts, None
-
+# parse_dotted_path moved to layout_decision_grammar.py (imported above).
 
 # ---------------------------------------------------------------------------
 # Applying resolved fields to context-config.yaml
@@ -343,7 +319,7 @@ def apply_field(field, config_lines):
     """Apply one resolved field to config_lines in place. Returns True if a
     config key was written, False if the verb needed no config write
     (SKIP/ACKNOWLEDGE)."""
-    base_key = dl.TITLE_TO_BASE_KEY.get(field.section_title)
+    base_key = TITLE_TO_BASE_KEY.get(field.section_title)
 
     if field.key == "decision":
         if field.verb in ("CONFIRM", "CUSTOM"):

@@ -41,7 +41,7 @@ principle `wizard-picker-and-boxes.md` §1 documents for the read path:
 | State | Entry condition | Screen |
 |---|---|---|
 | `layout_broken` | `validate_layout.validate(repo_root)` returns `ok=False` | Minimal screen listing the `FAIL` lines from the validation report. No boxes/decisions/picker attempted — `LayoutSource`'s own constructor-time `validate()==True` invariant means one couldn't be built anyway. |
-| `needs_discover` | Validates clean, but `context-layout-discovery.md` doesn't exist yet | Guide-only intro + a real **Run Discover** button (`POST /api/discover`, see `wizard-write-path.md` §5). |
+| `needs_discover` | Validates clean, but `context-layout-discovery.md` doesn't exist yet | Guide-only intro (one of two copy variants, see §3) + a real **Run Discover** button (`POST /api/discover`, see `wizard-write-path.md` §5). |
 | `decisions_pending` | Artifact exists, at least one field's `state` is `pending` or `staged` | The existing Decisions UI (`wizard-write-path.md` §6), unchanged — just reachable now on a repo that was never pre-initialized outside the browser. |
 | `steady_state` | Artifact exists, every field is `confirmed` | The full boxes/decisions/picker experience, byte-for-byte the same as before Phase 2. |
 
@@ -59,12 +59,20 @@ D20 status (the old check 2's predicate, relocated verbatim into
 `_is_d20_initialized` — same `SLOT_REGISTRY`/`_owning_skill_installed`/
 `find_slot_markers` helpers reused from `validate_layout.py`, not reimplemented) is
 still computed on every call and carried on every `OnboardingState` as a plain
-boolean. It never influences `state` — only whether the frontend shows its dismissible
-D20-init banner over `decisions_pending`/`steady_state` (see `SKILL.md`'s "Guided
-setup" section). This is deliberate: `wizard_boxes.py` already degrades gracefully
-when D20 was never run (`GuidelinesBox.initialized=False`, empty `resolved_paths` — a
-normal empty state, not an error), so there was never a correctness reason to block a
-screen on it, only a UX reason to mention it.
+boolean. It never influences `state` — only *which copy renders* within a state that's
+already been picked on other grounds. On `decisions_pending`/`steady_state` it toggles
+the dismissible D20-init banner; on `needs_discover` it instead picks one of two intro
+paragraphs above the shared Run Discover button (`renderNeedsDiscover` in
+`wizard.js`) — a genuinely greenfield repo (`d20_initialized: false`) gets a
+guide-only explanation of what `init` asks for, a repo that already ran `init`
+(`d20_initialized: true`) gets today's plain Discover-scan copy. Both cases render
+the *same* `needs_discover` state and the *same* button; there's no fifth top-level
+state for "greenfield" because `d20_initialized` already carries that distinction on
+every response — adding one would duplicate it for no behavioral gain (see
+`SKILL.md`'s "Guided setup" section). This is deliberate: `wizard_boxes.py` already
+degrades gracefully when D20 was never run (`GuidelinesBox.initialized=False`, empty
+`resolved_paths` — a normal empty state, not an error), so there was never a
+correctness reason to block a screen on it, only a UX reason to explain it.
 
 ## 4. `GET /api/state` response shape
 

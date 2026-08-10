@@ -18,6 +18,17 @@ Both paths are valid end states — pick based on project size and how much any
 downstream work needs to be grounded in real code/requirements structure. You can
 start Simple and add the Complex pieces later; nothing in Simple needs to be undone.
 
+**Checking what's already resolved:** once `ult-repo-layout` has run at least once
+(`init` or `discover`) in this project, you can see what it resolved — the What/How
+layer paths, the Guidelines slot, the Trip-wire ledger status — in a browser instead
+of re-reading `context-config.yaml` by hand:
+```
+python .github/skills/ult-layout-wizard/scripts/wizard_server.py .
+```
+See [`ult-layout-wizard`](../../.github/skills/ult-layout-wizard/SKILL.md). This is a
+status view that composes with the steps below, not a replacement for them — it won't
+run `init`/`discover` for you, and Phase 0 is browse-only (no writes yet).
+
 ---
 
 ## Path A — Simple: compiled guidelines only

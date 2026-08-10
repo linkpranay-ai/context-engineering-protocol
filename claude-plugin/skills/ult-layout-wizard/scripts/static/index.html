@@ -12,16 +12,103 @@
   <link rel="stylesheet" href="/static/wizard.css">
 </head>
 <body>
-  <header>
-    <h1>ult-layout-wizard</h1>
-    <p class="subtitle">
-      Resolve each pending layout decision below, then Apply to commit them into
-      <code>context-config.yaml</code> via <code>ult-repo-layout</code>'s own
-      <code>confirm</code> step &mdash; this wizard never writes that file directly.
-    </p>
+  <!-- Top bar (D24 UI design pass, revised): carries CEP's own project
+       identity - logo, full name, tagline (text verbatim from
+       assets/readme/hero.svg's "Context Engineering Protocol" lockup, same
+       verbatim-sourcing discipline the rest of this pass already uses for
+       color) - not this specific tool's title. ult-layout-wizard's own name
+       and guide copy live down in #main-content's page header instead (see
+       .page-header below); the top bar is shared chrome, the same on every
+       screen this install could show, tool-specific or not. -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <!-- Real CEP mark (assets/readme/cep-logo-mark.svg, inlined - the wizard
+           serves no route for repo assets outside /static, so inlining is
+           simplest and keeps this file's existing zero-extra-request
+           pattern). This is the tagline-free crop of the ribbon wordmark:
+           see that file's own comment for the y=712 crop rationale. No
+           background rect - the topbar's own --navy-900 is dark enough that
+           the mark's white letters + color ribbon read cleanly directly on
+           top of it, so the box is transparent rather than a mismatched
+           navy-ish square. Natural aspect is ~2.51:1 (see .topbar-logo),
+           wider than the old 32x32 square slot - deliberate, per the file's
+           own comment this replaces: a real wordmark reads better wide than
+           squeezed into a square. -->
+      <svg class="topbar-logo" viewBox="84.57 337.93 939.91 374.07" role="img" aria-label="CEP">
+        <defs>
+          <clipPath id="topbar-logo-ribbon-clip" clipPathUnits="userSpaceOnUse">
+            <path d="M489 498.08C490.62 501.28 489.51 514.34 488 517.5C490.91 519.49 489.38 520.53 489.38 523.5C489.38 524.4 489.92 525.54 490 526.5C490.28 529.79 489.5 532.44 489.03 535.53C488.66 537.99 489.33 540.15 489.03 542.53C488.55 546.37 490.31 549.14 486 550.5C489.85 552.52 489 555.51 489 559.5C486.61 559.98 481.15 559.03 479.72 559.65C478.6 560.13 479.68 560.15 479 560.73C469.5 561.12 459.93 560.24 450.58 562.26C434.34 565.79 420.08 576.84 411.43 590.93C404.92 601.55 400.63 614.23 393.17 624.11C388.04 621.76 371.11 623.29 364.5 623.28C347.83 623.25 331.17 623.39 314.5 623.27C306.84 623.21 298.66 624.09 291.13 622.92C293.38 621.96 296.06 621.77 298.49 621C302.85 619.61 307.29 617.93 311.41 615.91C319.42 612 326.59 605.56 332.48 598.96C339.84 590.7 344.49 580.09 350.12 570.64C362.59 549.69 375.03 528.14 395.64 514.09C417.44 499.22 437.91 497.86 463.5 497.87C471.96 497.87 480.56 497.58 489 498.08ZM515 557.72C514.17 558.48 513.33 559.24 512.5 560C511.17 560 509.83 560 508.5 560C508 559.24 507.5 558.48 507 557.72C509.67 557.72 512.33 557.72 515 557.72ZM519 559.83C519.83 559.89 520.67 559.94 521.5 560C521.67 560.22 521.83 560.44 522 560.67C519.67 560.67 517.33 560.67 515 560.67C515.17 560.45 515.33 560.22 515.5 560C516.67 559.94 517.83 559.89 519 559.83Z" clip-rule="evenodd"/>
+            <path d="M489 498.08C499.67 498.08 510.33 498.08 521 498.08C517 498.55 513 499.03 509 499.5C512.67 499.83 516.33 500.17 520 500.5C516.33 501.83 512.67 503.17 509 504.5C508.5 506.33 508 508.17 507.5 510C506 509.17 504.5 508.33 503 507.5C503 509.64 502.31 511.7 502.22 513.66C502.18 514.44 502.79 514.96 502.78 515.66C502.77 516.71 502.19 517.49 502.03 518.53C501.69 520.8 502.31 523.2 501.97 525.47C501.86 526.17 501.24 527 501.22 527.66C501.1 530.77 502.67 534.55 502.78 537.66C502.9 540.77 501.81 540.62 503.5 544C506.04 543.2 505.91 542.76 506.5 540C507.67 541.17 508.83 542.33 510 543.5C508.92 544.53 510.63 544.06 509.31 544.75C508.63 545.11 508.11 544.21 507.53 544.41C506.9 544.62 506.91 545.49 506.28 545.78C505.43 546.18 503.93 546.3 503 546.5C505.9 547.41 505.54 548.95 507 550.5C507.83 549 508.67 547.5 509.5 546C512.53 551.78 513.46 550.19 514.5 545C514.88 549.17 515.26 553.33 515.63 557.5C520.42 557.83 525.21 558.17 530 558.5C526.33 558.94 522.67 559.39 519 559.83C517.83 559.89 516.67 559.94 515.5 560C515.33 560.22 515.17 560.45 515 560.67C503 560.69 491 560.71 479 560.73C479.68 560.15 478.6 560.13 479.72 559.65C481.15 559.03 486.61 559.98 489 559.5C489 555.51 489.85 552.52 486 550.5C490.31 549.14 488.55 546.37 489.03 542.53C489.33 540.15 488.66 537.99 489.03 535.53C489.5 532.44 490.28 529.79 490 526.5C489.92 525.54 489.38 524.4 489.38 523.5C489.38 520.53 490.91 519.49 488 517.5C489.51 514.34 490.62 501.28 489 498.08ZM503.5 519C504.33 520.17 505.17 521.33 506 522.5C503.26 522.46 503.13 521.72 503.5 519ZM516.5 527C516.6 530.02 517.11 531.44 514 531.5C515.01 529.39 515.01 528.55 516.5 527ZM521.57 547C521.57 549.5 521.57 552 521.57 554.5C518.8 553.72 518.07 552.22 517 549.5C518.52 548.67 520.05 547.83 521.57 547ZM504 556.5C501.79 556.23 502.43 556.13 501 557.5C503.21 557.77 502.57 557.87 504 556.5ZM515 557.72C512.33 557.72 509.67 557.72 507 557.72C507.5 558.48 508 559.24 508.5 560C509.83 560 511.17 560 512.5 560C513.33 559.24 514.17 558.48 515 557.72Z" clip-rule="evenodd"/>
+            <path d="M521 498.08C534 498.07 547 498.07 560 498.07C561.09 498.88 562.17 499.69 563.26 500.5C563.32 503.39 564.05 505.73 564.35 508.5C564.63 511.15 564.06 513.86 564.09 516.5C564.19 525.61 564.2 534.33 563.71 543.5C563.41 548.95 564.79 555 563.08 560.17C558.22 560.11 553.36 560.06 548.5 560C548.33 560.25 548.17 560.49 548 560.74C539.33 560.71 530.67 560.69 522 560.67C521.83 560.44 521.67 560.22 521.5 560C520.67 559.94 519.83 559.89 519 559.83C522.67 559.39 526.33 558.94 530 558.5C525.21 558.17 520.42 557.83 515.63 557.5C515.26 553.33 514.88 549.17 514.5 545C513.46 550.19 512.53 551.78 509.5 546C508.67 547.5 507.83 549 507 550.5C505.54 548.95 505.9 547.41 503 546.5C503.93 546.3 505.43 546.18 506.28 545.78C506.91 545.49 506.9 544.62 507.53 544.41C508.11 544.21 508.63 545.11 509.31 544.75C510.63 544.06 508.92 544.53 510 543.5C508.83 542.33 507.67 541.17 506.5 540C505.91 542.76 506.04 543.2 503.5 544C501.81 540.62 502.9 540.77 502.78 537.66C502.67 534.55 501.1 530.77 501.22 527.66C501.24 527 501.86 526.17 501.97 525.47C502.31 523.2 501.69 520.8 502.03 518.53C502.19 517.49 502.77 516.71 502.78 515.66C502.79 514.96 502.18 514.44 502.22 513.66C502.31 511.7 503 509.64 503 507.5C504.5 508.33 506 509.17 507.5 510C508 508.17 508.5 506.33 509 504.5C512.67 503.17 516.33 501.83 520 500.5C516.33 500.17 512.67 499.83 509 499.5C513 499.03 517 498.55 521 498.08ZM564 498.06C565.71 498.05 567.42 498.05 569.13 498.04C567.59 498.42 566.04 498.81 564.5 499.19C564.33 498.82 564.17 498.44 564 498.06ZM503.5 519C503.13 521.72 503.26 522.46 506 522.5C505.17 521.33 504.33 520.17 503.5 519ZM516.5 527C515.01 528.55 515.01 529.39 514 531.5C517.11 531.44 516.6 530.02 516.5 527ZM521.57 547C520.05 547.83 518.52 548.67 517 549.5C518.07 552.22 518.8 553.72 521.57 554.5C521.57 552 521.57 549.5 521.57 547ZM504 556.5C502.57 557.87 503.21 557.77 501 557.5C502.43 556.13 501.79 556.23 504 556.5Z" clip-rule="evenodd"/>
+            <path d="M713 492.29C713.61 492.14 714.22 491.99 714.84 491.83C715.11 492.05 715.38 492.28 715.65 492.5C715.27 493.01 714.88 493.52 714.5 494.02C714 493.45 713.5 492.87 713 492.29ZM704.84 495.76C705.1 497.01 705.35 498.25 705.6 499.5C707.12 501.07 713.66 508.42 707.97 508.5C709.07 511.15 708.62 513.54 709.25 516.3C709.59 517.82 711.17 519.1 711.42 520.5C711.52 521.1 710.94 521.77 711.07 522.46C711.36 524.01 712.9 525.25 713.84 526.5C713.37 527.87 713.08 530.38 712.56 531.43C712.2 532.18 711.3 532.65 710.87 533.49C709.79 535.57 710.4 538.1 709.65 540.23C707.79 545.48 704.47 542.83 706.1 550.5C706.68 550.69 708.76 551.08 709.15 551.42C709.94 552.09 709.5 553.38 710.04 554.26C710.69 555.29 713.96 558.09 714.96 558.87C711.98 559.32 708.99 559.77 706.01 560.22C704.5 560.07 703 559.91 701.5 559.76C701.33 560.08 701.17 560.4 701 560.73C659.33 560.74 617.67 560.75 576 560.76C571.69 560.56 567.39 560.37 563.08 560.17C564.79 555 563.41 548.95 563.71 543.5C564.2 534.33 564.19 525.61 564.09 516.5C564.06 513.86 564.63 511.15 564.35 508.5C564.05 505.73 563.32 503.39 563.26 500.5C562.17 499.69 561.09 498.88 560 498.07C561.33 498.06 562.67 498.06 564 498.06C564.17 498.44 564.33 498.82 564.5 499.19C566.04 498.81 567.59 498.42 569.13 498.04C579.15 497.24 589.44 497.82 599.5 497.79C620.83 497.74 642.17 497.82 663.5 497.79C673.39 497.77 683.62 498.55 693.46 497.67C697.31 497.33 701.04 496.19 704.84 495.76Z" clip-rule="evenodd"/>
+            <path d="M863.84 558.84C871.09 555.37 877.91 553.56 883.31 546.8C895.55 531.47 891.93 507.78 874.69 497.81C871.16 495.77 867.43 493.98 863.37 493.3C852.86 491.54 833.49 492.25 822.5 492.88C803.79 493.95 790.81 506.42 777.87 518.4C759.29 535.63 741.22 554.55 714.96 558.87C713.96 558.09 710.69 555.29 710.04 554.26C709.5 553.38 709.94 552.09 709.15 551.42C708.76 551.08 706.68 550.69 706.1 550.5C704.47 542.83 707.79 545.48 709.65 540.23C710.4 538.1 709.79 535.57 710.87 533.49C711.3 532.65 712.2 532.18 712.56 531.43C713.08 530.38 713.37 527.87 713.84 526.5C712.9 525.25 711.36 524.01 711.07 522.46C710.94 521.77 711.52 521.1 711.42 520.5C711.17 519.1 709.59 517.82 709.25 516.3C708.62 513.54 709.07 511.15 707.97 508.5C713.66 508.42 707.12 501.07 705.6 499.5C705.35 498.25 705.1 497.01 704.84 495.76C707.56 494.6 710.28 493.45 713 492.29C713.5 492.87 714 493.45 714.5 494.02C714.88 493.52 715.27 493.01 715.65 492.5C715.38 492.28 715.11 492.05 714.84 491.83C716.58 490.29 718.32 488.76 720.06 487.22C725.5 485.64 730.22 479.78 734.38 475.91C744.76 466.28 754.47 455.67 766.23 447.7C789.56 431.89 816.62 434.1 843.5 434.09C859.12 434.09 874.68 432.98 889.42 439.12C928.19 455.28 950.8 513.95 915.17 544.65C911.03 548.22 906.37 551.67 901.28 553.76C889.36 558.64 876.61 560.1 863.84 558.84ZM563.08 560.17C567.39 560.37 571.69 560.56 576 560.76C566.67 560.75 557.33 560.75 548 560.74C548.17 560.49 548.33 560.25 548.5 560C553.36 560.06 558.22 560.11 563.08 560.17ZM706.01 560.22C704.34 560.39 702.67 560.56 701 560.73C701.17 560.4 701.33 560.08 701.5 559.76C703 559.91 704.5 560.07 706.01 560.22Z" clip-rule="evenodd"/>
+          </clipPath>
+        </defs>
+        <path d="M291.13 622.92C298.66 624.09 306.84 623.21 314.5 623.27C331.17 623.39 347.83 623.25 364.5 623.28C371.11 623.29 388.04 621.76 393.17 624.11C389.94 632.1 384.3 639.79 379.14 646.67C365.84 664.41 348.65 678.99 328.03 687.51C311.29 694.44 294.43 695.9 276.5 695.88C252.41 695.86 229 692.36 206.79 682.66C150.99 658.3 112.12 604.34 105.5 544.01C96.89 465.52 148.95 387.42 224.66 365.25C255.79 356.14 288.41 358.31 320.5 358.4C335.17 358.44 349.83 358.32 364.5 358.41C370.89 358.45 378.36 357.34 384.5 358.93C384.5 383.51 384.5 408.1 384.5 432.68C375.41 434.02 365.7 433.17 356.5 433.18C337.17 433.21 317.83 433.17 298.5 433.16C285.6 433.16 272.29 432.21 259.5 434.09C239.02 437.09 219.62 446.79 205.28 461.78C197.29 470.13 191.56 479.78 186.63 490.16C181.93 500.05 179.39 511.6 178.8 522.5C175.72 579.9 221.15 623.52 277.5 623.3C282.01 623.29 286.66 623.56 291.13 622.92ZM685.1 358.68C685.1 383.62 685.1 408.56 685.1 433.5C680.02 434.43 674.68 433.99 669.5 434.01C659.83 434.04 650.17 434.04 640.5 434.04C611.17 434.04 581.83 434.01 552.5 434.03C533.21 434.04 509.74 429.95 495.44 445.94C484.88 457.76 488.89 467.87 486.5 481.36C462.5 481.36 438.5 481.36 414.5 481.36C412.49 469.39 413.88 452.02 416.53 440.09C418.85 429.67 422.46 419.58 427.78 410.29C443.31 383.17 471.58 363.62 502.68 359.38C518.37 357.24 534.71 358.47 550.5 358.45C574.5 358.42 598.5 358.5 622.5 358.48C643.22 358.46 664.44 357.14 685.1 358.68ZM863.84 558.84C876.61 560.1 889.36 558.64 901.28 553.76C906.37 551.67 911.03 548.22 915.17 544.65C950.8 513.95 928.19 455.28 889.42 439.12C874.68 432.98 859.12 434.09 843.5 434.09C816.62 434.1 789.56 431.89 766.23 447.7C754.47 455.67 744.76 466.28 734.38 475.91C730.22 479.78 725.5 485.64 720.06 487.22C720 444.65 719.94 402.07 719.88 359.5C727.26 357.79 735.88 358.85 743.5 358.86C758.17 358.86 772.83 358.86 787.5 358.86C806.83 358.86 826.17 358.87 845.5 358.88C880.59 358.9 905.8 358.89 936.83 377.64C978.47 402.8 1006.56 452.5 1004.36 501.5C1003.24 526.62 995.29 550.16 981.67 571.2C974.19 582.75 964.17 593.39 953.27 601.77C936.19 614.89 915.75 623.56 894.46 626.72C873.25 629.87 850.9 628.04 829.5 628.04C820.83 628.04 812.17 628.01 803.5 628.03C798.68 628.04 793.68 627.65 788.97 628.5C788.81 650.86 788.66 673.22 788.5 695.59C765.68 695.56 742.86 695.53 720.04 695.5C720.19 653.05 720.35 610.61 720.5 568.16C728.91 565.04 737.75 561.77 746.63 560.35C758.11 558.51 769.91 559.31 781.5 559.29C799.5 559.25 817.5 559.33 835.5 559.26C844.93 559.22 854.44 559.63 863.84 558.84ZM486.75 576.5C487.27 581.15 486.72 585.83 487.11 590.5C487.87 599.7 492.93 608.7 500.19 614.34C513.59 624.77 538.28 621.21 554.5 621.29C583.16 621.44 611.83 621.33 640.5 621.31C655.26 621.3 670.39 620.37 685.1 621.55C685.1 646.2 685.1 670.85 685.1 695.5C677.27 697 668.5 696.05 660.5 696.05C645.5 696.05 630.5 696.05 615.5 696.05C589.83 696.04 564.17 696.06 538.5 696.05C508.94 696.04 484.41 696.83 458.74 679.74C441.66 668.37 428.08 651.9 420.79 632.7C418.62 627.01 415.73 619.67 416.03 613.5C416.42 605.19 422.13 595.13 427.96 589.45C431.07 586.42 434.33 583.69 438.2 581.66C443.41 578.93 448.84 577.12 454.71 576.41C462.24 575.49 479.34 575.43 486.75 576.5Z" fill="#fcfcfc" fill-rule="evenodd"/>
+        <g clip-path="url(#topbar-logo-ribbon-clip)">
+          <rect x="291.13" y="413.99" width="205.99" height="230.12" fill="#04bcc8"/>
+          <rect x="496.52" y="413.99" width="71.20" height="230.12" fill="#9db05f"/>
+          <rect x="567.13" y="413.99" width="154.64" height="230.12" fill="#eca01f"/>
+          <rect x="721.17" y="413.99" width="211.81" height="230.12" fill="#f96a08"/>
+        </g>
+      </svg>
+      <div>
+        <h1>Context Engineering Protocol</h1>
+        <p class="tagline">
+          Human-approved, source-attributed context package before an AI agent writes
+          a line of code.
+        </p>
+      </div>
+    </div>
+
+    <!-- Docs nav (UI design pass): populated from GET /api/docs by
+         loadDocsNav() in wizard.js. Protocol/README are fixed entries; Case
+         Studies opens an index of every case-studies/*/CASE-STUDY.md found.
+         Guide & FAQ has no content yet - disabled until it's written. Wizard
+         is this tool's own screen - a peer nav entry, not a special corner
+         control, so leaving docs and coming back both work the same way
+         (click a nav button) instead of relying on the overlay's own Close. -->
+    <nav class="topbar-nav" aria-label="CEP documentation">
+      <button type="button" class="topbar-nav-link" id="nav-doc-protocol">Protocol</button>
+      <button type="button" class="topbar-nav-link" id="nav-doc-readme">README</button>
+      <button type="button" class="topbar-nav-link" id="nav-doc-case-studies">Case Studies</button>
+      <button type="button" class="topbar-nav-link" disabled title="Not written yet">Guide &amp; FAQ</button>
+      <button type="button" class="topbar-nav-link" id="nav-wizard">Wizard</button>
+    </nav>
   </header>
 
-  <main>
+  <!-- Docs overlay (UI design pass): a full-width panel that replaces the
+       main view while open, populated by wizard.js's navigateDocs()/renderDocView().
+       Client-side only, deliberately - the wizard's /exchange URLs are
+       single-use, so this can never be a real page navigation. Back steps
+       one level back through whatever was visited this overlay session
+       (e.g. Case Studies index -> a case study -> Back returns to the
+       index); Close always exits to the Wizard screen regardless of depth. -->
+  <div id="docs-overlay" class="docs-overlay" style="display: none;" aria-label="Documentation viewer">
+    <div class="docs-overlay-bar">
+      <div class="docs-overlay-bar-left">
+        <button type="button" id="docs-overlay-back" class="secondary" style="display: none;">&larr; Back</button>
+        <h2 id="docs-overlay-title"></h2>
+      </div>
+      <button type="button" id="docs-overlay-close" class="secondary">&times; Close</button>
+    </div>
+    <div id="docs-overlay-body" class="docs-overlay-body"></div>
+  </div>
+
+  <main id="main-content">
+    <!-- This tool's own title + guide copy - moved down from the top bar
+         (D24 UI design pass, revised), which now carries CEP's shared
+         project identity instead. h2, not h1: "Context Engineering
+         Protocol" above is the page's one h1. -->
+    <div class="page-header">
+      <h2 class="page-title">ult-layout-wizard</h2>
+      <p class="page-subtitle">
+        Resolve each pending layout decision below, then Apply to commit them into
+        <code>context-config.yaml</code> via <code>ult-repo-layout</code>'s own
+        <code>confirm</code> step &mdash; this wizard never writes that file directly.
+      </p>
+    </div>
+
     <!-- Onboarding state router (D24 §18.14 section A). wizard.js's loadState()
          calls GET /api/state before anything else and shows exactly one of the
          sections below (state-layout-broken, state-needs-discover, or the
@@ -44,12 +131,38 @@
 
     <section id="state-needs-discover" aria-label="Run discover" style="display: none;">
       <h2>Let's find this repo's layout</h2>
-      <p>
-        This repo's layout hasn't been discovered yet. <strong>Discover</strong> scans
-        the repo and proposes a decision for each layer (What, How, and any opt-in
-        dimensions) &mdash; nothing is written into <code>context-config.yaml</code>
-        until you review and Apply those decisions on the next screen.
-      </p>
+
+      <!-- Two mutually-exclusive intro variants, picked by renderNeedsDiscover()
+           in wizard.js based on state.d20_initialized. Both funnel into the same
+           shared Run Discover button below - init and discover are independent
+           steps, this is guide copy only, never a gate on the button itself. -->
+      <div id="needs-discover-greenfield" style="display: none;">
+        <p>
+          This repo hasn't run <code>ult-repo-layout init</code> yet, so there's no
+          <code>context-config.yaml</code> for Discover to write proposals into.
+          <code>init</code> is a short conversational step with your coding agent
+          &mdash; it asks for this project's name and description, and (optionally)
+          whether its content lives in a separate workspace root &mdash; it never
+          guesses these from existing files. Run <code>/ult-repo-layout init</code>
+          whenever you're ready.
+        </p>
+        <p>
+          You can run <strong>Discover</strong> below before or after
+          <code>init</code> &mdash; order doesn't change what Discover finds, but
+          running <code>init</code> first gives the Guidelines box a real base
+          instead of defaults.
+        </p>
+      </div>
+
+      <div id="needs-discover-brownfield" style="display: none;">
+        <p>
+          This repo's layout hasn't been discovered yet. <strong>Discover</strong> scans
+          the repo and proposes a decision for each layer (What, How, and any opt-in
+          dimensions) &mdash; nothing is written into <code>context-config.yaml</code>
+          until you review and Apply those decisions on the next screen.
+        </p>
+      </div>
+
       <button type="button" id="discover-button">Run Discover</button>
       <p id="discover-message" role="status"></p>
     </section>
@@ -58,11 +171,18 @@
          Only ever unhidden by updateD20Banner() over decisions_pending/steady_state,
          and only when d20_initialized is still false. -->
     <div id="d20-banner" class="banner" role="status" style="display: none;">
-      <p>
-        This repo hasn't run <code>ult-repo-layout init</code> yet &mdash; some boxes
-        (Guidelines) may only show defaults until it has. Run
-        <code>/ult-repo-layout init</code> in your coding agent, then click Done.
-      </p>
+      <div class="banner-text">
+        <p>
+          This repo hasn't run <code>ult-repo-layout init</code> yet &mdash; some boxes
+          (Guidelines) may only show defaults until it has. <code>init</code> is a
+          short conversational step with your coding agent that asks:
+        </p>
+        <ul class="banner-checklist">
+          <li>This project's name and a one-line description</li>
+          <li>Whether its content lives in a separate workspace root (optional)</li>
+        </ul>
+        <p>Run <code>/ult-repo-layout init</code> in your coding agent, then click Done.</p>
+      </div>
       <div class="banner-actions">
         <button type="button" id="d20-banner-done">Done</button>
         <button type="button" id="d20-banner-dismiss" class="secondary">Dismiss</button>
@@ -77,53 +197,55 @@
         <code>context-config.yaml</code>.
       </p>
 
-      <article class="box" id="box-what">
-        <h2>What</h2>
-        <p class="box-desc">Requirements / product-intent content for this task.</p>
-        <p class="box-meta"></p>
-        <div class="box-layer" data-layer="L2">
-          <h3>L2</h3>
-          <ul class="box-paths" data-layer="L2"></ul>
-        </div>
-        <div class="box-layer" data-layer="L1">
-          <h3>L1</h3>
-          <p class="layer-hint" data-layer="L1"></p>
-          <ul class="box-paths" data-layer="L1"></ul>
-        </div>
-        <!-- Guide-only "copy this prompt for your agent" card (wizard_stub_content),
-             filled in by renderStubCards() only when /api/status sends one for this
-             box - e.g. the resolved path exists but is still empty. -->
-        <div class="stub-card" style="display: none;"></div>
-      </article>
+      <div class="boxes-grid">
+        <article class="box" id="box-what">
+          <h2>What</h2>
+          <p class="box-desc">Requirements / product-intent content for this task.</p>
+          <p class="box-meta"></p>
+          <div class="box-layer" data-layer="L2">
+            <h3>L2</h3>
+            <ul class="box-paths" data-layer="L2"></ul>
+          </div>
+          <div class="box-layer" data-layer="L1">
+            <h3>L1</h3>
+            <p class="layer-hint" data-layer="L1"></p>
+            <ul class="box-paths" data-layer="L1"></ul>
+          </div>
+          <!-- Guide-only "copy this prompt for your agent" card (wizard_stub_content),
+               filled in by renderStubCards() only when /api/status sends one for this
+               box - e.g. the resolved path exists but is still empty. -->
+          <div class="stub-card" style="display: none;"></div>
+        </article>
 
-      <article class="box" id="box-how">
-        <h2>How</h2>
-        <p class="box-desc">Process / implementation-approach content for this task.</p>
-        <p class="box-meta"></p>
-        <div class="box-layer" data-layer="L2">
-          <h3>L2</h3>
-          <ul class="box-paths" data-layer="L2"></ul>
-        </div>
-        <div class="box-layer" data-layer="L1">
-          <h3>L1</h3>
-          <p class="layer-hint" data-layer="L1"></p>
-          <ul class="box-paths" data-layer="L1"></ul>
-        </div>
-        <div class="stub-card" style="display: none;"></div>
-      </article>
+        <article class="box" id="box-how">
+          <h2>How</h2>
+          <p class="box-desc">Process / implementation-approach content for this task.</p>
+          <p class="box-meta"></p>
+          <div class="box-layer" data-layer="L2">
+            <h3>L2</h3>
+            <ul class="box-paths" data-layer="L2"></ul>
+          </div>
+          <div class="box-layer" data-layer="L1">
+            <h3>L1</h3>
+            <p class="layer-hint" data-layer="L1"></p>
+            <ul class="box-paths" data-layer="L1"></ul>
+          </div>
+          <div class="stub-card" style="display: none;"></div>
+        </article>
 
-      <article class="box" id="box-guidelines">
-        <h2>Guidelines</h2>
-        <p class="box-desc">Compiled project guidelines resolved for this repo.</p>
-        <p class="box-meta"></p>
-        <div class="stub-card" style="display: none;"></div>
-      </article>
+        <article class="box" id="box-guidelines">
+          <h2>Guidelines</h2>
+          <p class="box-desc">Compiled project guidelines resolved for this repo.</p>
+          <p class="box-meta"></p>
+          <div class="stub-card" style="display: none;"></div>
+        </article>
 
-      <article class="box" id="box-tripwire">
-        <h2>Trip-wire</h2>
-        <p class="box-desc">Decision-ledger status: entries, cursors, rejected sources.</p>
-        <p class="box-meta"></p>
-      </article>
+        <article class="box" id="box-tripwire">
+          <h2>Trip-wire</h2>
+          <p class="box-desc">Decision-ledger status: entries, cursors, rejected sources.</p>
+          <p class="box-meta"></p>
+        </article>
+      </div>
     </section>
 
     <section id="decisions" aria-label="Layout decisions" style="display: none;">

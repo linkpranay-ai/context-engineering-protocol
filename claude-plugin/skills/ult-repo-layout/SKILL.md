@@ -49,6 +49,13 @@ history and exit criteria — not needed to operate this skill day to day.
 This file and others in this repo cite `D<N>`/`§<N>` labels (e.g. `D21 §16.2`) — see
 `../../../references/design-scratchpad-glossary.md` for what each one means.
 
+**Alternative front-end:** once `init`/`discover` has run at least once here, you can
+also view what got resolved through a local browser wizard instead of re-reading
+`context-config.yaml` and the markers by hand — see
+[`ult-layout-wizard`](../ult-layout-wizard/SKILL.md) (D24). It's a read-only status
+view on top of this skill's own state, not an alternative way to run `init`/
+`discover`/`confirm-layers` — those still happen here.
+
 ## Dependencies
 
 None — this skill is foundational. `ult-context-generate` (`utilities`

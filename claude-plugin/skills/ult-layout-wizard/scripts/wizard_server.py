@@ -55,7 +55,15 @@ four-state router `wizard.js` calls before deciding what to render, deliberately
 folded into `/api/status` since that route assumes a constructible `LayoutSource`) and
 `POST /api/discover` (the same 3-gate mutating dispatch as `/api/stage`/`/api/apply`,
 `wizard_discover.run_discover` - the real, in-process (re-)generation of
-`context-layout-discovery.md`). `_handle_api_status` also now wires in
+`context-layout-discovery.md`).
+
+UI design pass adds two more read-only, session-gated routes for the top-bar
+docs viewer: `GET /api/docs` (the closed set of CEP's own docs available to
+render, `wizard_docs.list_docs`) and `GET /api/docs/<id>` (one doc rendered to
+HTML on request, `wizard_docs.find_doc` + `wizard_markdown.render`) - both
+resolve against `wizard_docs.install_root()`, not `ctx.repo_root`, since these
+docs describe the CEP protocol itself, not whatever repo is being onboarded.
+`_handle_api_status` also now wires in
 `wizard_stub_content`'s previously-orphaned preview cards alongside the existing box
 view model.
 """
@@ -64,6 +72,7 @@ from __future__ import annotations
 
 import html
 import json
+import mimetypes
 import sys
 from dataclasses import asdict
 from http import HTTPStatus
@@ -71,15 +80,18 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wizard_apply  # noqa: E402
 import wizard_auth  # noqa: E402
 import wizard_boxes  # noqa: E402
+import wizard_containment  # noqa: E402
 import wizard_content_hash  # noqa: E402
 import wizard_decision_staging  # noqa: E402
 import wizard_discover  # noqa: E402
+import wizard_docs  # noqa: E402
+import wizard_markdown  # noqa: E402
 import wizard_layout_source  # noqa: E402
 import wizard_onboarding_state  # noqa: E402
 import wizard_originhost  # noqa: E402
@@ -221,6 +233,15 @@ def _make_handler(ctx: _ServerContext):
                 return
             if path == "/api/decisions":
                 self._handle_api_decisions()
+                return
+            if path == "/api/docs":
+                self._handle_api_docs()
+                return
+            if path.startswith("/api/docs/"):
+                self._handle_api_doc_detail(path[len("/api/docs/"):])
+                return
+            if path.startswith("/api/docs-assets/"):
+                self._handle_api_doc_asset(path[len("/api/docs-assets/"):])
                 return
             if path.startswith("/static/"):
                 self._handle_static(path[len("/static/"):])
@@ -410,6 +431,104 @@ def _make_handler(ctx: _ServerContext):
                         for f in fields
                     ],
                 },
+            )
+
+        def _handle_api_docs(self) -> None:
+            """UI design pass: the closed set of CEP's own docs available to the
+            in-app viewer (PROTOCOL.md, README.md, every case study). Resolved
+            against wizard_docs.install_root() - this skill's own install
+            location - never ctx.repo_root, since these describe the CEP
+            protocol itself, not whatever repo the wizard happens to be
+            onboarding right now (see wizard_docs.py's module docstring)."""
+            if self._require_session() is None:
+                return
+            self._send_json(
+                HTTPStatus.OK, wizard_docs.to_json_dict(wizard_docs.list_docs())
+            )
+
+        def _handle_api_doc_detail(self, doc_id: str) -> None:
+            """Renders one doc to HTML on request, rather than eagerly with
+            /api/docs - most sessions never open every doc, and Markdown
+            rendering is pure CPU work with no reason to pay it upfront. doc_id
+            is looked up against the same closed set /api/docs enumerates, so
+            an unrecognized id is a plain 404 dict-lookup miss - never a
+            filesystem path built from client input (see wizard_docs.py)."""
+            if self._require_session() is None:
+                return
+            entry = wizard_docs.find_doc(doc_id)
+            if entry is None:
+                self._reject(HTTPStatus.NOT_FOUND, "Unknown doc id.")
+                return
+            try:
+                markdown_text = entry.path.read_text(encoding="utf-8")
+            except OSError as exc:
+                self._send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}
+                )
+                return
+            # entry.path lives under install_root() (see wizard_docs.py); its
+            # own directory, relative to that root, is where any relative
+            # image src in the doc's own Markdown/HTML is meant to resolve
+            # against - "." (the root itself, for PROTOCOL.md/README.md)
+            # collapses to the bare prefix rather than a literal "./".
+            doc_dir_rel = entry.path.parent.relative_to(wizard_docs.install_root()).as_posix()
+            asset_prefix = (
+                "/api/docs-assets/"
+                if doc_dir_rel == "."
+                else f"/api/docs-assets/{doc_dir_rel}/"
+            )
+            # Maps every other doc's own install-root-relative path back to
+            # its doc_id, so a relative Markdown link inside *this* doc (e.g.
+            # case-studies/README.md linking to "textual/CASE-STUDY.md") can
+            # become an in-app navigation instead of a dead href - see
+            # wizard_markdown.render()'s link_resolver parameter. Built fresh
+            # per request from the same closed-set scan /api/docs already
+            # returns; a path with no matching doc_id (e.g.
+            # "references/reproducibility-guide.md", deliberately outside
+            # this corpus) falls through to wizard_markdown's GitHub-link
+            # fallback instead - never a filesystem lookup on client input.
+            link_resolver_map = {
+                d.path.relative_to(wizard_docs.install_root()).as_posix(): d.doc_id
+                for d in wizard_docs.list_docs()
+            }
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "title": entry.title,
+                    "html": wizard_markdown.render(
+                        markdown_text,
+                        asset_prefix=asset_prefix,
+                        doc_dir=doc_dir_rel,
+                        link_resolver=link_resolver_map.get,
+                    ),
+                },
+            )
+
+        def _handle_api_doc_asset(self, rel_path: str) -> None:
+            """Serves a static file *referenced by* a rendered doc (e.g.
+            README.md's own hero image) - unlike doc_id above, this route DOES
+            take an arbitrary path from the client, because the browser is
+            just requesting whatever <img src> wizard_markdown.render() emitted
+            for it. wizard_containment.check_containment is therefore the real
+            boundary here (same posture as wizard_picker.py's rel_path), not a
+            closed-set dict lookup - see that module's docstring for why the
+            two doc-serving routes need different trust models."""
+            if self._require_session() is None:
+                return
+            decoded = unquote(rel_path)
+            try:
+                target = wizard_containment.check_containment(
+                    wizard_docs.install_root(), decoded
+                )
+            except wizard_containment.ContainmentError:
+                self._reject(HTTPStatus.NOT_FOUND, "Not found.")
+                return
+            if not target.is_file():
+                self._reject(HTTPStatus.NOT_FOUND, "Not found.")
+                return
+            content_type, _ = mimetypes.guess_type(str(target))
+            self._send_bytes(
+                HTTPStatus.OK, target.read_bytes(), content_type or "application/octet-stream"
             )
 
         def _handle_api_stage(self) -> None:

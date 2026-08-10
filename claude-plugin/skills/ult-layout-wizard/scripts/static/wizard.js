@@ -42,7 +42,40 @@
 // Discover button), decisions_pending/steady_state (today's existing
 // boxes/decisions/picker experience, unchanged - just reachable now). A
 // d20_initialized=false flag is carried on every state but never picks the screen -
-// it only toggles a small dismissible banner over decisions_pending/steady_state.
+// on needs_discover it only swaps which of two guide-copy variants intros the
+// (always-shared) Run Discover button (renderNeedsDiscover, greenfield vs.
+// brownfield copy - see references/wizard-onboarding-state-machine.md), and on
+// decisions_pending/steady_state it only toggles the small dismissible banner.
+//
+// UI design pass adds the top-bar docs viewer, wired once at startup rather than
+// inside loadState() - these are CEP's own project docs, not part of the onboarding
+// flow, so they're available regardless of which of the four states above is showing:
+//   GET /api/docs      - the closed set of docs this install actually has bundled
+//   GET /api/docs/<id> - one doc rendered to HTML (wizard_markdown.render server-side)
+// Opening a doc replaces #main-content with #docs-overlay client-side only (never a
+// real navigation - the wizard's /exchange URLs are single-use, so there's no second
+// page to send a browser to). Docs this install doesn't have (e.g. a copy of this
+// skill installed standalone, without PROTOCOL.md/case-studies/ alongside it) simply
+// disable their nav button rather than erroring - see setDocsNavAvailability.
+//
+// Revised: the top bar itself now carries CEP's shared project identity (logo, full
+// name, tagline), not this tool's own title - "Wizard" is just another nav button
+// next to Protocol/README/Case Studies, and this tool's title+guide copy moved down
+// into #main-content's own .page-header (see index.html). navigateDocs()/
+// renderDocView()/docsBack() replace the old openDoc()/openCaseStudiesIndex() pair,
+// adding a small in-overlay view history (docsBackStack) so a Back button can step
+// back out of any doc to whatever was open before it - standing in for real browser
+// history, which a single-use /exchange URL can't use either.
+//
+// "Case Studies" in the top bar navigates straight to case-studies/README.md's own
+// rendered content now, not a client-built list (the old {kind: "case-studies-index"}
+// view is gone) - and every relative Markdown link inside a rendered doc (to another
+// case study, to SYNTHESIS.md/TEMPLATE.md, or to a heading anchor in PROTOCOL.md/
+// README.md) becomes a real in-app navigation too, via wizard_markdown.py's
+// link_resolver marking it with data-doc-id/-fragment instead of a real href - see
+// the delegated click listener on #docs-overlay-body below. A link that doesn't
+// resolve to a doc this install has (e.g. references/reproducibility-guide.md) is left
+// as a real GitHub link that opens in a new tab instead, so it never dead-ends the SPA.
 
 (function () {
   "use strict";
@@ -476,6 +509,20 @@
     });
   }
 
+  // Picks which of needs-discover-greenfield / needs-discover-brownfield intros
+  // this repo. Purely which paragraph explains *why* Discover hasn't run yet -
+  // the Run Discover button underneath is shared and unaffected either way.
+  function renderNeedsDiscover(state) {
+    var greenfield = document.getElementById("needs-discover-greenfield");
+    var brownfield = document.getElementById("needs-discover-brownfield");
+    if (!greenfield || !brownfield) {
+      return;
+    }
+    var isGreenfield = !state.d20_initialized;
+    greenfield.style.display = isGreenfield ? "" : "none";
+    brownfield.style.display = isGreenfield ? "none" : "";
+  }
+
   // Dismissed for the life of this page load only - reloading the page (or a
   // fresh session) shows the banner again until d20_initialized actually
   // becomes true. That's intentional: dismissing is "not now", not "never".
@@ -507,6 +554,7 @@
       }
       document.getElementById("d20-banner").style.display = "none";
       if (state.state === "needs_discover") {
+        renderNeedsDiscover(state);
         return;
       }
       // decisions_pending / steady_state: today's existing full experience,
@@ -552,8 +600,202 @@
     message.classList.toggle("error", Boolean(isError));
   }
 
+  // ------------------------------------------------------------------------
+  // Docs viewer (UI design pass) - see the module docstring above. Wired once
+  // at startup, independent of loadState()'s four-screen router: these are
+  // CEP's own project docs, not part of the onboarding flow.
+  // ------------------------------------------------------------------------
+
+  var docsList = [];
+
+  // One entry per view the overlay can show: {kind: "doc", id, fragment}.
+  // `fragment`, when present, is a heading id to scroll to once the doc's
+  // HTML is in the DOM (set when navigating via an in-app link that pointed
+  // at an anchor - see the data-doc-id click handler below). docsCurrentView
+  // is whatever's on screen right now (null when the overlay is closed);
+  // docsBackStack holds every view navigated away from this overlay session,
+  // in visiting order, so Back can step through them one at a time - a small
+  // in-page history, standing in for the real browser history a single-use
+  // /exchange URL can't use (see the module docstring).
+  var docsCurrentView = null;
+  var docsBackStack = [];
+
+  function setDocsNavAvailability() {
+    var byId = {};
+    docsList.forEach(function (d) {
+      byId[d.id] = d;
+    });
+
+    [
+      ["nav-doc-protocol", !!byId.protocol],
+      ["nav-doc-readme", !!byId.readme],
+      // "Case Studies" now navigates straight to case-studies/README.md's
+      // rendered content (see nav-doc-case-studies's click handler below),
+      // not an auto-generated list - so its availability tracks that one
+      // doc, the same way the other two nav buttons track theirs.
+      ["nav-doc-case-studies", !!byId["case-studies-readme"]],
+    ].forEach(function (pair) {
+      var button = document.getElementById(pair[0]);
+      button.disabled = !pair[1];
+      button.title = pair[1] ? "" : "Not available in this install.";
+    });
+  }
+
+  function loadDocsNav() {
+    fetchJson("/api/docs").then(function (result) {
+      if (!result.ok) {
+        return;
+      }
+      docsList = result.body.docs || [];
+      setDocsNavAvailability();
+    });
+  }
+
+  // Highlights whichever top-bar nav button matches what's on screen right
+  // now: Wizard when the overlay is closed, the matching doc button when a
+  // top-level doc is open, Case Studies for both the index and any case
+  // study opened from it (there's no separate per-case-study nav button to
+  // light up instead).
+  function updateActiveNav() {
+    var activeId = "nav-wizard";
+    if (docsCurrentView && docsCurrentView.kind === "doc") {
+      if (docsCurrentView.id === "protocol") {
+        activeId = "nav-doc-protocol";
+      } else if (docsCurrentView.id === "readme") {
+        activeId = "nav-doc-readme";
+      } else {
+        // Every other doc id (case-studies-readme, case-studies-synthesis,
+        // case-studies-template, case-study-*) lives under the Case
+        // Studies section - there's no separate nav button for any of them.
+        activeId = "nav-doc-case-studies";
+      }
+    }
+    ["nav-wizard", "nav-doc-protocol", "nav-doc-readme", "nav-doc-case-studies"].forEach(
+      function (id) {
+        document
+          .getElementById(id)
+          .classList.toggle("topbar-nav-link-active", id === activeId);
+      }
+    );
+  }
+
+  function docsOverlayIsOpen() {
+    return document.getElementById("docs-overlay").style.display !== "none";
+  }
+
+  function updateDocsBackButton() {
+    document.getElementById("docs-overlay-back").style.display =
+      docsBackStack.length > 0 ? "" : "none";
+  }
+
+  function showDocsOverlay(title) {
+    document.getElementById("docs-overlay-title").textContent = title;
+    document.getElementById("docs-overlay").style.display = "";
+    document.getElementById("main-content").style.display = "none";
+  }
+
+  function closeDocsOverlay() {
+    document.getElementById("docs-overlay").style.display = "none";
+    document.getElementById("main-content").style.display = "";
+    docsCurrentView = null;
+    docsBackStack = [];
+    updateActiveNav();
+  }
+
+  // Renders `view` into the overlay without touching docsBackStack - the
+  // single place that actually draws a view, used both for forward
+  // navigation (after navigateDocs pushes the old view) and for Back (which
+  // pops instead of pushing). `view.kind` is always "doc" now - the
+  // Case Studies section's landing content is case-studies/README.md's own
+  // rendered HTML (doc id "case-studies-readme"), not a client-built list;
+  // see wizard_docs.py for how that doc, its supporting SYNTHESIS.md/
+  // TEMPLATE.md, and every individual case study all end up in the same
+  // fetchable doc corpus.
+  function renderDocView(view) {
+    docsCurrentView = view;
+    updateDocsBackButton();
+    updateActiveNav();
+    fetchJson("/api/docs/" + encodeURIComponent(view.id)).then(function (result) {
+      if (!result.ok) {
+        return;
+      }
+      showDocsOverlay(result.body.title);
+      document.getElementById("docs-overlay-body").innerHTML = result.body.html;
+      // A link rendered by wizard_markdown.py's link_resolver (e.g.
+      // case-studies/README.md's own "../README.md#measured-impact" link)
+      // may carry a fragment identifying a heading inside *this* doc -
+      // scroll it into view once the HTML above is actually in the DOM.
+      if (view.fragment) {
+        var target = document.getElementById(view.fragment);
+        if (target) {
+          target.scrollIntoView();
+        }
+      }
+    });
+  }
+
+  // Forward navigation: if the overlay is already open, the view it's
+  // currently showing goes onto the back stack first, so Back can return to
+  // it - whether this navigation came from the top bar (e.g. clicking
+  // README while a case study is open) or from inside the overlay itself
+  // (e.g. clicking a case study from the index).
+  function navigateDocs(view) {
+    if (docsOverlayIsOpen() && docsCurrentView) {
+      docsBackStack.push(docsCurrentView);
+    }
+    renderDocView(view);
+  }
+
+  function docsBack() {
+    if (docsBackStack.length === 0) {
+      closeDocsOverlay();
+      return;
+    }
+    renderDocView(docsBackStack.pop());
+    updateDocsBackButton();
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     loadState();
+    loadDocsNav();
+    updateActiveNav();
+
+    document.getElementById("nav-doc-protocol").addEventListener("click", function () {
+      navigateDocs({ kind: "doc", id: "protocol" });
+    });
+    document.getElementById("nav-doc-readme").addEventListener("click", function () {
+      navigateDocs({ kind: "doc", id: "readme" });
+    });
+    document.getElementById("nav-doc-case-studies").addEventListener("click", function () {
+      navigateDocs({ kind: "doc", id: "case-studies-readme" });
+    });
+    document.getElementById("nav-wizard").addEventListener("click", function () {
+      closeDocsOverlay();
+    });
+    document.getElementById("docs-overlay-back").addEventListener("click", function () {
+      docsBack();
+    });
+    document.getElementById("docs-overlay-close").addEventListener("click", function () {
+      closeDocsOverlay();
+    });
+    // Delegated (not per-link) since the overlay body's content is replaced
+    // wholesale on every navigation - wizard_markdown.py's link_resolver
+    // marks an in-app-navigable link with data-doc-id/-fragment instead of
+    // a real href (see its docstring: single-use exchange-token URLs can't
+    // support real page navigation), so clicking one routes through
+    // navigateDocs exactly like the old case-study list buttons did.
+    document.getElementById("docs-overlay-body").addEventListener("click", function (event) {
+      var link = event.target.closest("[data-doc-id]");
+      if (!link) {
+        return;
+      }
+      event.preventDefault();
+      navigateDocs({
+        kind: "doc",
+        id: link.dataset.docId,
+        fragment: link.dataset.docFragment || null,
+      });
+    });
 
     document.getElementById("discover-button").addEventListener("click", function () {
       setDiscoverMessage("Running discover…");
