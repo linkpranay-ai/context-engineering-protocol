@@ -21,6 +21,20 @@
       "input": "We have coding conventions scattered across CONTRIBUTING.md, a wiki, and some PDFs — can you compile them into one scope-aware guidelines doc for the team?",
       "not_expected_skill": "autoscaffold-content",
       "notes": "Compiling existing scattered guideline sources is compiling-project-guidelines's job, not this skill's — this skill only generates new starter content for an empty, already-resolved layer, never reconciles existing docs."
+    },
+    {
+      "id": "ult-autoscaffold-content-04",
+      "type": "positive",
+      "input": "This is a big monorepo — ult-repo-layout resolved our How-L2 path but there's nothing there yet, and one overview file won't cut it with this many subsystems. Can you triage the modules and generate per-module architecture docs for the ones that actually matter?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Phase B large-repo trigger: explicit per-module triage/tiering request against an already-resolved, empty layer — should route to the Step 4 large-repo fork, not the Phase A single-overview path."
+    },
+    {
+      "id": "ult-autoscaffold-content-05",
+      "type": "positive",
+      "input": "I already ran the autoscaffold content skill on this repo yesterday and it generated a few modules before I had to stop. Can we pick back up where it left off instead of starting over?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Phase B resume trigger: an existing TRIAGE-STATE.json checkpoint from a prior run — should route to the Step 2.5 resume check (report progress, continue vs. restart), never a silent restart."
     }
   ]
 }
