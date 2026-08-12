@@ -1,8 +1,8 @@
 ---
 name: autoscaffold-content
-description: Generate real starter content for a project's What-L2 (requirements) and How-L2 (architecture/conventions) CEP layers once ult-repo-layout has resolved their paths but found them empty — an honest, minimal, YAML-frontmatter-first overview document per layer for small/single targets, or graph-informed per-module tiering with resumable per-module CONTEXT.md generation and a rendered CEP-INDEX.md router for large repos. Do NOT use to enforce layout paths or run layer discovery — that's ult-repo-layout. Do NOT use to compile or reconcile existing guideline documents — that's compiling-project-guidelines. Do NOT expect built-in domain-specific content packs (telecom, fintech, etc.) — that mechanism doesn't exist yet (Phase C, unbuilt).
+description: Generate real starter content for a project's What-L2 (requirements) and How-L2 (architecture/conventions) CEP layers once ult-repo-layout has resolved their paths but found them empty — an honest, minimal, YAML-frontmatter-first overview document per layer for small/single targets, or graph-informed per-module tiering with resumable per-module CONTEXT.md generation and a rendered CEP-INDEX.md router for large repos, optionally informed by a user-supplied domain-pack of terminology/references if one is configured. Do NOT use to enforce layout paths or run layer discovery — that's ult-repo-layout. Do NOT use to compile or reconcile existing guideline documents — that's compiling-project-guidelines. Do NOT use to author or generate a domain pack — this skill only ever consumes one you already wrote.
 namespace: ult
-version: 0.2.0
+version: 0.3.0
 origin: ground-up
 author: Pranay Mishra
 maintainer: Pranay Mishra
@@ -16,11 +16,12 @@ tier: draft
 
 # ult-autoscaffold-content
 
-**Status: Phase A + Phase B (empty-case single-overview generation, plus
-large-repo triage/tiering and resume/checkpoint).** Phase C (domain packs)
-and Phase D (wizard integration, CI wiring) are designed but not yet built
-— see `D24-WIZARD-REMAINING-WORK.md` in the design repo for the full phase
-sequence. Nothing in this file should be read as covering those phases.
+**Status: Phase A + Phase B + Phase C (empty-case single-overview
+generation, large-repo triage/tiering and resume/checkpoint, and optional
+domain-pack consumption).** Phase D (wizard integration, CI wiring) is
+designed but not yet built — see `D24-WIZARD-REMAINING-WORK.md` in the
+design repo for the full phase sequence. Nothing in this file should be
+read as covering that phase.
 
 ## Overview
 
@@ -211,6 +212,49 @@ ambiguous, ask the user rather than guessing; a wrong guess in either
 direction either undersells a big repo with one thin file or overwhelms a
 small one with unnecessary tiering ceremony.
 
+## Step 4.5 — Domain pack (optional)
+
+Check `context-config.yaml` for `autoscaffold_content.domain_pack_path`.
+This key is absent by default — most runs have no domain pack, and that's
+the normal case, not a degraded one.
+
+- **Key absent or unset:** state so, one line ("No domain pack configured —
+  proceeding on observed evidence only"), and continue unchanged.
+- **Key set, but the path doesn't exist:** tell the user plainly the
+  configured pack is missing, and continue without it — never invent pack
+  content, never block the run over a missing optional file.
+- **Key set, and the file exists:** Read it directly. No script parses or
+  schema-validates a domain pack — same consumption model this skill
+  already uses for `context-config.yaml` itself, and the same "no PyYAML
+  dependency, no YAML-parsing script anywhere in this repo" convention
+  every other config file in this project follows. See
+  `starter_kits/context_engineering/domain-pack.yaml.template` for the
+  schema and field-by-field docs. Use its `terminology`/
+  `standard_references`/`module_patterns` sections only as vocabulary and
+  citation aids for Step 5/5b's prose — **never** as license to assert
+  something the codebase doesn't evidence (the "TBD when genuinely
+  unknown" rule from Step 5 still governs), **never** written into
+  generated frontmatter (frontmatter schema is unchanged by this step),
+  and **never** consulted for Step 4's tiering (already decided by the
+  time this step runs — tiering stays purely structural, on purpose).
+
+**§18.8 M3 coupling check (done as part of designing this step, not
+deferred to later):** checked a minimal strawman schema against §18.4's
+four reused patterns for hidden coupling before building this. Router file
+and YAML-frontmatter-first: no coupling — a pack never adds `CEP-INDEX.md`
+rows or frontmatter fields. Template-plus-human-extension: the one real
+risk found — a pack could tempt confident-sounding prose not actually
+grounded in the repo — mitigated by the explicit rule above. Two-pass
+triage: the other real risk — a pack claiming a module is important could
+bias tiering — mitigated by placing this step *after* Step 4, not before,
+so pack content is structurally incapable of reaching the tiering logic.
+No blocking coupling found once both guardrails are in place, so this step
+ships alongside the homework rather than waiting on a separate pass.
+
+OSS ships **zero built-in domain packs** — this step only ever consumes a
+pack the user already wrote themselves; it never authors, suggests, or
+scaffolds one.
+
 ## Step 5 — Generate (small/single-overview case)
 
 Write one document per requested box. Template-plus-human-extension: this is
@@ -280,14 +324,17 @@ filename than what the wizard's card specified.
 ## Step 7 — Report back
 
 **Small/single-overview case:** state plainly which file(s) you wrote, at
-which path(s), and — if this run was triggered by a wizard card — remind
-the user to go back to the wizard tab and click "Check now" to confirm the
-box picked it up.
+which path(s), whether a domain pack was used (per Step 4.5) and, if
+this run was triggered by a wizard card — remind the user to go back to
+the wizard tab and click "Check now" to confirm the box picked it up.
 
 **Large-repo case:** report:
 - The graph mode used (graph-informed or heuristic, per Step 3.5's
   one-liner requirement) and, if heuristic, the lower-confidence caveat
   again here so it isn't lost between steps.
+- Domain pack status, per Step 4.5: used `<path>`, not configured, or
+  configured but missing — same "state which mode you used" convention as
+  the graph-mode line above.
 - The tier summary (module counts per tier) and how many were generated
   this run vs. skipped vs. still pending.
 - The path to `CEP-INDEX.md` (the router file) and to `TRIAGE-STATE.json`
@@ -298,8 +345,21 @@ box picked it up.
 
 ## What this skill deliberately does not do
 
-- **No domain packs.** No pluggable domain-specific content (telecom,
-  fintech, etc.) — §18.8's mechanism is still undesigned (Phase C).
+- **Does not author or generate domain packs.** Only ever consumes a
+  user-supplied one if `autoscaffold_content.domain_pack_path` is
+  configured (Step 4.5) — OSS ships zero built-in packs, and this skill has
+  no mechanism to create one for you. See
+  `starter_kits/context_engineering/domain-pack.yaml.template` for the
+  shape to copy and fill in yourself.
+- **Never mechanically parses or schema-validates a domain pack.** It's
+  read directly by the agent as advisory context, the same way
+  `context-config.yaml` itself is — no Python script touches it, no PyYAML
+  dependency, no structured validation. A malformed pack degrades to "the
+  agent does its best reading it," not a crash.
+- **Never lets a domain pack influence tiering.** Module importance
+  (Step 4) stays purely dependency-rank/file-count based, regardless of
+  what a pack's `module_patterns` section claims — checked explicitly per
+  §18.8 M3's coupling-check requirement (see Step 4.5).
 - **No GLOSSARY.md, no ARCHITECTURE.md-specifically-named file.** Small
   targets get one honestly-titled overview file per box; large targets get
   per-module `CONTEXT.md` files plus `CEP-INDEX.md` — no other fixed
@@ -315,6 +375,7 @@ box picked it up.
   consults whatever graph already exists, inheriting
   `CONSUMING-CODE-GRAPH.md`'s own gated escalation rather than
   reimplementing it — see Step 3.5.
-- **Never picks the tiering thresholds or graph mode silently.** Both are
-  always stated to the user (Step 3.5's mode one-liner, Step 4's tier
-  table) — never a quiet default buried in a report nobody reads.
+- **Never picks the tiering thresholds, graph mode, or domain-pack status
+  silently.** All three are always stated to the user (Step 3.5's mode
+  one-liner, Step 4's tier table, Step 4.5/Step 7's pack-status line) —
+  never a quiet default buried in a report nobody reads.

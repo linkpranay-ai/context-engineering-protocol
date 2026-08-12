@@ -35,6 +35,20 @@
       "input": "I already ran the autoscaffold content skill on this repo yesterday and it generated a few modules before I had to stop. Can we pick back up where it left off instead of starting over?",
       "expected_skill": "autoscaffold-content",
       "notes": "Phase B resume trigger: an existing TRIAGE-STATE.json checkpoint from a prior run — should route to the Step 2.5 resume check (report progress, continue vs. restart), never a silent restart."
+    },
+    {
+      "id": "ult-autoscaffold-content-06",
+      "type": "positive",
+      "input": "We've got a domain-pack.yaml at org/domain-pack.yaml with our telecom terminology and standard references configured in context-config.yaml — use it while generating the How-L2 overview.",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Phase C domain-pack trigger: a configured, user-supplied pack should route to the Step 4.5 optional-consumption step, folding its vocabulary/references into generation prose only."
+    },
+    {
+      "id": "ult-autoscaffold-content-07-negative",
+      "type": "negative",
+      "input": "Can you create a domain-pack.yaml for our telecom vertical so future scaffolding runs use the right terminology?",
+      "not_expected_skill": "autoscaffold-content",
+      "notes": "This skill only ever consumes a user-supplied domain pack (Step 4.5) — it has no mechanism to author or generate one; OSS ships zero built-in packs and there's no separate authoring skill for this either."
     }
   ]
 }

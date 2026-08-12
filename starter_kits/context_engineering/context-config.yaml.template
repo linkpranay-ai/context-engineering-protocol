@@ -211,3 +211,13 @@ graphify:
   # Path filtering is post-query: layer assignment is determined by node file path prefix
   # what-l3 nodes: file path starts with the what_l3.path above
   # what-l2 nodes: file path starts with the what_l2.path above
+
+autoscaffold_content:
+  # Optional domain pack (§18.8) for ult-autoscaffold-content — seeds
+  # vocabulary/citations for its generated prose. Absent by default = zero
+  # behavior change (generation proceeds on observed evidence only, no
+  # domain-vocabulary hints). OSS ships zero built-in packs: copy
+  # starter_kits/context_engineering/domain-pack.yaml.template, fill in
+  # your own vertical's terminology/references/module patterns, then point
+  # this key at your copy.
+  # domain_pack_path: <path to your domain-pack.yaml, e.g. org/domain-pack.yaml>
