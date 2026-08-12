@@ -1,0 +1,26 @@
+{
+  "skill": "autoscaffold-content",
+  "cases": [
+    {
+      "id": "ult-autoscaffold-content-01",
+      "type": "positive",
+      "input": "ult-repo-layout confirmed our What-L2 path at docs/requirements/ but it's empty — can you generate a starting requirements overview there?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Canonical trigger: an already-resolved, empty What-L2 layer needing a real starter document."
+    },
+    {
+      "id": "ult-autoscaffold-content-02",
+      "type": "positive",
+      "input": "Write requirements/specs documentation for this project at `docs/requirements/`. Cover what the project is, who it's for, and the functional requirements, in whatever files make sense under the directory — a single overview file is fine to start.",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Matches the exact prompt shape ult-layout-wizard's What/How preview cards hand the user — the wizard-card invocation path (Step 1 mode 1), not just standalone conversational phrasing."
+    },
+    {
+      "id": "ult-autoscaffold-content-03-negative",
+      "type": "negative",
+      "input": "We have coding conventions scattered across CONTRIBUTING.md, a wiki, and some PDFs — can you compile them into one scope-aware guidelines doc for the team?",
+      "not_expected_skill": "autoscaffold-content",
+      "notes": "Compiling existing scattered guideline sources is compiling-project-guidelines's job, not this skill's — this skill only generates new starter content for an empty, already-resolved layer, never reconciles existing docs."
+    }
+  ]
+}
