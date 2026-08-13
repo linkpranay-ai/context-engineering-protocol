@@ -1,0 +1,67 @@
+# Domain Pack Template (§18.8)
+#
+# OPTIONAL, user-supplied. Seeds domain-specific vocabulary for
+# ult-autoscaffold-content's generated prose (What-L2/How-L2 overview files
+# and per-module CONTEXT.md files). OSS ships ZERO built-in domain packs —
+# this file is a SHAPE to copy and fill in with your own vertical's
+# conventions, not real content itself. Every value below is a placeholder;
+# replace them with terms, references, and patterns that actually apply to
+# your project.
+#
+# Setup: copy this file somewhere in your own repo (e.g.
+# org/domain-pack.yaml), fill it in, then point
+# context-config.yaml's `autoscaffold_content.domain_pack_path` at your
+# copy. Leave that key unset/absent and nothing here has any effect.
+#
+# Consumption model (deliberate, see ult-autoscaffold-content/SKILL.md
+# Step 4.5 and its §18.8 M3 coupling-check note):
+#   - Read directly by the generating agent. No script parses or
+#     schema-validates this file — same convention every other YAML config
+#     in this project follows (context-config.yaml itself included). A
+#     malformed or partially-filled pack just means the agent does its
+#     best reading it, not a crash.
+#   - Used ONLY to inform generation-time prose — correct terminology,
+#     correct standard citations. Never a license to assert something the
+#     codebase doesn't evidence; the "write TBD when genuinely unknown"
+#     rule always wins over anything in this file.
+#   - Never written into generated frontmatter — frontmatter schema is
+#     unchanged by this file's existence.
+#   - Never consulted during module tiering/triage (Step 4). Tier
+#     assignment stays purely dependency-rank/file-count based, on
+#     purpose, regardless of what `module_patterns` below claims.
+
+domain_pack_version: 1
+
+name: <short label for this vertical, e.g. "telecom" or "fintech">
+description: <one-line description of what this pack covers>
+
+terminology:
+  # Domain vocabulary the agent should use consistently in generated
+  # prose, instead of guessing or inventing its own phrasing. Add as many
+  # entries as are useful — an empty list is a valid, no-op pack section.
+  - term: <e.g. "RAN">
+    definition: <e.g. "Radio Access Network — the subsystem handling radio-layer connectivity">
+  # - term: <...>
+  #   definition: <...>
+
+standard_references:
+  # Standards/specs commonly cited in this vertical, so generated prose
+  # references them correctly instead of omitting or misnaming them.
+  - id: <e.g. "3GPP TS 38.300">
+    title: <e.g. "NR and NG-RAN Overall Description">
+    url: <optional — leave blank if not applicable>
+  # - id: <...>
+  #   title: <...>
+  #   url: <...>
+
+module_patterns:
+  # Common module/directory naming conventions in this vertical — purely
+  # advisory context for generation-time prose (e.g. "this looks like the
+  # gateway subsystem, describe it accordingly"). NEVER consulted during
+  # Step 4's tiering — module importance there is decided by real
+  # dependency/file-count data, not by what this section says a directory
+  # name usually means.
+  - pattern: <e.g. "ran/" or "*-gateway/">
+    meaning: <e.g. "Typically the Radio Access Network subsystem in telecom repos">
+  # - pattern: <...>
+  #   meaning: <...>

@@ -1,0 +1,54 @@
+{
+  "skill": "autoscaffold-content",
+  "cases": [
+    {
+      "id": "ult-autoscaffold-content-01",
+      "type": "positive",
+      "input": "ult-repo-layout confirmed our What-L2 path at docs/requirements/ but it's empty — can you generate a starting requirements overview there?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Canonical trigger: an already-resolved, empty What-L2 layer needing a real starter document."
+    },
+    {
+      "id": "ult-autoscaffold-content-02",
+      "type": "positive",
+      "input": "Run the `ult-autoscaffold-content` skill against this repo. It writes the requirements/specs documentation to `docs/requirements/` itself - no separate prompt to write.",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Matches the exact prompt shape ult-cep-wizard's What/How preview cards hand the user as of D24 Phase D — the wizard-card invocation path (Step 1 mode 1), not just standalone conversational phrasing. Cards now point at running this skill by name (mirroring guidelines_card()'s shape) rather than authoring a freeform generation prompt inline."
+    },
+    {
+      "id": "ult-autoscaffold-content-03-negative",
+      "type": "negative",
+      "input": "We have coding standards spread across CONTRIBUTING.md, a wiki, and some PDFs — can you pull it all together into one consistent style write-up for new hires?",
+      "not_expected_skill": "autoscaffold-content",
+      "notes": "Compiling existing scattered guideline sources is compiling-project-guidelines's job, not this skill's — this skill only generates new starter content for an empty, already-resolved layer, never reconciles existing docs. Reworded off the skill's own description vocabulary (compile/conventions/guideline/documents) to clear the keyword-overlap trigger gate while keeping the same intent."
+    },
+    {
+      "id": "ult-autoscaffold-content-04",
+      "type": "positive",
+      "input": "This is a big monorepo — ult-repo-layout resolved our How-L2 path but there's nothing there yet, and one overview file won't cut it with this many subsystems. Can you triage the modules and generate per-module architecture docs for the ones that actually matter?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Phase B large-repo trigger: explicit per-module triage/tiering request against an already-resolved, empty layer — should route to the Step 4 large-repo fork, not the Phase A single-overview path."
+    },
+    {
+      "id": "ult-autoscaffold-content-05",
+      "type": "positive",
+      "input": "I already ran the autoscaffold content skill on this repo yesterday and it generated a few modules before I had to stop. Can we pick back up where it left off instead of starting over?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Phase B resume trigger: an existing TRIAGE-STATE.json checkpoint from a prior run — should route to the Step 2.5 resume check (report progress, continue vs. restart), never a silent restart."
+    },
+    {
+      "id": "ult-autoscaffold-content-06",
+      "type": "positive",
+      "input": "We've got a domain-pack.yaml at org/domain-pack.yaml with our telecom terminology and standard references configured in context-config.yaml — use it while generating the How-L2 overview.",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Phase C domain-pack trigger: a configured, user-supplied pack should route to the Step 4.5 optional-consumption step, folding its vocabulary/references into generation prose only."
+    },
+    {
+      "id": "ult-autoscaffold-content-07-negative",
+      "type": "negative",
+      "input": "Can you put together a telecom vocabulary and citations starter file for our vertical that I can wire in later?",
+      "not_expected_skill": "autoscaffold-content",
+      "notes": "This skill only ever consumes a user-supplied domain pack (Step 4.5) — it has no mechanism to author or generate one; OSS ships zero built-in packs and there's no separate authoring skill for this either. Reworded off the skill's own description vocabulary (domain/pack/yaml/scaffolding/terminology) to clear the keyword-overlap trigger gate while keeping the same intent."
+    }
+  ]
+}

@@ -15,7 +15,7 @@ Most of this repo is static skill/prompt/script content with no runtime attack
 surface of its own — it runs inside whatever agent runtime or CI job invokes it, under
 that environment's own security posture.
 
-`ult-layout-wizard` (D24) is the one exception, and the first place this repo binds a
+`ult-cep-wizard` (D24) is the one exception, and the first place this repo binds a
 real network port. It is a **local, user-launched, on-demand** tool: it starts when
 you run it, binds `127.0.0.1` only, and exits when you close it or hit Ctrl+C —
 never a background daemon or a hosted/managed service (see `ROADMAP.md`'s "Not on
@@ -34,9 +34,9 @@ query string). Neither `/api/stage` nor `/api/apply` writes to disk directly; bo
 hand off to `ult-repo-layout`'s own `confirm_layers.py` module (imported and called
 in-process — the same code path its CLI uses) to do the actual commit. Full detail,
 including the exact gate order and each route's own additional guards:
-[`.github/skills/ult-layout-wizard/references/wizard-security-model.md`](.github/skills/ult-layout-wizard/references/wizard-security-model.md).
+[`.github/skills/ult-cep-wizard/references/wizard-security-model.md`](.github/skills/ult-cep-wizard/references/wizard-security-model.md).
 
-If you find an issue in `ult-layout-wizard` — a containment bypass, an auth/session
+If you find an issue in `ult-cep-wizard` — a containment bypass, an auth/session
 flaw, a CSRF gap, a way to reach `/api/stage`, `/api/apply`, or `/api/discover`
 without clearing all three gates, or anything letting a request from outside
 `127.0.0.1` be treated as trusted — please report it privately per the process below

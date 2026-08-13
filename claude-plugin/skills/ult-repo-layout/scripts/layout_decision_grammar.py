@@ -4,10 +4,10 @@ artifact (`context-layout-discovery.md`).
 
 Factored out of discover_layers.py/confirm_layers.py (D24 v5 SS18 Phase 1,
 strategic decision S2 / open question Q-d) so a third caller
-(ult-layout-wizard's write path) can stage decision lines without reaching
+(ult-cep-wizard's write path) can stage decision lines without reaching
 into either module's internals. Before this module existed, the same
 `TITLE_TO_BASE_KEY` map was independently re-imported by confirm_layers.py
-(`import discover_layers as dl`) and by ult-layout-wizard's
+(`import discover_layers as dl`) and by ult-cep-wizard's
 wizard_layout_source.py (its own importlib.import_module reach-in) - two
 un-factored copies of the same coupling.
 

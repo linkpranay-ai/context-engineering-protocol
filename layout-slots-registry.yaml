@@ -108,6 +108,30 @@ slots:
     producer: example-consumer
     consumers: ~   # none registered yet
 
+  - id: autoscaffold_content_state
+    project_layout_slot: true
+    kind: file
+    default_bucket: cache
+    pre_d21_default: starter_kit/autoscaffold-content/TRIAGE-STATE.json
+    workspace_root_leaf: cache/autoscaffold-content/TRIAGE-STATE.json
+    config_key: ~   # NEW slot (D24 Phase B) -- no pre-existing config-key fallback
+    note: "JSON, not YAML, like decision_ledger above -- a machine-read/written checkpoint (per-module tier/status/output_path), reviewed via scaffold_state.py's own show/render-index output, never hand-edited outside that script."
+    producer: ult-autoscaffold-content
+    consumers:
+      - ult-autoscaffold-content/scripts/scaffold_state.py (read/write)
+
+  - id: autoscaffold_content_index
+    project_layout_slot: true
+    kind: file
+    default_bucket: cache
+    pre_d21_default: starter_kit/autoscaffold-content/CEP-INDEX.md
+    workspace_root_leaf: cache/autoscaffold-content/CEP-INDEX.md
+    config_key: ~   # NEW slot (D24 Phase B) -- no pre-existing config-key fallback
+    note: "derived, regenerable -- rendered from autoscaffold_content_state by scaffold_state.py render-index, never hand-edited (same framing as compiled_guidelines's note above)."
+    producer: ult-autoscaffold-content
+    consumers:
+      - ult-autoscaffold-content/SKILL.md Step 7 (report back, points the user at this file)
+
   - id: security_docs
     project_layout_slot: true
     kind: directory

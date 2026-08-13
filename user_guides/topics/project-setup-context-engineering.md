@@ -23,11 +23,13 @@ start Simple and add the Complex pieces later; nothing in Simple needs to be und
 layer paths, the Guidelines slot, the Trip-wire ledger status — in a browser instead
 of re-reading `context-config.yaml` by hand:
 ```
-python .github/skills/ult-layout-wizard/scripts/wizard_server.py .
+python .github/skills/ult-cep-wizard/scripts/wizard_server.py .
 ```
-See [`ult-layout-wizard`](../../.github/skills/ult-layout-wizard/SKILL.md). This is a
+See [`ult-cep-wizard`](../../.github/skills/ult-cep-wizard/SKILL.md). This is a
 status view that composes with the steps below, not a replacement for them — it won't
-run `init`/`discover` for you, and Phase 0 is browse-only (no writes yet).
+run `init`/`discover` for you, and Phase 0 is browse-only (no writes yet). If the
+What/How boxes resolve to an empty path, the wizard shows a stub prompt pointing at
+`ult-autoscaffold-content` (see steps 5-6 below) rather than a bare "not configured."
 
 ---
 
@@ -128,7 +130,11 @@ anything downstream is generated.
    automatically to the same `scripts/md_index.py` indexed mechanism as What-L1
    (`what_l2.index_path`, default `specs-out/l2_index.json`, and
    `what_l2.md_index_profile`, default `generic`) — no extra setup beyond having the
-   files in place.
+   files in place. **Nothing there yet?** Run
+   [`ult-autoscaffold-content`](../../.github/skills/ult-autoscaffold-content/SKILL.md)
+   instead of writing this by hand — it generates a real, honest starter draft (a
+   single overview for a small target, or graph-informed per-module tiering for a
+   large repo) once `ult-repo-layout` has resolved the path but found it empty.
 
 6. **Populate How-L2 (org conventions/templates)**: under the path you set for
    `how_l2` (default `org/`):
@@ -138,7 +144,9 @@ anything downstream is generated.
    org/guidelines/    — narrative guidance on house style
    ```
    `ult-context-generate` Step 2 reads these and caches the result to
-   `org-conventions/<task_type>.yaml`, gated on a non-empty `approved_by`.
+   `org-conventions/<task_type>.yaml`, gated on a non-empty `approved_by`. Same as
+   above — if this path is empty, `ult-autoscaffold-content` can scaffold a starter
+   draft rather than leaving you to write the first version from scratch.
 
 7. **Populate How-L1 (org-wide process standards) — optional, piloting**: if your
    org has its own CMMI/ISO/IEEE-style process standards you want incorporated,

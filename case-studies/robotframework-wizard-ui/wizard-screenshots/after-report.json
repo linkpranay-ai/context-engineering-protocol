@@ -1,0 +1,113 @@
+[
+  {
+    "stage": "opened_exchange_url",
+    "url": "http://127.0.0.1:56750/exchange?token=k3dl9q-G8Fsl00ML5qmZUhkryoOEyYqp795BOPkMIKU"
+  },
+  {
+    "stage": "page_loaded",
+    "title": "ult-cep-wizard"
+  },
+  {
+    "stage": "initial_state_detected",
+    "state": "steady_state",
+    "d20_initialized": false
+  },
+  {
+    "stage": "screenshot",
+    "file": "after-01-initial-state.png"
+  },
+  {
+    "stage": "skipped_discover",
+    "reason": "initial state was 'steady_state', not needs_discover"
+  },
+  {
+    "stage": "decisions_resolved",
+    "count": 0,
+    "detail": []
+  },
+  {
+    "stage": "screenshot",
+    "file": "after-03-decisions-resolved.png"
+  },
+  {
+    "stage": "apply_button_state",
+    "disabled": false
+  },
+  {
+    "stage": "clicked_apply"
+  },
+  {
+    "stage": "apply_confirmed",
+    "message": "Nothing to confirm - every field was already confirmed."
+  },
+  {
+    "stage": "screenshot",
+    "file": "after-04-steady-state.png"
+  },
+  {
+    "stage": "post_apply_state",
+    "state": "steady_state"
+  },
+  {
+    "stage": "stub_cards_observed",
+    "count": 3,
+    "detail": [
+      {
+        "desc": "",
+        "expected_path": "",
+        "has_prompt_text": false
+      },
+      {
+        "desc": "",
+        "expected_path": "",
+        "has_prompt_text": false
+      },
+      {
+        "desc": "A new, non-empty file at `starter_kit/project_guidelines/COMPILED-GUIDELINES.md`.",
+        "expected_path": "Expected: starter_kit/project_guidelines/COMPILED-GUIDELINES.md",
+        "has_prompt_text": true
+      }
+    ]
+  },
+  {
+    "stage": "screenshot",
+    "file": "after-05-boxes-and-stub-cards.png"
+  },
+  {
+    "stage": "docs_nav_opened",
+    "doc": "protocol",
+    "body_chars": 28316
+  },
+  {
+    "stage": "screenshot",
+    "file": "after-06-docs-protocol.png"
+  },
+  {
+    "stage": "docs_nav_opened",
+    "doc": "readme",
+    "body_chars": 20606
+  },
+  {
+    "stage": "screenshot",
+    "file": "after-06-docs-readme.png"
+  },
+  {
+    "stage": "docs_nav_opened",
+    "doc": "case-studies",
+    "body_chars": 8251
+  },
+  {
+    "stage": "screenshot",
+    "file": "after-06-docs-case-studies.png"
+  },
+  {
+    "stage": "page_errors",
+    "errors": []
+  },
+  {
+    "stage": "console_errors",
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  }
+]

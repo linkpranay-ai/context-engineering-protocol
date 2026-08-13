@@ -100,7 +100,8 @@ from pathlib import Path
 # §15.2 slot registry (Phase 1: context_packages; Phase 3b: + plans_output,
 # brainstorm_output; Phase 2: + compiled_guidelines, user_stories_output,
 # security_docs, security_report, project_plan_docs; trip-wire (CEP-1.0-ROADMAP.md
-# §7): + decision_ledger)
+# §7): + decision_ledger; D24 Phase B: + autoscaffold_content_state,
+# autoscaffold_content_index)
 # ---------------------------------------------------------------------------
 
 SLOT_REGISTRY = {
@@ -168,6 +169,23 @@ SLOT_REGISTRY = {
         # same bucket-reassignment rationale as compiled_guidelines above.
         "workspace_root_leaf": "cache/decision-ledger/DECISION-LEDGER.json",
         "owning_skill": "ult-institutional-memory-distill",
+    },
+    "autoscaffold_content_state": {
+        "kind": "file",
+        "default": "starter_kit/autoscaffold-content/TRIAGE-STATE.json",
+        # D24 Phase B - a derived/regenerable checkpoint (per-module tier/
+        # status/output_path), only ever written via scaffold_state.py,
+        # same bucket-reassignment rationale as decision_ledger above.
+        "workspace_root_leaf": "cache/autoscaffold-content/TRIAGE-STATE.json",
+        "owning_skill": "ult-autoscaffold-content",
+    },
+    "autoscaffold_content_index": {
+        "kind": "file",
+        "default": "starter_kit/autoscaffold-content/CEP-INDEX.md",
+        # D24 Phase B - rendered from autoscaffold_content_state by
+        # scaffold_state.py render-index, never hand-edited.
+        "workspace_root_leaf": "cache/autoscaffold-content/CEP-INDEX.md",
+        "owning_skill": "ult-autoscaffold-content",
     },
 }
 

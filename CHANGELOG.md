@@ -6,6 +6,22 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ult-autoscaffold-content` Phase B: silent tiering corruption on graphify cwd/path-relativity
+  mismatch.** If `graphify update` ran from a different working directory than `scan --repo-root`
+  expected, every `source_file` in `graph.json` carried a different leading path segment, so
+  `scaffold_state.py`'s `_module_of()` extracted the wrong module name for every node — every real
+  module silently defaulted to `in_degree: 0` and landed Tier 3, with no error or warning anywhere.
+  Found and self-corrected during the `robotframework-wizard-ui` case study; confirmed a recurrence
+  of the same cwd-relativity footgun already known to affect `graphify query`/`explain`/`affected`.
+  `scan --graph-mode graphify` now cross-checks the graph's own module names against `--repo-root`'s
+  real directories before tiering: zero overlap raises `GraphRepoRootMismatchError` (ERROR, exit 1,
+  no state written); partial overlap below 50% is a non-fatal `WARNING`, printed to stderr
+  immediately, persisted to `TRIAGE-STATE.json`'s `repo_scan.graph_module_overlap_warning`, and
+  echoed in `render-index`'s `CEP-INDEX.md` output — surfaced wherever an operator looks, never
+  silent.
+
 ## [0.4.0]
 
 21 commits since v0.3.0. Headline: two full protocol capabilities go from planned to shipped and

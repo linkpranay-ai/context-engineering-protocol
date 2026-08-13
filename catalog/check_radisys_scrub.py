@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 """
-Mechanical Radisys-reference scrub gate for ult-layout-wizard (D24 §18.9 Q-g, v5).
+Mechanical Radisys-reference scrub gate for ult-cep-wizard and
+ult-autoscaffold-content (D24 §18.9 Q-g, v5; ult-autoscaffold-content added Phase D).
 
 Q-g authorized porting patterns from Radisys's internal `ult-scaffold-repo` into
-this skill, "as long as we remove all the Radisys specific references" - but round-3
-adversarial review found that authorization alone was never backed by a mechanical
-check that the scrub actually happened, or *stayed* true as the skill evolves after
-the port. This script is that check: a case-insensitive deny-list grep across every
-file under the new skill's own directory, run as a required CI step on every PR that
-touches it (not a one-time port-time check, and not a repo-wide grep - a repo-wide
-grep would false-positive on this repo's own legitimate IETF/standards-body
-references in existing case studies, per the implementation plan's own risk R5).
+ult-cep-wizard, "as long as we remove all the Radisys specific references" - but
+round-3 adversarial review found that authorization alone was never backed by a
+mechanical check that the scrub actually happened, or *stayed* true as the skill
+evolves after the port. This script is that check: a case-insensitive deny-list grep
+across every file under each covered skill's own directory, run as a required CI
+step on every PR that touches either one (not a one-time port-time check, and not a
+repo-wide grep - a repo-wide grep would false-positive on this repo's own legitimate
+IETF/standards-body references in existing case studies, per the implementation
+plan's own risk R5).
+
+ult-autoscaffold-content is ground-up content, not ported from Radisys internal
+source the way ult-cep-wizard was (`origin: ground-up` in its own SKILL.md
+frontmatter) - it's covered here defensively anyway, per Phase D's explicit
+instruction, rather than assuming ground-up authorship guarantees a clean scan.
 
 Deny-list, per §18.4's "what's dropped" column plus the Radisys name itself:
   - "Radisys" (and the `Radi[Ss]ys` internal-shorthand variant)
@@ -25,14 +32,17 @@ origin) are handled with an inline `<!-- scrub-allow: reason -->` marker on the
 *same line* as the flagged term - reviewed like any other diff, not a blanket
 exemption file (Q-g, v5).
 
-Exits 1 if any un-allow-listed match is found under the skill's directory.
+Exits 1 if any un-allow-listed match is found under either skill's directory.
 """
 import re
 import sys
 from pathlib import Path
 
 LIBRARY_ROOT = Path(__file__).resolve().parent.parent
-SKILL_DIR = LIBRARY_ROOT / ".github" / "skills" / "ult-layout-wizard"
+SKILL_DIRS = (
+    LIBRARY_ROOT / ".github" / "skills" / "ult-cep-wizard",
+    LIBRARY_ROOT / ".github" / "skills" / "ult-autoscaffold-content",
+)
 
 ALLOW_MARKER_RE = re.compile(r"<!--\s*scrub-allow\s*:.*-->")
 
@@ -93,21 +103,24 @@ def scan_file(path: Path):
 
 
 def main():
-    if not SKILL_DIR.is_dir():
-        print(f"{SKILL_DIR} does not exist - nothing to scrub-check.")
-        return 0
-
     failures = []
     files_scanned = 0
-    for path in _iter_scannable_files(SKILL_DIR):
-        files_scanned += 1
-        rel = path.relative_to(LIBRARY_ROOT).as_posix()
-        for line_no, label, line_text in scan_file(path):
-            if label.startswith("undecodable"):
-                continue
-            failures.append(f"{rel}:{line_no}: [{label}] {line_text}")
+    for skill_dir in SKILL_DIRS:
+        if not skill_dir.is_dir():
+            print(f"{skill_dir} does not exist - nothing to scrub-check.")
+            continue
 
-    print(f"Scanned {files_scanned} file(s) under {SKILL_DIR.relative_to(LIBRARY_ROOT)}.")
+        dir_files = 0
+        for path in _iter_scannable_files(skill_dir):
+            dir_files += 1
+            files_scanned += 1
+            rel = path.relative_to(LIBRARY_ROOT).as_posix()
+            for line_no, label, line_text in scan_file(path):
+                if label.startswith("undecodable"):
+                    continue
+                failures.append(f"{rel}:{line_no}: [{label}] {line_text}")
+        print(f"Scanned {dir_files} file(s) under {skill_dir.relative_to(LIBRARY_ROOT)}.")
+
     if failures:
         print(f"\n{len(failures)} Radisys-scrub violation(s):\n")
         for f in failures:
@@ -118,7 +131,7 @@ def main():
             "marker on that same line rather than removing this check."
         )
         return 1
-    print("No Radisys-scrub violations found.")
+    print(f"No Radisys-scrub violations found ({files_scanned} file(s) total).")
     return 0
 
 

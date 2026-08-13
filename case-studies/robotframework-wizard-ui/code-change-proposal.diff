@@ -1,0 +1,19 @@
+diff --git a/src/robot/running/arguments/typeconverters.py b/src/robot/running/arguments/typeconverters.py
+index 13590fe..a01549e 100644
+--- a/src/robot/running/arguments/typeconverters.py
++++ b/src/robot/running/arguments/typeconverters.py
+@@ -51,7 +51,13 @@ class TypeConverter:
+                  languages: 'Languages|None' = None):
+         self.type_info = type_info
+         self.custom_converters = custom_converters
+-        self.languages = languages or Languages()
++        self._languages = languages
++
++    @property
++    def languages(self) -> 'Languages':
++        if self._languages is None:
++            self._languages = Languages()
++        return self._languages
+ 
+     @classmethod
+     def register(cls, converter: 'type[TypeConverter]') -> 'type[TypeConverter]':

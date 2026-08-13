@@ -314,7 +314,7 @@ index. Wired as an explicit optional step in `references/what-l1-fallback-query.
   `ult-repo-layout/SKILL.md` do. No reader-facing breakage today — the glossary is still one click
   away via `CONTRIBUTING.md` — but adding a direct pointer in each file would be more consistent.
   Pure polish, not blocking.
-- **`ult-layout-wizard` visual design pass.** **Status: implemented (Phase 2, D24 §18.14),** landed
+- **`ult-cep-wizard` visual design pass.** **Status: implemented (Phase 2, D24 §18.14),** landed
   alongside the brownfield onboarding state machine rather than Phase 1 as originally placed here —
   the state-router work touched the same static files a second time anyway, so the two were done in
   one pass instead of two. `scripts/static/wizard.css` now pulls its palette from this README's own
@@ -397,7 +397,7 @@ Some things are deliberately out of scope rather than deferred:
   a persistent background service. **Narrower line, stated explicitly:** a user-launched, on-demand
   setup/status tool that starts when invoked, does its work (or shows a snapshot of current state),
   and exits is in scope — no continuous file-watching, no background daemon, no live-patching of
-  source. See the onboarding wizard (`.github/skills/ult-layout-wizard/`, design decision D24 — see
+  source. See the onboarding wizard (`.github/skills/ult-cep-wizard/`, design decision D24 — see
   `references/design-scratchpad-glossary.md`).
 - **Multiple ranked search modes / multi-bundle registry** (from `okf-gem`). No demonstrated need:
   CEP's single deterministic ranking and per-project single corpus already serve real usage. Same
