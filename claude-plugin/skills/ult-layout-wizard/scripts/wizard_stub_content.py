@@ -30,13 +30,18 @@ later re-reads the expected path on an explicit "Check now" click). The other mo
 **paste-back**, ends with "the wizard writes the content to the resolved target path
 itself, through the same write endpoint" - that endpoint does not exist until Phase
 1, so a Phase-0 paste-back card would end in a dead affordance. This module therefore
-only builds agent-writes-in-place cards. Guidelines is a special case: its content
-isn't freeform prose the user asks an agent to write, it's a compiled artifact
-produced by the `compiling-project-guidelines` skill itself, so its card points at
-running that skill rather than emitting a paste-into-your-agent prompt block.
-Trip-wire has no card at all - it's a derived/regenerable log populated by
-`decision_ledger.py` as things happen, not authored content (same reasoning
-`wizard_tripwire.py`'s own docstring gives for treating it as read-only-derived).
+only builds agent-writes-in-place cards. All three boxes now converge on the same
+card shape (D24 Phase D): each card's `prompt_text` points at running a real skill
+rather than authoring a freeform generation prompt this module would have to keep
+in sync with that skill's own `SKILL.md` by hand. Guidelines points at
+`compiling-project-guidelines` (its content is a compiled artifact, not prose a
+user asks an agent to freehand). What/How point at `ult-autoscaffold-content`, once
+it existed to point at - `_what_how_prompt()` used to author the What/How prompt
+text inline; that's superseded outright as of Phase D, no fallback kept, per the
+same two-sources-of-truth reasoning that already governed Guidelines. Trip-wire has
+no card at all - it's a derived/regenerable log populated by `decision_ledger.py` as
+things happen, not authored content (same reasoning `wizard_tripwire.py`'s own
+docstring gives for treating it as read-only-derived).
 """
 
 from __future__ import annotations
@@ -82,18 +87,22 @@ def _has_content(repo_root: Path, rel_path: str) -> bool:
 
 
 def _what_how_prompt(box_title: str, expected_path: str) -> str:
-    if box_title == "What":
-        return (
-            f"Write the requirements/specs documentation for this project to "
-            f"`{expected_path}`. Cover what the project is, who it's for, and its "
-            f"functional requirements, in whatever files make sense under that "
-            f"directory - a single overview file is fine to start."
-        )
+    """Points at running `ult-autoscaffold-content` rather than authoring a freeform
+    generation prompt inline (D24 Phase D, mirrors `guidelines_card()`'s shape below).
+    Unconditional - this module never checks whether the skill is actually installed
+    before naming it, same as `guidelines_card()` doesn't for
+    `compiling-project-guidelines`; a missing skill is a fail-fast case for whatever
+    the user pastes this into, not a reason to keep the old freeform prompt alive as
+    a silent fallback."""
+    content_kind = (
+        "requirements/specs documentation"
+        if box_title == "What"
+        else "architecture/conventions documentation"
+    )
     return (
-        f"Write the architecture/conventions documentation for this project to "
-        f"`{expected_path}`. Cover the project's structure, key design decisions, "
-        f"and any conventions a new contributor should follow, in whatever files "
-        f"make sense under that directory - a single overview file is fine to start."
+        f"Run the `ult-autoscaffold-content` skill against this repo. It writes "
+        f"the {content_kind} to `{expected_path}` itself - no separate prompt to "
+        f"write."
     )
 
 

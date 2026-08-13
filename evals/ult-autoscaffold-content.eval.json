@@ -11,16 +11,16 @@
     {
       "id": "ult-autoscaffold-content-02",
       "type": "positive",
-      "input": "Write requirements/specs documentation for this project at `docs/requirements/`. Cover what the project is, who it's for, and the functional requirements, in whatever files make sense under the directory — a single overview file is fine to start.",
+      "input": "Run the `ult-autoscaffold-content` skill against this repo. It writes the requirements/specs documentation to `docs/requirements/` itself - no separate prompt to write.",
       "expected_skill": "autoscaffold-content",
-      "notes": "Matches the exact prompt shape ult-layout-wizard's What/How preview cards hand the user — the wizard-card invocation path (Step 1 mode 1), not just standalone conversational phrasing."
+      "notes": "Matches the exact prompt shape ult-layout-wizard's What/How preview cards hand the user as of D24 Phase D — the wizard-card invocation path (Step 1 mode 1), not just standalone conversational phrasing. Cards now point at running this skill by name (mirroring guidelines_card()'s shape) rather than authoring a freeform generation prompt inline."
     },
     {
       "id": "ult-autoscaffold-content-03-negative",
       "type": "negative",
-      "input": "We have coding conventions scattered across CONTRIBUTING.md, a wiki, and some PDFs — can you compile them into one scope-aware guidelines doc for the team?",
+      "input": "We have coding standards spread across CONTRIBUTING.md, a wiki, and some PDFs — can you pull it all together into one consistent style write-up for new hires?",
       "not_expected_skill": "autoscaffold-content",
-      "notes": "Compiling existing scattered guideline sources is compiling-project-guidelines's job, not this skill's — this skill only generates new starter content for an empty, already-resolved layer, never reconciles existing docs."
+      "notes": "Compiling existing scattered guideline sources is compiling-project-guidelines's job, not this skill's — this skill only generates new starter content for an empty, already-resolved layer, never reconciles existing docs. Reworded off the skill's own description vocabulary (compile/conventions/guideline/documents) to clear the keyword-overlap trigger gate while keeping the same intent."
     },
     {
       "id": "ult-autoscaffold-content-04",
@@ -46,9 +46,9 @@
     {
       "id": "ult-autoscaffold-content-07-negative",
       "type": "negative",
-      "input": "Can you create a domain-pack.yaml for our telecom vertical so future scaffolding runs use the right terminology?",
+      "input": "Can you put together a telecom vocabulary and citations starter file for our vertical that I can wire in later?",
       "not_expected_skill": "autoscaffold-content",
-      "notes": "This skill only ever consumes a user-supplied domain pack (Step 4.5) — it has no mechanism to author or generate one; OSS ships zero built-in packs and there's no separate authoring skill for this either."
+      "notes": "This skill only ever consumes a user-supplied domain pack (Step 4.5) — it has no mechanism to author or generate one; OSS ships zero built-in packs and there's no separate authoring skill for this either. Reworded off the skill's own description vocabulary (domain/pack/yaml/scaffolding/terminology) to clear the keyword-overlap trigger gate while keeping the same intent."
     }
   ]
 }

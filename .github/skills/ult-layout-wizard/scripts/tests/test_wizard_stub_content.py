@@ -80,6 +80,12 @@ class TestWhatHowCard(unittest.TestCase):
         self.assertNotEqual(what_card.prompt_text, how_card.prompt_text)
         self.assertEqual(how_card.box_title, "How")
 
+    def test_what_and_how_cards_name_the_autoscaffold_skill(self):
+        what_card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
+        how_card = wsc.what_how_card("How", self.root, ["org/"])
+        self.assertIn("ult-autoscaffold-content", what_card.prompt_text)
+        self.assertIn("ult-autoscaffold-content", how_card.prompt_text)
+
 
 class TestGuidelinesCard(unittest.TestCase):
     def setUp(self):
