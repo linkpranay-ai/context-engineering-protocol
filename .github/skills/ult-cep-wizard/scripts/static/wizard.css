@@ -1,0 +1,903 @@
+/* wizard.css - styling for ult-cep-wizard's frontend (Phase 0/1 boxes,
+   decisions, picker; Phase 2 onboarding-state screens). No build step, no
+   framework - plain CSS served as a static asset (see wizard_server.py's
+   STATIC_ASSETS closed set).
+
+   Palette (D24 §18.14 section D): taken verbatim from assets/readme/hero.svg
+   (grep-confirmed, not eyeballed) so the wizard reads as the same product as
+   the rest of CEP rather than an unstyled internal tool. Exposed as custom
+   properties below - navy for headers/panels, orange for primary actions,
+   cyan for informational accents, the two light backgrounds for page/panel
+   fill, blue-gray for muted text - with a prefers-color-scheme override
+   swapping to a dark-navy ground while keeping the same accent hues, since
+   `color-scheme: light dark` was already the stated intent before this pass. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg-start: #F7FBFE;
+  --bg-end: #EEF4F9;
+  --panel-bg: #FFFFFF;
+  --panel-alt-bg: #ECF7FD;
+  --border: #B8DEEE;
+
+  --navy-900: #152238;
+  --navy-800: #18314E;
+  --navy-700: #1A446F;
+
+  --orange: #FF6A42;
+  --orange-bright: #FF7543;
+
+  --cyan: #22C4E5;
+  --cyan-light: #8DE7FF;
+  --cyan-pale: #D9F7FF;
+
+  --text: #18314E;
+  --muted: #44586E;
+  --faint: #93ADC8;
+  --faintest: #90A7C1;
+
+  --danger: #C23B32;
+  --danger-bg: #FBEAE8;
+  --success: #237A45;
+  --success-bg: #E7F4EC;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-start: #0E1826;
+    --bg-end: #152238;
+    --panel-bg: #18314E;
+    --panel-alt-bg: #1A446F;
+    --border: #2C4A6E;
+
+    --text: #ECF7FD;
+    --muted: #8DE7FF;
+    --faint: #93ADC8;
+    --faintest: #90A7C1;
+
+    --danger-bg: #3A2220;
+    --success-bg: #17301F;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 0 1.75rem 1.75rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: linear-gradient(160deg, var(--bg-start), var(--bg-end)) fixed;
+  min-height: 100vh;
+}
+
+/* Top bar (UI design pass): a solid navy band - the same dark panel color
+   hero.svg uses behind the CEP monogram - so it reads as a real bar rather
+   than blending into the page's light gradient. Negative side margins let it
+   bleed edge-to-edge while body keeps its usual 1.75rem gutter for
+   everything below; matching padding re-aligns its own content to that same
+   gutter. */
+header.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 -1.75rem 1.75rem;
+  padding: 0.85rem 1.75rem;
+  background: var(--navy-900);
+  box-shadow: 0 2px 6px rgba(14, 24, 38, 0.25);
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.topbar-logo {
+  /* Real CEP ribbon wordmark (see index.html's comment) - natural aspect
+     ~2.51:1, so this is a wide box, not the old 32x32 square. */
+  flex-shrink: 0;
+  width: 80px;
+  height: 32px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #F7FAFF;
+  line-height: 1.2;
+}
+
+/* Small and single-line by design (not the full hero.svg tagline size) -
+   at typical laptop widths this keeps .topbar-brand's text block close to
+   the logo's own 32px height, so align-items:center on .topbar-brand lines
+   the logo up with the heading rather than with the mid-point of a tall
+   two-line stack. Ellipsis instead of wrapping so a long line never grows
+   that stack back to two lines; dropped entirely below 860px (see media
+   query) rather than fighting for space against the nav once it's tight. */
+.tagline {
+  margin: 0.15rem 0 0 0;
+  font-size: 0.72rem;
+  color: var(--cyan-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46ch;
+}
+
+.topbar-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.topbar-nav-link {
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  color: #F7FAFF;
+  background: rgba(247, 250, 255, 0.08);
+  border: 1px solid rgba(247, 250, 255, 0.18);
+  border-radius: 6px;
+}
+
+.topbar-nav-link:hover:not(:disabled) {
+  background: rgba(247, 250, 255, 0.16);
+  border-color: var(--orange-bright);
+}
+
+.topbar-nav-link:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Marks whichever nav entry matches the screen currently showing (the
+   Wizard screen itself, or an open doc/overlay) - toggled in wizard.js.
+   Solid orange rather than the translucent hover tint so "where am I" reads
+   at a glance instead of looking like a hover state that got stuck. */
+.topbar-nav-link-active {
+  background: var(--orange);
+  border-color: var(--orange-bright);
+}
+
+.topbar-nav-link-active:hover:not(:disabled) {
+  background: var(--orange-bright);
+}
+
+/* This tool's own title + guide copy (D24 UI design pass, revised) - moved
+   down from the top bar, which now carries CEP's shared project identity
+   instead (see index.html's comment on <main>). Plain light-page colors,
+   unlike the old .subtitle/h1 pair this replaces which were styled for the
+   topbar's dark navy background. */
+.page-header {
+  margin-bottom: 1.1rem;
+}
+
+.page-title {
+  margin: 0 0 0.2rem 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.page-subtitle {
+  margin: 0;
+  color: var(--muted);
+  /* No ch cap: every section below (banners, boxes, decisions, picker) is
+     now the same full width of #main-content (see main{}), so a narrower
+     prose column here would read as a stray inconsistency, not a deliberate
+     readability choice - it's one short paragraph, not a long-form block
+     that needs a capped line length. */
+}
+
+/* Docs overlay (UI design pass): replaces #main-content while open, rather
+   than a real page navigation - the wizard's /exchange URLs are single-use,
+   so there is no second page to navigate to (see wizard.js's openDoc()). */
+.docs-overlay {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.1rem 1.35rem;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+.docs-overlay-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Groups Back + title as one flex item so .docs-overlay-bar keeps its
+   original two-item space-between layout (this group at the start, Close at
+   the end) - Back's own display is toggled in wizard.js, hidden whenever
+   there's nowhere to go back to (see docsBackStack). */
+.docs-overlay-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+#docs-overlay-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.docs-overlay-body {
+  max-width: 78ch;
+  /* Without this, a block element with only max-width (no auto margins)
+     sits flush against the left edge of the much-wider overlay card,
+     leaving a large dead gap on the right - confirmed via screenshot
+     review. Centering reads as an intentional readable-width column
+     instead of a layout bug. */
+  margin: 0 auto;
+}
+
+.docs-overlay-body h1,
+.docs-overlay-body h2,
+.docs-overlay-body h3,
+.docs-overlay-body h4 {
+  color: var(--navy-800);
+  margin: 1.4rem 0 0.5rem;
+}
+
+.docs-overlay-body h1:first-child,
+.docs-overlay-body h2:first-child {
+  margin-top: 0;
+}
+
+.docs-overlay-body p,
+.docs-overlay-body li {
+  overflow-wrap: anywhere;
+}
+
+.docs-overlay-body pre {
+  background: var(--panel-alt-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  font-size: 0.82rem;
+}
+
+.docs-overlay-body code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--panel-alt-bg);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.docs-overlay-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.docs-overlay-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+}
+
+.docs-overlay-body th,
+.docs-overlay-body td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-overlay-body th {
+  background: var(--panel-alt-bg);
+}
+
+.docs-overlay-body blockquote {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.9rem;
+  border-left: 3px solid var(--cyan);
+  background: var(--panel-alt-bg);
+  color: var(--muted);
+}
+
+.docs-overlay-body a {
+  color: var(--navy-700);
+}
+
+.docs-index-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.docs-index-list button {
+  width: 100%;
+  text-align: left;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-alt-bg);
+  color: var(--navy-700);
+}
+
+.docs-index-list button:hover {
+  background: var(--cyan-pale);
+  border-color: var(--cyan);
+}
+
+/* Single column, one consistent content width for every top-level section
+   (page-header, banners, #boxes, #decisions, #picker) - this used to be a
+   2fr/1fr grid that every direct child auto-placed into unless it opted out
+   with grid-column:1/-1. Some sections opted out and some didn't, which is
+   exactly why boxes/decisions/picker used to render at different widths
+   (2/3, full, 2/3) instead of lining up. A plain vertical stack has no such
+   trap: every child is automatically full width of this container, full
+   stop. max-width+margin:auto caps the reading/working width on very wide
+   monitors (this is a dashboard, not prose, but an uncapped 2500px-wide row
+   of cards still looks broken) while the dark topbar above keeps its own
+   independent edge-to-edge bleed. */
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* #boxes is a plain block, not a grid: .legend (a full-width intro line) and
+   .boxes-grid (the actual 4-up row) are kept as separate elements on purpose.
+   Putting the legend inside the grid as a grid-column:1/-1 item used to force
+   an extra implicit column (auto-fit only collapses tracks with NO item
+   touching them, and the spanning legend touched every track) - that phantom
+   column ate space the 4 real boxes should have stretched into, so the row
+   fell short of the page's other full-width sections instead of lining up
+   with them. Keeping the legend out of the grid entirely avoids the trap. */
+.boxes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.box {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  min-width: 0;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+.box h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.box h3 {
+  margin: 0.6rem 0 0.25rem 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--faint);
+}
+
+.legend {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.box-desc {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.box-meta {
+  margin: 0 0 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.box-layer:first-of-type h3 {
+  margin-top: 0;
+}
+
+.layer-hint {
+  margin: 0 0 0.35rem 0;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+
+.box-paths {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.box-paths .layer-empty {
+  color: var(--faint);
+  font-style: italic;
+  list-style: none;
+  margin-left: -1.1rem;
+}
+
+.box.unavailable {
+  opacity: 0.6;
+}
+
+.box.has-problems {
+  border-color: var(--danger);
+}
+
+#decisions {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+#decisions h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.decisions-desc {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#decision-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.decision-empty {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.decision-row {
+  background: var(--panel-alt-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.65rem 0.85rem;
+}
+
+.decision-title {
+  margin: 0 0 0.3rem 0;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--navy-800);
+  overflow-wrap: anywhere;
+}
+
+.decision-state-badge {
+  display: inline-block;
+  margin: 0 0 0.4rem 0;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--border);
+}
+
+.state-pending .decision-state-badge {
+  background: #FF6A4226;
+  color: #B84A2E;
+}
+
+.state-staged .decision-state-badge {
+  background: var(--cyan-pale);
+  color: #0C7A93;
+}
+
+.state-confirmed .decision-state-badge {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.decision-value {
+  margin: 0 0 0.25rem 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.decision-comment {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.decision-actions button {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.65rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--navy-700);
+}
+
+.decision-actions button:hover {
+  background: var(--cyan-pale);
+  border-color: var(--cyan);
+}
+
+.apply-row {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+#apply-button {
+  font-size: 0.9rem;
+  padding: 0.45rem 1.15rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 8px;
+}
+
+#apply-button:hover:not(:disabled) {
+  background: var(--orange-bright);
+}
+
+#apply-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+#apply-message {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+#apply-message.error {
+  color: var(--danger);
+}
+
+#picker {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+#picker h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+.picker-desc {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.picker-target-info {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.8rem;
+  min-height: 1.1em;
+  font-weight: 600;
+  color: var(--cyan);
+}
+
+.picker-path {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
+  color: var(--navy-700);
+}
+
+#picker-use-dir {
+  font-size: 0.85rem;
+  padding: 0.32rem 0.7rem;
+  margin-left: 0.5rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 6px;
+}
+
+#picker-use-dir:hover {
+  background: var(--orange-bright);
+}
+
+#picker-entries {
+  list-style: none;
+  margin: 0.5rem 0 0 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+#picker-entries li button {
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+#picker-entries li button:hover,
+#picker-up:not(:disabled):hover {
+  background: var(--cyan-pale);
+}
+
+#picker-up {
+  font-size: 0.85rem;
+  padding: 0.32rem 0.65rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--navy-700);
+}
+
+#picker-up:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Phase 2 (D24 §18.14) onboarding state screens - layout_broken,
+   needs_discover, and the dismissible D20-init banner. Same panel language as
+   boxes/decisions/picker above (rounded card, soft cyan border) so a screen
+   that only ever shows one of these still reads as the same product. */
+
+#state-layout-broken,
+#state-needs-discover {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.1rem 1.35rem;
+  box-shadow: 0 1px 2px rgba(21, 34, 56, 0.05);
+}
+
+#state-layout-broken h2,
+#state-needs-discover h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+#state-layout-broken {
+  border-left: 4px solid var(--danger);
+}
+
+#state-needs-discover {
+  border-left: 4px solid var(--orange);
+}
+
+.failure-list {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.6rem 0.6rem 1.6rem;
+  background: var(--danger-bg);
+  border-radius: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--danger);
+}
+
+.guide-hint {
+  margin: 0.75rem 0 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+#discover-button {
+  font-size: 0.9rem;
+  padding: 0.45rem 1.15rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 8px;
+}
+
+#discover-button:hover {
+  background: var(--orange-bright);
+}
+
+#discover-message,
+#rerun-discover-message {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+#discover-message.error,
+#rerun-discover-message.error {
+  color: var(--danger);
+}
+
+#d20-banner {
+  background: var(--cyan-pale);
+  border: 1px solid var(--cyan);
+  border-left: 4px solid var(--orange);
+  border-radius: 10px;
+  padding: 0.7rem 1.1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--navy-800);
+}
+
+.banner-text {
+  flex: 1 1 320px;
+}
+
+#d20-banner p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+#d20-banner p + p {
+  margin-top: 0.4rem;
+}
+
+.banner-checklist {
+  margin: 0.35rem 0;
+  padding: 0 0 0 1.2rem;
+  font-size: 0.85rem;
+}
+
+.banner-checklist li {
+  margin: 0.15rem 0;
+}
+
+.banner-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+#d20-banner-done {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.75rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 6px;
+}
+
+#d20-banner-done:hover {
+  background: var(--orange-bright);
+}
+
+button.secondary {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.7rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--navy-700);
+}
+
+button.secondary:hover {
+  background: var(--cyan-pale);
+  border-color: var(--cyan);
+}
+
+.stub-card {
+  margin-top: 0.7rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--panel-alt-bg);
+  border: 1px dashed var(--cyan);
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+
+.stub-card-desc,
+.stub-card-path {
+  margin: 0 0 0.4rem 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.stub-card-prompt {
+  margin: 0 0 0.5rem 0;
+  padding: 0.55rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Drop the tagline before it ever has to wrap (see .tagline's own comment) -
+   at this width the nav row alone is already competing for space with the
+   brand block, so a subtitle is the first thing to go, not the last. */
+@media (max-width: 860px) {
+  .tagline {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  header.topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .topbar-nav {
+    width: 100%;
+  }
+
+  .topbar-nav-link {
+    font-size: 0.78rem;
+    padding: 0.35rem 0.6rem;
+  }
+}

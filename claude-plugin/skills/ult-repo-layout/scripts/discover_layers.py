@@ -113,7 +113,7 @@ MEDIUM_CONFIDENCE_FILE_FLOOR = 3
 MIN_DOC_COUNT_FOR_UNNAMED_MATCH = 2
 
 # Section titles and TITLE_TO_BASE_KEY moved to layout_decision_grammar.py
-# (D24 Phase 1, factored out so ult-layout-wizard can import the same
+# (D24 Phase 1, factored out so ult-cep-wizard can import the same
 # vocabulary without reaching into this module) - imported above, re-exported
 # under these same names here so every existing `dl.WHAT_L2_TITLE`-style
 # reference (this module's own code below, confirm_layers.py, and the test

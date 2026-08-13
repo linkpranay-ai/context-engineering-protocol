@@ -19,7 +19,7 @@ tier: draft
 **Status: Phase A + Phase B + Phase C + Phase D (empty-case single-overview
 generation; large-repo triage/tiering and resume/checkpoint; optional
 domain-pack consumption; and wizard integration/CI wiring).**
-`ult-layout-wizard`'s What/How preview cards now point at running this
+`ult-cep-wizard`'s What/How preview cards now point at running this
 skill by name (see `wizard_stub_content.py`'s `_what_how_prompt()`) — see
 `D24-WIZARD-REMAINING-WORK.md` in the design repo for the full phase
 sequence.
@@ -44,7 +44,7 @@ matter, and persist progress in a state file so a second run resumes
 instead of restarting. Both paths write real, human-extensible content —
 Phase B doesn't replace Phase A's honesty standard, it scales it.
 
-This is **not** a subprocess the onboarding wizard (`ult-layout-wizard`)
+This is **not** a subprocess the onboarding wizard (`ult-cep-wizard`)
 shells out to. Like `compiling-project-guidelines`, it's invoked directly by
 a human inside whichever coding agent they already have open — Claude Code,
 Copilot Chat, or otherwise. When the wizard's What/How boxes are empty, its
@@ -54,7 +54,7 @@ result must land at; this skill honors that path rather than picking its own
 discretion, so the wizard's "Check now" button has a real path to test).
 
 **Run this:**
-- When `ult-layout-wizard`'s What or How box is empty and its card told you to
+- When `ult-cep-wizard`'s What or How box is empty and its card told you to
   run this skill
 - Standalone, conversationally, any time you want a starting requirements or
   architecture overview for a repo that already has `ult-repo-layout` layer

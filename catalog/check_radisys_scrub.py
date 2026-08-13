@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Mechanical Radisys-reference scrub gate for ult-layout-wizard and
+Mechanical Radisys-reference scrub gate for ult-cep-wizard and
 ult-autoscaffold-content (D24 §18.9 Q-g, v5; ult-autoscaffold-content added Phase D).
 
 Q-g authorized porting patterns from Radisys's internal `ult-scaffold-repo` into
-ult-layout-wizard, "as long as we remove all the Radisys specific references" - but
+ult-cep-wizard, "as long as we remove all the Radisys specific references" - but
 round-3 adversarial review found that authorization alone was never backed by a
 mechanical check that the scrub actually happened, or *stayed* true as the skill
 evolves after the port. This script is that check: a case-insensitive deny-list grep
@@ -15,7 +15,7 @@ IETF/standards-body references in existing case studies, per the implementation
 plan's own risk R5).
 
 ult-autoscaffold-content is ground-up content, not ported from Radisys internal
-source the way ult-layout-wizard was (`origin: ground-up` in its own SKILL.md
+source the way ult-cep-wizard was (`origin: ground-up` in its own SKILL.md
 frontmatter) - it's covered here defensively anyway, per Phase D's explicit
 instruction, rather than assuming ground-up authorship guarantees a clean scan.
 
@@ -40,7 +40,7 @@ from pathlib import Path
 
 LIBRARY_ROOT = Path(__file__).resolve().parent.parent
 SKILL_DIRS = (
-    LIBRARY_ROOT / ".github" / "skills" / "ult-layout-wizard",
+    LIBRARY_ROOT / ".github" / "skills" / "ult-cep-wizard",
     LIBRARY_ROOT / ".github" / "skills" / "ult-autoscaffold-content",
 )
 

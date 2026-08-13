@@ -39,7 +39,7 @@ H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 # Skills with a hand-authored Copilot wrapper that has unique, non-mechanical
 # "When invoked directly" steps. Never touched by this script, in any mode.
 HAND_AUTHORED_PROMPTS = {
-    "ult-context-generate", "ult-codegraph", "demo-consume-context", "ult-layout-wizard",
+    "ult-context-generate", "ult-codegraph", "demo-consume-context", "ult-cep-wizard",
 }
 
 PROMPT_FIELDS = [

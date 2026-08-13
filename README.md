@@ -98,8 +98,8 @@ install just a subset of skills instead of the full set.
 You can also drive layout setup itself through a browser instead of the CLI above —
 `ult-repo-layout` doesn't need to have run first; a repo with it merely *installed*
 gets a guided "Run Discover" step in the browser instead of a wall of CLI output:
-`python .github/skills/ult-layout-wizard/scripts/wizard_server.py .` — see
-[`ult-layout-wizard`](.github/skills/ult-layout-wizard/SKILL.md).
+`python .github/skills/ult-cep-wizard/scripts/wizard_server.py .` — see
+[`ult-cep-wizard`](.github/skills/ult-cep-wizard/SKILL.md).
 
 Then see [`user_guides/topics/project-setup-context-engineering.md`](user_guides/topics/project-setup-context-engineering.md)
 for the two setup paths:
@@ -119,7 +119,7 @@ for the two setup paths:
 | [`ult-codegraph`](.github/skills/ult-codegraph/SKILL.md) | Generate a codebase knowledge graph with `graphify` so other skills can query cross-file relationships before touching code. |
 | [`ult-context-generate`](.github/skills/ult-context-generate/SKILL.md) | Assemble a context package (code graph, requirements, constraints, blast radius) before a downstream generation task runs — human-approved, source-attributed. |
 | [`ult-repo-layout`](.github/skills/ult-repo-layout/SKILL.md) | Register, resolve, and validate where a project's path-slots actually live via `.layout-slots.yaml` markers, so relocating a slot needs zero `SKILL.md` edits. |
-| [`ult-layout-wizard`](.github/skills/ult-layout-wizard/SKILL.md) | Local, localhost-only browser wizard for a project with `ult-repo-layout` installed — guides an uninitialized repo through Run Discover, then shows resolved What/How/Guidelines/Trip-wire state through four labeled boxes and a directory picker, and lets you resolve and Apply pending layout decisions. |
+| [`ult-cep-wizard`](.github/skills/ult-cep-wizard/SKILL.md) | Local, localhost-only browser wizard for a project with `ult-repo-layout` installed — guides an uninitialized repo through Run Discover, then shows resolved What/How/Guidelines/Trip-wire state through four labeled boxes and a directory picker, and lets you resolve and Apply pending layout decisions. |
 | [`ult-institutional-memory-distill`](.github/skills/ult-institutional-memory-distill/SKILL.md) | Trip-wire: distill PRs/design docs/postmortems into a persistent decision ledger, and surface prior-rejected paths to a human before a package's approval gate closes, never auto-applied or auto-suppressed. |
 | [`ult-cep-retrofit`](.github/skills/ult-cep-retrofit/SKILL.md) | Bring an existing, third-party skill library under this protocol — inventory, classify, and insert an idempotent pointer to `CONSUMING-CONTEXT-PACKAGE.md` into each relevant unit, without rewriting the library's own instructions. |
 | [`demo-consume-context`](.github/skills/demo-consume-context/SKILL.md) | Worked example that discovers, loads, and tags a context package per `CONSUMING-CONTEXT-PACKAGE.md` — proves the produce/consume/tag loop end-to-end. |

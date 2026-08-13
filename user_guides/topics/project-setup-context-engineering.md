@@ -23,9 +23,9 @@ start Simple and add the Complex pieces later; nothing in Simple needs to be und
 layer paths, the Guidelines slot, the Trip-wire ledger status — in a browser instead
 of re-reading `context-config.yaml` by hand:
 ```
-python .github/skills/ult-layout-wizard/scripts/wizard_server.py .
+python .github/skills/ult-cep-wizard/scripts/wizard_server.py .
 ```
-See [`ult-layout-wizard`](../../.github/skills/ult-layout-wizard/SKILL.md). This is a
+See [`ult-cep-wizard`](../../.github/skills/ult-cep-wizard/SKILL.md). This is a
 status view that composes with the steps below, not a replacement for them — it won't
 run `init`/`discover` for you, and Phase 0 is browse-only (no writes yet).
 
