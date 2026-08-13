@@ -31,6 +31,19 @@ Subcommands:
     than cross-import each other's scripts; decision_ledger.py's own
     docstring states the same posture for content_hash.py/md_index.py).
 
+    --graph-mode graphify cross-checks the graph's own module names against
+    --repo-root's real directories before tiering (defends against the
+    graphify cwd/path-relativity footgun -- see CONSUMING-CODE-GRAPH.md and
+    this file's _check_graph_repo_root_alignment() docstring). ZERO overlap
+    is treated as a hard failure (ERROR, exit 1, no state written): silently
+    proceeding would tier every module Tier 3/in-degree 0 with no signal
+    anything went wrong, which is exactly the bug this guards against.
+    Partial overlap (<50% of on-disk modules found in the graph) is a
+    non-fatal WARNING, but never a silent one -- printed to stderr
+    immediately, persisted to repo_scan.graph_module_overlap_warning in
+    state, and echoed in render-index's output, so it surfaces wherever an
+    operator looks, not just in a scrollback line.
+
     Assigns each module a tier:
       Tier 0 (skip)  -- generated/vendor directory name or file-suffix
                         majority match. Auto-marked "skipped" immediately --
@@ -134,6 +147,20 @@ DEPENDENCY_RELATIONS = frozenset({"imports_from", "imports", "calls"})
 # discover_layers.py's HIGH_CONFIDENCE_FILE_FLOOR/MEDIUM_CONFIDENCE_FILE_FLOOR).
 TIER1_MIN_IN_DEGREE = 10
 TIER1_MIN_FILE_COUNT = 50
+
+# Below this fraction of on-disk modules found among the graph's own module
+# names, --graph-mode graphify emits a non-fatal WARNING (see
+# _check_graph_repo_root_alignment()). Flagged implementation default, same
+# posture as the tier thresholds above -- no cited design-doc number.
+GRAPH_MODULE_OVERLAP_WARN_THRESHOLD = 0.5
+
+
+class GraphRepoRootMismatchError(ValueError):
+    """Raised when a graphify-mode graph shares ZERO top-level module names
+    with --repo-root's own directories -- the graphify cwd/path-relativity
+    footgun's exact signature. A ValueError subclass so it flows through
+    the existing `except (ValueError, FileNotFoundError)` -> ERROR/exit-1
+    handling in _cmd_scan() without any new CLI wiring."""
 
 
 # --------------------------------------------------------------------------- #
@@ -251,6 +278,92 @@ def _graph_in_degrees(graph):
     return {module: len(s) for module, s in senders.items()}
 
 
+def _graph_module_names(graph):
+    """Set of every module name _module_of() extracts from the graph's own
+    nodes -- used only to cross-check against --repo-root's real
+    directories (see _check_graph_repo_root_alignment())."""
+    names = set()
+    for node in graph.get("nodes", []):
+        module = _module_of(node.get("source_file"))
+        if module is not None:
+            names.add(module)
+    return names
+
+
+def _check_graph_repo_root_alignment(graph_modules, module_names, graph_path):
+    """Defend against the graphify cwd/path-relativity footgun: if
+    `graphify update` was run from a different working directory than
+    --repo-root expects, every source_file in graph.json carries a
+    different (wrong) leading path segment, so _module_of()'s naive
+    first-`/`-segment split extracts the wrong module name for every node.
+
+    Left unchecked, _graph_in_degrees()'s output shares no keys with the
+    real on-disk module names, scan()'s `in_degrees.get(name, 0)` lookup
+    silently defaults every module to in_degree 0, and every module lands
+    Tier 3 -- a complete, plausible-looking, WRONG tiering with no error or
+    warning anywhere (found and self-corrected the hard way during the
+    robotframework-wizard-ui case study; this function exists so the next
+    occurrence is loud instead of silent).
+
+    Returns None if aligned. Returns a warning string (non-fatal --
+    partial degradation, not total failure) if overlap is present but
+    thin. Raises GraphRepoRootMismatchError (fatal -- caller must not
+    proceed to tier or write state) if overlap is exactly zero.
+    """
+    if not graph_modules or not module_names:
+        # Nothing to cross-check (empty graph, or no candidate module
+        # directories on disk yet) -- not this footgun's signature.
+        return None
+
+    disk_set = set(module_names)
+    overlap = graph_modules & disk_set
+
+    def _sample(names, limit=8):
+        names = sorted(names)
+        shown = ", ".join(names[:limit])
+        return shown + (", ..." if len(names) > limit else "")
+
+    if not overlap:
+        raise GraphRepoRootMismatchError(
+            "graph at {graph_path} shares ZERO top-level module names with "
+            "--repo-root's own directories -- this is the graphify cwd/"
+            "path-relativity footgun.\n"
+            "  --repo-root modules on disk : {disk}\n"
+            "  modules seen in graph.json  : {graph}\n"
+            "`graphify update` was very likely run from a different working "
+            "directory than --repo-root, so every source_file in the graph "
+            "carries a different (wrong) leading path segment. Proceeding "
+            "would silently default every module to in_degree 0 and tier "
+            "everything Tier 3 -- a plausible-looking but wrong result.\n"
+            "Fix: re-run `graphify update` with cwd matching --repo-root, "
+            "then re-run this scan. (No state was written.)".format(
+                graph_path=graph_path,
+                disk=_sample(disk_set),
+                graph=_sample(graph_modules),
+            )
+        )
+
+    ratio = len(overlap) / len(disk_set)
+    if ratio < GRAPH_MODULE_OVERLAP_WARN_THRESHOLD:
+        return (
+            "only {pct:.0f}% of --repo-root's on-disk modules ({overlap_n}/"
+            "{total_n}) also appear as module names in the graph at "
+            "{graph_path} -- possible partial graphify cwd/path-relativity "
+            "mismatch, or the graph is simply stale/incomplete for some "
+            "modules. Affected modules' in_degree may under-count (fall "
+            "back toward Tier 3) rather than reflect real dependency "
+            "weight. Missing from graph: {missing}. Re-run `graphify "
+            "update` with cwd matching --repo-root if this is unexpected.".format(
+                pct=ratio * 100,
+                overlap_n=len(overlap),
+                total_n=len(disk_set),
+                graph_path=graph_path,
+                missing=_sample(disk_set - overlap),
+            )
+        )
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Tier assignment                                                            #
 # --------------------------------------------------------------------------- #
@@ -340,8 +453,15 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
     module_names = _top_level_candidate_dirs(repo_root)
 
     in_degrees = {}
+    alignment_warning = None
     if graph_mode == "graphify":
         graph = _load_graph(graph_path)
+        # Cross-check BEFORE tiering, and before any state mutation below --
+        # a zero-overlap mismatch must abort with no partial/corrupt state
+        # written, same posture as _load_graph()'s own missing-file check.
+        alignment_warning = _check_graph_repo_root_alignment(
+            _graph_module_names(graph), module_names, graph_path
+        )
         in_degrees = _graph_in_degrees(graph)
 
     new_modules = []
@@ -395,6 +515,11 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
         "graph_source": graph_mode,
         "graph_path": str(graph_path) if graph_path else None,
         "scanned_at": _now_iso(),
+        # Non-fatal graph/repo-root module-overlap degradation, if any --
+        # None when aligned or when graph_mode == "heuristic". Persisted
+        # (not just printed) so `show` and `render-index` still surface it
+        # after the run that produced it has scrolled out of the terminal.
+        "graph_module_overlap_warning": alignment_warning,
     }
     return state
 
@@ -456,6 +581,10 @@ def render_index(state, repo_name):
             "graph-informed tiering -- treat tier assignments below as a "
             "starting point, not a verified dependency ranking."
         )
+    overlap_warning = (state.get("repo_scan") or {}).get("graph_module_overlap_warning")
+    if overlap_warning:
+        lines.append("")
+        lines.append("**WARNING:** {}".format(overlap_warning))
     lines.append("")
 
     for tier in (1, 2, 3, 0):
@@ -524,8 +653,16 @@ def _cmd_scan(args):
     try:
         scan(state, args.repo_root, args.graph_mode, graph_path=args.graph_path, rescan=args.rescan)
     except (ValueError, FileNotFoundError) as e:
+        # Covers GraphRepoRootMismatchError too (a ValueError subclass) --
+        # the zero-overlap graphify cwd/path-relativity case. No state is
+        # written: `state` here is whatever was loaded before scan() raised.
         print("ERROR: {}".format(e), file=sys.stderr)
         return 1
+    overlap_warning = (state.get("repo_scan") or {}).get("graph_module_overlap_warning")
+    if overlap_warning:
+        # Non-fatal partial-overlap degradation -- printed immediately so
+        # it's seen at scan time, not only later via `show`/render-index.
+        print("WARNING: {}".format(overlap_warning), file=sys.stderr)
     save_state(args.state, state)
     print(json.dumps(summarize(state), indent=2))
     return 0

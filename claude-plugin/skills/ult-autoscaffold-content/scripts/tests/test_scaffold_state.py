@@ -177,6 +177,64 @@ class GraphInDegreeTests(unittest.TestCase):
         self.assertNotIn("core", degrees)
 
 
+class GraphRepoRootAlignmentTests(unittest.TestCase):
+    """_graph_module_names() / _check_graph_repo_root_alignment() --
+    defends against the graphify cwd/path-relativity footgun (see
+    scaffold_state.py's own docstring for the mechanism): if `graphify
+    update` ran from the wrong cwd relative to --repo-root, every
+    source_file carries a different leading path segment, _module_of()
+    extracts the wrong module name for every node, and every module
+    silently defaults to in_degree 0 / Tier 3 with no signal anything went
+    wrong. These tests cover the unit-level detection logic; ScanTests
+    below covers the same footgun through the real scan() entry point."""
+
+    def test_graph_module_names_extracts_all_distinct_modules(self):
+        names = ss._graph_module_names(_fixture_graph())
+        self.assertEqual(names, {"core", "utils", "legacy", "orphan"})
+
+    def test_alignment_ok_when_overlap_is_full(self):
+        warning = ss._check_graph_repo_root_alignment(
+            {"core", "utils"}, ["core", "utils"], "graph.json"
+        )
+        self.assertIsNone(warning)
+
+    def test_alignment_returns_none_when_either_set_is_empty(self):
+        # Nothing to cross-check (empty graph, or no on-disk module
+        # candidates yet) -- not this footgun's signature.
+        self.assertIsNone(ss._check_graph_repo_root_alignment(set(), ["core"], "graph.json"))
+        self.assertIsNone(ss._check_graph_repo_root_alignment({"core"}, [], "graph.json"))
+
+    def test_alignment_warns_on_partial_overlap_below_threshold(self):
+        # 1 of 5 disk modules found in the graph -- 20% < 50% threshold.
+        warning = ss._check_graph_repo_root_alignment(
+            {"core", "mystery1", "mystery2"},
+            ["core", "utils", "legacy", "orphan", "generated"],
+            "graph.json",
+        )
+        self.assertIsNotNone(warning)
+        self.assertIn("20%", warning)
+        self.assertIn("graph.json", warning)
+
+    def test_alignment_ok_when_overlap_meets_threshold_exactly(self):
+        # 1 of 2 -- exactly 50%. The check is a strict "<", so this must
+        # NOT warn (matches TierAssignmentTests' own >= convention for
+        # threshold boundaries).
+        warning = ss._check_graph_repo_root_alignment(
+            {"core"}, ["core", "utils"], "graph.json"
+        )
+        self.assertIsNone(warning)
+
+    def test_alignment_raises_on_zero_overlap(self):
+        with self.assertRaises(ss.GraphRepoRootMismatchError) as ctx:
+            ss._check_graph_repo_root_alignment(
+                {"src"}, ["core", "utils", "legacy"], "graph.json"
+            )
+        message = str(ctx.exception)
+        self.assertIn("ZERO", message)
+        self.assertIn("core", message)
+        self.assertIn("src", message)
+
+
 class TierAssignmentTests(unittest.TestCase):
     def test_tier_for_graph_thresholds(self):
         self.assertEqual(ss._tier_for_graph(10, False), (1, "graph:in-degree"))
@@ -220,6 +278,10 @@ class ScanTests(unittest.TestCase):
             self.assertEqual(by_id["generated/"]["tier"], 0)
             self.assertEqual(by_id["generated/"]["status"], "skipped")
             self.assertEqual(state["repo_scan"]["graph_source"], "graphify")
+            # _fixture_graph()'s modules (core/utils/legacy/orphan) overlap
+            # 4/5 = 80% with this repo's disk modules -- above the 50%
+            # warn threshold, so alignment must be reported clean.
+            self.assertIsNone(state["repo_scan"]["graph_module_overlap_warning"])
 
     def test_scan_heuristic_mode_labels_basis_lower_confidence(self):
         with tempfile.TemporaryDirectory() as d:
@@ -300,6 +362,57 @@ class ScanTests(unittest.TestCase):
             self.assertIn("orphan/", by_id)
             self.assertEqual(by_id["orphan/"]["status"], "skipped")
 
+    def test_scan_raises_and_writes_no_state_on_total_graph_mismatch(self):
+        # Reproduces the graphify cwd/path-relativity footgun end-to-end:
+        # every node's source_file carries an extra unexpected "src/"
+        # segment (the exact shape produced when `graphify update` runs
+        # from the wrong cwd relative to --repo-root).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            graph = _fixture_graph()
+            for node in graph["nodes"]:
+                if node["source_file"]:
+                    node["source_file"] = "src/" + node["source_file"]
+            graph_path = Path(d) / "graph.json"
+            import json
+            graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+            state = ss.empty_state()
+            with self.assertRaises(ss.GraphRepoRootMismatchError):
+                ss.scan(state, root, "graphify", graph_path=graph_path)
+            # No partial/corrupt state written on the failure path -- same
+            # posture as _load_graph()'s own missing-file failure.
+            self.assertEqual(state["modules"], [])
+            # repo_scan is untouched too -- the raise happens before scan()
+            # assigns its new value, so it's still the pre-scan default.
+            self.assertIsNone(state["repo_scan"]["scanned_at"])
+
+    def test_scan_persists_and_reports_warning_on_partial_graph_mismatch(self):
+        # Only core/'s nodes keep their real path; every other node moves
+        # under an unrelated "mystery/" segment -- 1 of 5 disk modules
+        # (20%) overlaps, below the 50% warn threshold.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            graph = _fixture_graph()
+            for node in graph["nodes"]:
+                sf = node["source_file"]
+                if sf and not sf.startswith("core/"):
+                    node["source_file"] = "mystery/" + sf
+            graph_path = Path(d) / "graph.json"
+            import json
+            graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)  # must not raise
+
+            warning = state["repo_scan"]["graph_module_overlap_warning"]
+            self.assertIsNotNone(warning)
+            self.assertIn("20%", warning)
+            # Non-fatal: tiering still ran and state was still written.
+            self.assertTrue(len(state["modules"]) > 0)
+
 
 class MarkGeneratedSkippedTests(unittest.TestCase):
     def _state_with_pending_module(self):
@@ -365,6 +478,19 @@ class RenderIndexTests(unittest.TestCase):
         state["repo_scan"] = {"graph_source": "heuristic", "graph_path": None, "scanned_at": "now"}
         text = ss.render_index(state, "demo-repo")
         self.assertIn("lower-confidence", text)
+
+    def test_render_index_surfaces_graph_module_overlap_warning(self):
+        # A persisted partial-overlap warning (see ScanTests) must reach
+        # anyone reading the generated CEP-INDEX.md, not just whoever ran
+        # `scan` and saw the stderr line at the time.
+        state = ss.empty_state()
+        state["repo_scan"] = {
+            "graph_source": "graphify", "graph_path": "x", "scanned_at": "now",
+            "graph_module_overlap_warning": "only 20% of on-disk modules matched the graph",
+        }
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("**WARNING:**", text)
+        self.assertIn("only 20% of on-disk modules matched the graph", text)
 
 
 class SummarizeTests(unittest.TestCase):
