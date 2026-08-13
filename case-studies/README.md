@@ -22,6 +22,7 @@ deliberate negative control, chosen to show a situation where this protocol adds
 | [ripgrep-crlf-replace-terminator](ripgrep-crlf-replace/CASE-STUDY.md) ⚠️ tooling side-quest | BurntSushi/ripgrep (Unlicense OR MIT) | No | **Not a CEP protocol case** — evaluates `ult-codegraph`/`graphify` alone (no context package, no approval gate) against naive search on a real Rust bug fix (PR #3100). `graphify explain` cheaply resolves the right symbols (~84x fewer tokens than the naive-grep-narrowed file set), but `path`/`affected` starting from the CLI flag's own definition symbol fail outright — a disclosed, structural limitation of AST-only graphs against ripgrep's one-struct-per-flag pattern, plus a real Windows deep-path environment bug found along the way. A real CEP-protocol case in a new ecosystem is still owed. |
 | [ripgrep-trim-user-stories](ripgrep-user-stories/CASE-STUDY.md) | BurntSushi/ripgrep (MIT/Unlicense) | No | A real CEP-protocol run (context package, self-approval, provenance) against a Rust CLI tool — distinct from `ripgrep-crlf-replace-terminator`'s tooling-only side-quest — using a brand-new, independently-designed consuming skill (`demo-write-user-stories`). Reproduces the generative-benefit finding a third time on a new ecosystem, and finds the hallucination-suppression benefit is conditional on how underspecified the input request is, not universal. |
 | [cep-retrofit-superpowers](cep-retrofit-superpowers/CASE-STUDY.md) | obra/superpowers (MIT) + open5gs/open5gs (AGPL-3.0) | No | First test of the `ult-cep-retrofit` metaskill itself: a full-library retrofit pass across a real, unrelated 62-unit skill library (0 misclassifications, pristine clone rather than this repo's own already-adapted copies of the same skills), plus a deep with/without-CEP comparison of one retrofitted skill (`writing-plans`)'s generated output, plus a first-ever trip-wire (institutional-memory) rung on top. Finds real Mode 2 defects (duplicate AVP declarations, a fabricated test target) Mode 1 avoids, and a genuinely humbling trip-wire finding: a `tier: revise` hit accepted without checking its own `required_evidence` field produces a confidently wrong value. Closes this directory's `Trip-wire` and `Metaskill-retrofit origin` coverage gaps for the first time. |
+| [robotframework-wizard-ui](robotframework-wizard-ui/CASE-STUDY.md) | robotframework/robotframework (Apache-2.0) | No | First case to drive `ult-cep-wizard`'s browser UI end-to-end via Playwright (real screenshots, not curl) and to exercise `ult-autoscaffold-content`'s Phase B large-repo triage/tiering path directly (13 modules tiered, 13/13 `CONTEXT.md` generated for both What-L2 and How-L2). Real before/after UI evidence that Phase D's empty-box wiring works; a real `graphify` cwd/path-relativity footgun found and fixed along the way; a genuine, disclosed finding that autoscaffolded content's module-granularity corroborates but doesn't substitute for issue-level grounding on a narrow task; and a validated stretch-goal code-change proposal (real unit tests pass 47/47 and 362/362, identically before and after). |
 
 Both consumer-benefit cases also find that the generative benefit compounds past the user-story
 file itself: an approved context package's grounding stays available, pre-identified, to whatever
@@ -52,6 +53,7 @@ capability doesn't exist) · N/A doesn't apply to this case's own scope.
 | ripgrep-crlf-replace-terminator ⚠️ tooling side-quest | N/A — no package generated | N/A | N/A | ➖ | ➖ | N/A | N/A — not a protocol case |
 | ripgrep-trim-user-stories | ✅ (self-approved, disclosed) | ✅ | ✅ (0 conflicts) | ➖ | ➖ | No — new, ground-up `demo-write-user-stories` | Generative |
 | cep-retrofit-superpowers | ✅ (freshly regenerated package, disclosed) | ✅ | ✅ (0 conflicts, 1 gap) | ➖ | ✅ (3-entry fixture ledger, real `query`, 1 hit materially changed output — and shown, on independent re-verification, to itself be wrong) | Yes — metaskill-retrofitted `writing-plans`, machine-selected `recommend()` signal | Generative |
+| robotframework-wizard-ui | ✅ (self-approved, disclosed) | ✅ | ✅ (0 conflicts) | ➖ | ➖ | No — reuses ground-up `demo-write-user-stories` from ripgrep-trim-user-stories | Generative |
 
 All other cases above still show ➖ across derived-package composition, trip-wire, and
 metaskill-retrofit origin — an honest gap that isn't fully closed yet either: derived-package
@@ -62,6 +64,13 @@ Copilot cross-runtime re-run of that same experiment surfaced a real `cep_retrof
 (`CHANGELOG.md`'s `[Unreleased]` → Fixed), which was worth keeping, but the case-study write-up
 itself was not; see this file's git history for the removed content. No second metaskill-retrofit
 case study is currently planned. Derived-package composition still awaits its own first case.
+
+None of the columns above track wizard-UI or large-repo-autoscaffold coverage, since no case before
+`robotframework-wizard-ui` exercised either — that case closes both gaps directly (see its own
+CASE-STUDY.md §2 and §4) without needing a new column here: `ult-cep-wizard`'s browser UI had only
+ever been driven by curl/HTTP or unit/E2E tests, and `ult-autoscaffold-content`'s Phase B
+large-repo triage/tiering path had only ever run against a scratch fixture, never a real, external,
+50-100 KSLOC codebase.
 
 ## Synthesis
 

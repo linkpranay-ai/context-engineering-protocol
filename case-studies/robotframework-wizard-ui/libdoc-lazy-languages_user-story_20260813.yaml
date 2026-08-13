@@ -1,0 +1,288 @@
+context_package:
+  id: libdoc-lazy-languages_user-story_20260813
+  task: >
+    Write functional user stories for fixing Robot Framework's Libdoc
+    performance degradation on large keyword libraries (real, closed issue
+    #5254, "Libdoc performance degradation starting RF 6.0"):
+    `TypeConverter.__init__` (`src/robot/running/arguments/typeconverters.py`)
+    eagerly constructs a new `Languages()` instance on every call even when
+    the caller never reads `.languages`, and Libdoc's doc-generation path
+    (`TypeDoc.for_type()` in `libdocpkg/datatypes.py`, `_get_type_docs()` in
+    `libdocpkg/robotbuilder.py`) calls `TypeConverter.converter_for()` once
+    per documented argument type without ever passing `languages` — so a
+    library with thousands of keywords/arguments instantiates `Languages()`
+    thousands of times purely for documentation generation, roughly doubling
+    Libdoc's run time. Real upstream fix: commit
+    `6d0c6a4630bf6b906253c802e2bf5b266a1a8893` ("Initiallize
+    `TypeConverter.languages` only when needed", 2024-11-05, "Fixes #5254"),
+    reporting "roughly 50% performance enhancement with really big
+    libraries" — this fix postdates the pinned `v7.1.1` clone this case
+    study uses, so the bug is still live, reproducible source in this repo.
+  scope:
+    feature: "TypeConverter.languages eager-vs-lazy construction and Libdoc's call path into it"
+    task_type: user-story
+    new_or_existing: existing
+    out_of_scope: >
+      The `Languages` class's own internal cost (why constructing it is slow
+      in the first place — the real fix's commit message explicitly flags
+      this as a separate, uninvestigated question); the companion same-day
+      commit `9d93b7d89bd971a03e4b195db2412f1e5f30e44d` ("Make initializing
+      `Languages` without arguments faster") which optimizes a different,
+      complementary path; any change to execution-time behavior (the
+      execution engine always passes a real `Languages` instance already,
+      so this fix is Libdoc-only in effect).
+  aspects:
+    - aspect_id: a1
+      name: Root cause -- TypeConverter.languages eager (vs. lazy) construction
+      what_l3_covered: true
+      what_l2_covered: true
+      what_l1_covered: false
+      llm_knowledge_used: false
+      web_fallback_used: false
+    - aspect_id: a2
+      name: Libdoc's call path into TypeConverter.converter_for() (blast radius)
+      what_l3_covered: true
+      what_l2_covered: true
+      what_l1_covered: false
+      llm_knowledge_used: false
+      web_fallback_used: false
+  generated_at: "2026-08-13T00:00:00Z"
+  approved_by:
+    - actor: agent:dogfood-context-engineering-oss
+      at: "2026-08-13T00:00:00Z"
+  content_hash: b0489975
+  what_l1_fallback_count: 0
+  llm_knowledge_count: 0
+  web_fallback_count: 0
+  conflicts_count: 0
+  llm_scaffold_count: 0
+  how_l1_fallback_count: 0
+  how_l1_covered: false
+  org_convention_ref: >
+    org/libdocpkg/CONTEXT.md, org/running/CONTEXT.md, org/conf/CONTEXT.md --
+    this run's own freshly-autoscaffolded How-L2 content (ult-autoscaffold-content
+    Phase B, this same case study, generated 2026-08-13). Used as corroborating,
+    module-granularity context (structure/tier/dependency position), not as the
+    primary evidence for this specific performance bug -- see decisions_log.
+  summary:
+    - "What-L3: `TypeConverter.__init__` (running/arguments/typeconverters.py:54) reads `self.languages = languages or Languages()` -- eager, unconditional construction whenever the caller passes no `languages` argument. `graphify explain \"TypeConverter\"` confirms this is a high-traffic node: degree 44, with 25 converter subclasses (Enum/String/Boolean/Integer/Float/Decimal/Bytes/ByteArray/DateTime/Date/TimeDelta/Path/None/List/Tuple/TypedDict/Dictionary/Set/FrozenSet/Union/Literal/Custom) inheriting from it."
+    - "What-L3: Libdoc never passes `languages` to `TypeConverter.converter_for()`. Two real, confirmed call sites: `TypeDoc.for_type()` (libdocpkg/datatypes.py:50, called once per documented type) and `_get_type_docs()` (libdocpkg/robotbuilder.py:68, called once per keyword/init). `graphify affected \".converter_for()\" --depth 2` surfaces both directly, plus `TypeConverter.convert()`'s own runtime caller (typeinfo.py:266) for contrast -- confirming Libdoc's doc-time path and the execution engine's run-time path share the exact same constructor."
+    - "What-L3 (real upstream fix, verified against github.com/robotframework/robotframework): commit 6d0c6a4630bf6b906253c802e2bf5b266a1a8893, 'Initiallize `TypeConverter.languages` only when needed,' 2024-11-05, 'Fixes #5254' -- makes `.languages` a lazy-initialized property instead of an eager `__init__` assignment. Commit message reports 'roughly 50% performance enhancement with really big libraries.' This commit postdates the pinned v7.1.1 clone (2024-10-19), so the eager-construction bug is still live, reproducible source in this repo -- confirmed directly: `grep -n \"self.languages\" src/robot/running/arguments/typeconverters.py` -> line 54, unchanged from the pre-fix state the issue describes."
+    - "What-L2 (autoscaffolded, this case study's own Phase B output): docs/requirements/libdocpkg/CONTEXT.md confirms libdocpkg (Tier 3 leaf) depends on `running` (where TypeConverter lives); docs/requirements/running/CONTEXT.md confirms running (Tier 2) depends on `conf` (where Languages lives) -- both real, graph-derived dependency edges corroborating the real call chain libdocpkg -> running.TypeConverter -> conf.Languages found in What-L3, though neither file mentions performance or this specific bug (see decisions_log -- this is expected of module-granularity Phase B content, not a gap in scaffolding quality)."
+    - "No conflicts detected between What-L3 (source) and the external issue-tracker/commit evidence -- both describe the identical mechanism (eager `Languages()` in `TypeConverter.__init__`, no `languages` passed from Libdoc)."
+  context_items:
+    - id: ctx_001
+      layer: what-l3
+      source: "src/robot/running/arguments/typeconverters.py:41-54 (TypeConverter.__init__)"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: "Root cause -- TypeConverter.languages eager (vs. lazy) construction"
+      summary: >
+        `TypeConverter.__init__(self, type_info, custom_converters=None,
+        languages=None)` at line 54 sets `self.languages = languages or
+        Languages()` unconditionally -- if no `languages` instance is passed
+        in (Libdoc's case, always), a brand-new `Languages()` is constructed
+        on every single `TypeConverter` instantiation, whether or not
+        `.languages` is ever subsequently read.
+      what_l1_fallback: false
+
+    - id: ctx_002
+      layer: what-l3
+      source: "src/robot/libdocpkg/datatypes.py:50 (TypeDoc.for_type)"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: a2
+      aspect: "Libdoc's call path into TypeConverter.converter_for() (blast radius)"
+      summary: >
+        `TypeDoc.for_type(cls, type_info, converters)` calls
+        `TypeConverter.converter_for(type_info, converters)` with no
+        `languages` argument -- called once per documented argument type
+        while Libdoc walks a library's keywords, each call triggering
+        ctx_001's eager construction.
+      what_l1_fallback: false
+
+    - id: ctx_003
+      layer: what-l3
+      source: "src/robot/libdocpkg/robotbuilder.py:45,68 (_get_type_docs)"
+      type: implementation
+      confidence: EXTRACTED
+      aspect_id: a2
+      aspect: "Libdoc's call path into TypeConverter.converter_for() (blast radius)"
+      summary: >
+        `_get_type_docs(self, keywords, custom_converters)` (line 68),
+        invoked from line 45 for `libdoc.inits + libdoc.keywords`, is the
+        second real, independent Libdoc call path reaching the same
+        `converter_for()` -> eager-`Languages()` chain -- confirmed directly
+        by `graphify affected \".converter_for()\" --depth 2`
+        (`._get_type_docs() [calls] libdocpkg/robotbuilder.py:L68`).
+      what_l1_fallback: false
+
+    - id: ctx_004
+      layer: what-l3
+      source: "graphify explain \"TypeConverter\" / \"Languages\"; src/robot/conf/languages.py:30"
+      type: blast-radius
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: "Root cause -- TypeConverter.languages eager (vs. lazy) construction"
+      summary: >
+        `graphify explain "TypeConverter"` reports degree 44 (25 converter
+        subclasses inherit from it, plus real call sites). `graphify affected
+        "Languages" --depth 1` reports 11 real dependent nodes, including
+        `.__init__() [calls] running/arguments/typeconverters.py:L49` --
+        the exact eager-construction edge from ctx_001 (graphify attributes
+        the call edge to the enclosing `__init__` signature line, 5 lines
+        above the literal `Languages()` call statement at line 54 -- a
+        line-number-granularity quirk, not a discrepancy in the finding).
+        Both nodes are high-degree, central utility classes -- unlike the
+        low-degree-leaf `graphify affected` limitation disclosed in the
+        ripgrep case studies, no "no affected nodes found" result occurred
+        anywhere in this run.
+      what_l1_fallback: false
+
+    - id: ctx_005
+      layer: what-l3
+      source: "graphify affected \".converter_for()\" --depth 2"
+      type: blast-radius
+      confidence: EXTRACTED
+      aspect_id: a2
+      aspect: "Libdoc's call path into TypeConverter.converter_for() (blast radius)"
+      summary: >
+        11 real affected nodes at depth 2: 6 converter-subclass `__init__()`
+        calls (typeconverters.py:423,460,516,577,628,677,733),
+        `.literal_converter_for()` (L742), `.convert()`'s runtime caller
+        (typeinfo.py:L266), and the two Libdoc call sites from ctx_002/ctx_003
+        (datatypes.py:L50, robotbuilder.py:L68) -- a real, complete, directly
+        observed blast radius for any change to `converter_for()`'s
+        `languages`-handling behavior.
+      what_l1_fallback: false
+
+    - id: ctx_006
+      layer: what-l2
+      source: >
+        GitHub issue #5254 ("Libdoc performance degradation starting RF
+        6.0", opened 2024-11-04, closed 2024-11-05) and commit
+        6d0c6a4630bf6b906253c802e2bf5b266a1a8893 (upstream fix, not present
+        in this pinned v7.1.1 clone -- verified via GitHub's API, treated as
+        an external What-L2-equivalent artifact the same way the
+        ripgrep-user-stories case treated CHANGELOG.md: the closest real,
+        maintained record of user-facing intent, hand-adapted since no
+        in-repo requirements doc discusses this bug)
+      type: requirement
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: "Root cause -- TypeConverter.languages eager (vs. lazy) construction"
+      summary: >
+        Reporter profiled a 10,000+-keyword dynamic library with
+        pyinstrument, traced the RF-6.0-vs-earlier slowdown to `Languages`
+        being "instantiated once each Keyword" during Libdoc doc generation,
+        and proposed passing a shared instance or making `Languages` a
+        singleton. The actual merged fix (lazy-init `TypeConverter.languages`
+        instead) is a different, smaller change achieving the same effect;
+        commit message reports "roughly 50% performance enhancement with
+        really big libraries."
+      what_l1_fallback: false
+
+    - id: ctx_007
+      layer: what-l2
+      source: "docs/requirements/libdocpkg/CONTEXT.md (this case study's own autoscaffolded Phase B output)"
+      type: requirement
+      confidence: EXTRACTED
+      aspect_id: a2
+      aspect: "Libdoc's call path into TypeConverter.converter_for() (blast radius)"
+      summary: >
+        Confirms `libdocpkg` (Tier 3 leaf, in-degree 0) depends on `running`
+        (among `htmldata`/`utils`/`variables`) -- the real, graph-derived
+        dependency edge corroborating the libdocpkg -> running.TypeConverter
+        call chain found directly in What-L3 (ctx_002, ctx_003). Module-level
+        only -- does not mention this specific bug or performance at all
+        (see decisions_log).
+      what_l1_fallback: false
+
+    - id: ctx_008
+      layer: what-l2
+      source: "docs/requirements/running/CONTEXT.md (this case study's own autoscaffolded Phase B output)"
+      type: requirement
+      confidence: EXTRACTED
+      aspect_id: a1
+      aspect: "Root cause -- TypeConverter.languages eager (vs. lazy) construction"
+      summary: >
+        Confirms `running` (Tier 2, in-degree 5) depends on `conf` (among
+        `api`/`libraries`/`model`/`output`/`parsing`/`result`/`utils`/`variables`)
+        -- the real, graph-derived dependency edge corroborating
+        `TypeConverter`'s reach into `conf.Languages` (ctx_001, ctx_004).
+        Module-level only -- same caveat as ctx_007.
+      what_l1_fallback: false
+
+    - id: ctx_009
+      layer: domain-knowledge
+      source: "llm_domain_knowledge, corroborated at src/robot/conf/settings.py:531"
+      type: domain-best-practice
+      confidence: SUGGESTED
+      aspect_id: a1
+      aspect: "Root cause -- TypeConverter.languages eager (vs. lazy) construction"
+      summary: >
+        General principle: an expensive-to-construct, doc-time-irrelevant
+        object should be lazily initialized when most call sites never read
+        it. Corroborated directly in this repo: the *execution* path
+        constructs exactly one `Languages(self['Language'])` per run
+        (conf/settings.py:531, `RobotSettings.languages` property), so
+        laziness costs execution nothing -- it is purely Libdoc's
+        None-default, once-per-argument-type path that pays the eager
+        construction's cost for no benefit.
+      approved_by:
+        - actor: agent:dogfood-context-engineering-oss
+          at: "2026-08-13T00:00:00Z"
+      what_l1_fallback: false
+
+  conflicts_detected: []
+
+  gaps_detected: []
+
+  open_questions:
+    - >
+      Whether the companion commit `9d93b7d89bd971a03e4b195db2412f1e5f30e44d`
+      ("Make initializing `Languages` without arguments faster") reduces the
+      cost of `conf/languages.py`'s own constructor enough that the
+      lazy-vs-eager question in `TypeConverter.__init__` becomes moot for
+      small/medium libraries -- out of scope for this task's source set
+      (only `typeconverters.py`/`datatypes.py`/`robotbuilder.py`/
+      `languages.py`'s public surface were read; `languages.py`'s internal
+      `__init__` cost itself was not profiled in this run).
+
+  decisions_log:
+    - topic: What-L2/How-L2 coverage is module-granularity, not issue-granularity
+      decided: >
+        This case study's own freshly-autoscaffolded docs/requirements/*
+        and org/* CONTEXT.md files (ult-autoscaffold-content Phase B, same
+        run) were included as ctx_007/ctx_008 -- real, correct, and useful
+        for corroborating dependency edges -- but neither mentions
+        performance or this specific bug, because Phase B content is
+        generated at module granularity (docstring + tier + dependency
+        edges), not line- or issue-level detail. This task's real primary
+        grounding came from What-L3 (source) + the code graph + the real
+        GitHub issue/commit (ctx_006), with What-L2/How-L2 serving a
+        corroborating, not primary, role. Disclosed explicitly rather than
+        silently treating What-L2 as "covered" in a misleading sense -- see
+        CASE-STUDY.md for the fuller discussion.
+    - topic: GitHub issue/commit used as What-L2-equivalent external evidence
+      decided: >
+        No in-repo requirements doc discusses this bug (it postdates the
+        pinned v7.1.1 clone). Followed the ripgrep-user-stories case study's
+        precedent of hand-adapting the closest real, maintained artifact
+        that documents user-facing bugfix intent -- there, CHANGELOG.md;
+        here, the GitHub issue tracker and its linked fix commit, verified
+        live via GitHub's API rather than assumed from training knowledge.
+    - topic: Task selection anchored to the pinned v7.1.1 commit
+      decided: >
+        Issue #5254 was opened 2024-11-04, about two weeks after v7.1.1's
+        2024-10-19 release, and closed 2024-11-05 -- squarely in the
+        version-context window the pinned clone establishes. Verified the
+        bug is still live, reproducible source at the pinned commit (not
+        already fixed) before selecting it as this case's task, per
+        Stage 5's evidentiary bar.
+
+  non_regression_risks:
+    - "TypeConverter is a degree-44 node with 25 converter subclasses inheriting from it (ctx_004) -- any fix must not change behavior for execution-path callers, which always pass a real `Languages` instance already (conf/settings.py:531, ctx_009) and are therefore unaffected by laziness on the None-default path."
+    - "Both real Libdoc call sites (datatypes.py:L50, robotbuilder.py:L68 -- ctx_002/ctx_003) must still get a working `.languages` accessor after any fix -- the real upstream fix makes it a lazy property rather than removing the attribute, exactly because some code path could still read `.languages` even when Libdoc itself never does."
+    - "Unlike both ripgrep case studies in this repo, `graphify affected` never returned a \"no affected nodes found\" low-degree-leaf result anywhere in this run (TypeConverter degree 44, Languages degree 25, both far above that failure mode) -- a genuine contrasting data point on when the previously-disclosed limitation does and doesn't bite, not a new defect."
