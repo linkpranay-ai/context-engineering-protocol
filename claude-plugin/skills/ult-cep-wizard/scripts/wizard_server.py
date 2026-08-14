@@ -73,13 +73,14 @@ from __future__ import annotations
 import html
 import json
 import mimetypes
+import posixpath
 import sys
 from dataclasses import asdict
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -97,6 +98,10 @@ import wizard_onboarding_state  # noqa: E402
 import wizard_originhost  # noqa: E402
 import wizard_picker  # noqa: E402
 import wizard_preflight  # noqa: E402
+import wizard_retrofit_apply  # noqa: E402
+import wizard_retrofit_draft  # noqa: E402
+import wizard_retrofit_inventory  # noqa: E402
+import wizard_retrofit_state  # noqa: E402
 import wizard_stub_content  # noqa: E402
 
 BIND_HOST = "127.0.0.1"
@@ -234,6 +239,15 @@ def _make_handler(ctx: _ServerContext):
             if path == "/api/decisions":
                 self._handle_api_decisions()
                 return
+            if path == "/api/retrofit/inventory":
+                self._handle_api_retrofit_inventory()
+                return
+            if path == "/api/retrofit/state":
+                self._handle_api_retrofit_state()
+                return
+            if path == "/api/retrofit/contract-locations":
+                self._handle_api_retrofit_contract_locations()
+                return
             if path == "/api/docs":
                 self._handle_api_docs()
                 return
@@ -274,6 +288,18 @@ def _make_handler(ctx: _ServerContext):
                 return
             if path == "/api/discover":
                 self._handle_api_discover()
+                return
+            if path == "/api/retrofit/select":
+                self._handle_api_retrofit_select()
+                return
+            if path == "/api/retrofit/draft":
+                self._handle_api_retrofit_draft()
+                return
+            if path == "/api/retrofit/draft-override":
+                self._handle_api_retrofit_draft_override()
+                return
+            if path == "/api/retrofit/apply":
+                self._handle_api_retrofit_apply()
                 return
 
             self._reject(HTTPStatus.NOT_FOUND, "Not found.")
@@ -404,6 +430,302 @@ def _make_handler(ctx: _ServerContext):
                         {"name": e.name, "rel_path": e.rel_path} for e in result.entries
                     ],
                 },
+            )
+
+        def _handle_api_retrofit_inventory(self) -> None:
+            """Journey 3 Phase A - read-only, same session-gate-only posture as
+            `_handle_api_picker` (no CSRF/mutating gate: nothing is written).
+            `target` defaults to "." (the repo root itself) so a first load with
+            no query string still returns something rather than erroring."""
+            if self._require_session() is None:
+                return
+            query = urlsplit(self.path).query
+            target_rel_path = parse_qs(query).get("target", ["."])[0]
+            try:
+                result = wizard_retrofit_inventory.build_inventory(
+                    ctx.repo_root, target_rel_path
+                )
+            except wizard_retrofit_inventory.RetrofitInventoryError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(
+                HTTPStatus.OK, wizard_retrofit_inventory.to_json_dict(result)
+            )
+
+        def _handle_api_retrofit_state(self) -> None:
+            """Journey 3 Phase B - rehydrate every staged selection/draft on
+            page load (e.g. after a browser refresh). Read-only, same
+            session-gate-only posture as `_handle_api_retrofit_inventory`."""
+            if self._require_session() is None:
+                return
+            state = wizard_retrofit_state.load_state(ctx.repo_root)
+            self._send_json(HTTPStatus.OK, wizard_retrofit_state.to_json_dict(state))
+
+        def _handle_api_retrofit_contract_locations(self) -> None:
+            """Journey 3 Phase B - best-effort default same-repo contract
+            locations (wizard_retrofit_draft.detect_contract_locations).
+            Read-only; the frontend always shows this as an editable default,
+            never a silent final answer (SKILL.md Step 5: ask, don't
+            assume)."""
+            if self._require_session() is None:
+                return
+            locations = wizard_retrofit_draft.detect_contract_locations(ctx.repo_root)
+            self._send_json(HTTPStatus.OK, {"contract_locations": locations})
+
+        def _handle_api_retrofit_select(self) -> None:
+            """Journey 3 Phase B - stage (or replace) one unit's inclusion,
+            contract selection, and reference-resolution config. Does not
+            compute a draft itself - a changed selection is expected to be
+            followed by a POST /api/retrofit/draft call, kept as two steps so
+            the frontend can let a human review contracts/reference mode
+            before spending a draft computation on them."""
+            body = self._read_json_body()
+            if body is None:
+                return
+            unit_id = body.get("unit_id")
+            primary_file = body.get("primary_file")
+            if not unit_id or not primary_file:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "unit_id and primary_file are required"},
+                )
+                return
+            contracts = body.get("contracts") or []
+            if not isinstance(contracts, list) or not all(
+                isinstance(c, str) for c in contracts
+            ):
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "contracts must be a list of strings"},
+                )
+                return
+            unknown = [c for c in contracts if c not in wizard_retrofit_draft.CONTRACT_ORDER]
+            if unknown:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": f"unknown contract(s): {', '.join(unknown)}"},
+                )
+                return
+            try:
+                wizard_containment.check_containment(ctx.repo_root, primary_file)
+            except wizard_containment.ContainmentError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            # Directory the drafted reference is written relative to: a flat
+            # file's own containing directory, or a skill-dir/manifest-dir
+            # unit's own directory (primary_file already points inside it) -
+            # this dirname math is correct for every unit type without this
+            # handler needing to know the unit's "type" at all.
+            unit_dir_rel_path = posixpath.dirname(primary_file) or "."
+
+            state = wizard_retrofit_state.load_state(ctx.repo_root)
+            entry = wizard_retrofit_state.upsert_selection(
+                state,
+                unit_id,
+                primary_file=primary_file,
+                unit_dir_rel_path=unit_dir_rel_path,
+                include=bool(body.get("include", True)),
+                contracts=contracts,
+                reference_mode=body.get("reference_mode", "same-repo"),
+                reference_args=body.get("reference_args") or {},
+            )
+            wizard_retrofit_state.save_state(ctx.repo_root, state)
+            self._send_json(HTTPStatus.OK, {"unit_id": unit_id, "selection": entry})
+
+        def _handle_api_retrofit_draft(self) -> None:
+            """Journey 3 Phase B - computes (or recomputes) one unit's draft:
+            idempotency check, insertion point, and template text, via
+            wizard_retrofit_draft.build_draft(). Persists the result into
+            RETROFIT-STATE.json so it survives a refresh; a prior manual
+            override (draft-override) is intentionally discarded by a
+            re-draft, since the underlying contracts/reference config changed
+            and the override text no longer necessarily applies."""
+            body = self._read_json_body()
+            if body is None:
+                return
+            unit_id = body.get("unit_id")
+            if not unit_id:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "unit_id is required"})
+                return
+
+            state = wizard_retrofit_state.load_state(ctx.repo_root)
+            try:
+                entry = wizard_retrofit_state.find_unit(state, unit_id)
+            except wizard_retrofit_state.RetrofitStateError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            if not entry.get("include", False):
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": f"unit {unit_id!r} is not included - select it first"},
+                )
+                return
+            contracts = entry.get("contracts") or []
+            if not contracts:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": f"unit {unit_id!r} has no contracts selected"},
+                )
+                return
+
+            try:
+                result = wizard_retrofit_draft.build_draft(
+                    ctx.repo_root,
+                    entry["primary_file"],
+                    entry.get("unit_dir_rel_path", "."),
+                    contracts,
+                    entry.get("reference_mode", "same-repo"),
+                    entry.get("reference_args") or {},
+                )
+            except wizard_retrofit_draft.RetrofitDraftError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+
+            entry = wizard_retrofit_state.set_draft(
+                state,
+                unit_id,
+                draft_text=result.draft_text,
+                insertion_point=result.insertion_point,
+                contracts_included=result.contracts_included,
+                contracts_skipped_idempotent=result.contracts_skipped_idempotent,
+                target_file_hash=result.target_file_hash,
+                context_before=result.context_before,
+                context_after=result.context_after,
+            )
+            wizard_retrofit_state.save_state(ctx.repo_root, state)
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "unit_id": unit_id,
+                    "selection": entry,
+                    "all_satisfied": result.all_satisfied,
+                },
+            )
+
+        def _handle_api_retrofit_draft_override(self) -> None:
+            """Journey 3 Phase B - persists a human's textarea edit over a
+            previously-computed draft (SKILL.md Step 6.3's "always editable"
+            requirement). Requires draft() to have run first for this unit -
+            there is nothing to override otherwise."""
+            body = self._read_json_body()
+            if body is None:
+                return
+            unit_id = body.get("unit_id")
+            draft_text = body.get("draft_text")
+            if not unit_id or draft_text is None:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "unit_id and draft_text are required"},
+                )
+                return
+            state = wizard_retrofit_state.load_state(ctx.repo_root)
+            try:
+                entry = wizard_retrofit_state.set_draft_override(state, unit_id, draft_text)
+            except wizard_retrofit_state.RetrofitStateError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            wizard_retrofit_state.save_state(ctx.repo_root, state)
+            self._send_json(HTTPStatus.OK, {"unit_id": unit_id, "selection": entry})
+
+        def _handle_api_retrofit_apply(self) -> None:
+            """Journey 3 Phase C - writes every requested unit's already-
+            drafted insertion to disk, one file at a time
+            (wizard_retrofit_apply.apply_batch). A per-unit failure is a
+            normal, expected outcome here, not a request-level error - this
+            always answers HTTP 200 with a per-unit results list; only a
+            structurally malformed request (missing/non-list unit_ids) gets
+            its own 400, matching SKILL.md Step 8's own stated contract that
+            a write failure on one file never aborts the rest of the batch.
+
+            For every unit that actually gets written, the corresponding
+            RETROFIT-STATE.json entry is reset to the same "nothing left to
+            insert here" shape build_draft() itself uses when everything is
+            already satisfied (draft_text="", insertion_point=None,
+            contracts_included=[]) - see wizard_retrofit_apply's module
+            docstring for why this is what makes a resubmitted batch safe by
+            construction. State is persisted after each successful write
+            (not once at the end) so a mid-batch crash never leaves
+            RETROFIT-STATE.json out of sync with files actually written to
+            disk."""
+            body = self._read_json_body()
+            if body is None:
+                return
+            unit_ids = body.get("unit_ids")
+            if (
+                not isinstance(unit_ids, list)
+                or not unit_ids
+                or not all(isinstance(u, str) for u in unit_ids)
+            ):
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "unit_ids must be a non-empty list of strings"},
+                )
+                return
+
+            state = wizard_retrofit_state.load_state(ctx.repo_root)
+            results_by_id: Dict[str, Dict[str, Any]] = {}
+            inputs: List[wizard_retrofit_apply.ApplyUnitInput] = []
+            for unit_id in unit_ids:
+                try:
+                    entry = wizard_retrofit_state.find_unit(state, unit_id)
+                except wizard_retrofit_state.RetrofitStateError as exc:
+                    results_by_id[unit_id] = {
+                        "unit_id": unit_id,
+                        "status": "failed",
+                        "reason": str(exc),
+                        "contracts_applied": [],
+                        "contracts_skipped_idempotent": [],
+                    }
+                    continue
+                if not entry.get("include", False):
+                    results_by_id[unit_id] = {
+                        "unit_id": unit_id,
+                        "status": "failed",
+                        "reason": "not included in the selection",
+                        "contracts_applied": [],
+                        "contracts_skipped_idempotent": [],
+                    }
+                    continue
+                inputs.append(
+                    wizard_retrofit_apply.ApplyUnitInput(
+                        unit_id=unit_id,
+                        primary_file=entry.get("primary_file"),
+                        insertion_point=entry.get("insertion_point"),
+                        draft_text=entry.get("draft_text") or "",
+                        contracts_included=list(entry.get("contracts_included") or []),
+                        target_file_hash=entry.get("target_file_hash"),
+                    )
+                )
+
+            for result in wizard_retrofit_apply.apply_batch(ctx.repo_root, inputs):
+                if result.status == "applied":
+                    applied_entry = wizard_retrofit_state.find_unit(state, result.unit_id)
+                    skipped = list(
+                        applied_entry.get("contracts_skipped_idempotent") or []
+                    ) + list(result.contracts_applied)
+                    wizard_retrofit_state.set_draft(
+                        state,
+                        result.unit_id,
+                        draft_text="",
+                        insertion_point=None,
+                        contracts_included=[],
+                        contracts_skipped_idempotent=skipped,
+                        target_file_hash=result.target_file_hash_after,
+                        context_before="",
+                        context_after="",
+                    )
+                    wizard_retrofit_state.save_state(ctx.repo_root, state)
+                results_by_id[result.unit_id] = {
+                    "unit_id": result.unit_id,
+                    "status": result.status,
+                    "reason": result.reason,
+                    "contracts_applied": result.contracts_applied,
+                    "contracts_skipped_idempotent": result.contracts_skipped_idempotent,
+                }
+
+            self._send_json(
+                HTTPStatus.OK,
+                {"results": [results_by_id[unit_id] for unit_id in unit_ids]},
             )
 
         def _handle_api_decisions(self) -> None:

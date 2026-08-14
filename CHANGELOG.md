@@ -6,6 +6,54 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
 
 ## [Unreleased]
 
+### Added
+
+- **`ult-cep-wizard`: Journey 3 (consumer/retrofit) wizard UI, shipped in four
+  independently-mergeable phases.** Mechanizes `ult-cep-retrofit`'s read → select → draft →
+  apply flow as a second, orthogonal wizard journey (not a fifth `wizard_onboarding_state`
+  value — retrofit answers "does this other skill library know how to use what the project
+  produced," a different question from the existing layout-onboarding journey). Two
+  deliberate v1 scope limits, both documented rather than silently assumed: no LLM in the
+  loop (every drafted sentence is a fixed, contract-specific template, always rendered into
+  an editable textarea for a human to finish); retrofit target must be a subdirectory of the
+  project's own repo root (the same containment boundary the picker already enforces
+  everywhere else — an out-of-repo target is a flagged future extension, not built now).
+  - **Phase A** — read-only inventory view: `wizard_retrofit_inventory.py` batches
+    `cep_retrofit.py`'s `inventory()`/`describe()`/`recommend()` for every discovered unit
+    into one round-trip; `GET /api/retrofit/inventory` (session-gated, read-only); a new
+    top-level "Retrofit a Skill Library" nav entry with a target picker, inventory table,
+    and per-row recommendation badges/matched terms/contract checkboxes.
+  - **Phase B** — reference resolution + draft + batch diff preview:
+    `wizard_retrofit_draft.py` (pure `resolve_reference()`/`draft_insertion_text()`/
+    `detect_contract_locations()`) and `wizard_retrofit_state.py` (durable
+    `cache/cep-retrofit/RETROFIT-STATE.json`, modeled on `ult-autoscaffold-content`'s
+    `TRIAGE-STATE.json` convention, so a multi-round-trip run against a large library
+    survives a browser refresh or wizard restart); `POST /api/retrofit/select`,
+    `POST /api/retrofit/draft`, `POST /api/retrofit/draft-override`,
+    `GET /api/retrofit/state`; editable draft textareas and a collapsible per-file batch
+    diff-preview view (context-before / inserted-block / context-after, pure string-slicing
+    around the insertion point — no diff algorithm needed since every change is an
+    insertion).
+  - **Phase C** — write path: `wizard_retrofit_apply.py`'s `apply_unit()`/`apply_batch()`
+    (fast-path skip on nothing staged, freshness re-check against the draft-time hash, a
+    last-instant `check_pointer()` idempotency guard immediately before writing, atomic
+    splice-write, per-unit exception isolation so one file's failure never aborts the
+    batch); `POST /api/retrofit/apply` behind the existing three-gate mutating-route chain;
+    the wired-up "Apply changes" button with a live per-unit result list and an
+    "N retrofitted, M skipped, K failed" summary. **Widens the wizard's write surface** —
+    previously two fixed CEP-owned artifacts, now any file under the project the target
+    picker can reach — with a `SECURITY.md` entry landing in the same change describing what
+    stays the same (containment, atomicity, the three-gate chain) and what's new (blast
+    radius, the freshness re-check, the v1 in-repo-only limit).
+  - **Phase D** — docs/housekeeping: new
+    `.github/skills/ult-cep-wizard/references/wizard-retrofit-flow.md` (Journey-3 analogue of
+    the existing onboarding-journey reference docs); `catalog/check_radisys_scrub.py`'s
+    `SKILL_DIRS` extended to cover `ult-cep-retrofit`.
+  - Exercised end-to-end via the `robotframework-wizard-ui` case study (a real, unrelated
+    OSS repo) and 87 new automated tests (63 pure-function/state unit tests across the
+    inventory/draft/state/apply modules plus 24 real-bound-socket route-wiring tests,
+    including one full happy-path walk verifying the target file's actual on-disk content).
+
 ### Fixed
 
 - **`ult-autoscaffold-content` Phase B: silent tiering corruption on graphify cwd/path-relativity

@@ -1,6 +1,6 @@
 ---
 name: cep-wizard
-description: Launch a local, localhost-only browser wizard for a project with ult-repo-layout installed (initialized or not) — guides an uninitialized or not-yet-discovered repo through Run Discover, then shows resolved layer/slot state through four labeled boxes and a directory picker, and lets you resolve pending layout decisions (confirm/skip/disable/pick-a-directory) and Apply them into context-config.yaml via ult-repo-layout's own confirm step. Do NOT use for headless/CI-only layout validation — use ult-repo-layout's discover/confirm-layers/--validate directly.
+description: Launch a local, localhost-only browser wizard with two journeys — layout onboarding for a project with ult-repo-layout installed (initialized or not): guides an uninitialized or not-yet-discovered repo through Run Discover, then shows resolved layer/slot state through four labeled boxes and a directory picker, and lets you resolve pending layout decisions (confirm/skip/disable/pick-a-directory) and Apply them into context-config.yaml via ult-repo-layout's own confirm step; and retrofit — walks an existing skill library through ult-cep-retrofit's inventory/classify/draft/apply flow, with an editable per-file diff preview and batch Apply, never writing without that preview. Do NOT use for headless/CI-only layout validation — use ult-repo-layout's discover/confirm-layers/--validate directly.
 namespace: ult
 version: 0.2.0
 origin: ground-up
@@ -17,7 +17,8 @@ tier: read
 # ult-cep-wizard
 
 **Status: Phase 0 (read) + Phase 1 (write) + Phase 2 (guided brownfield onboarding)
-complete (D24).** A thin, user-launched, localhost-only local server that reads a
+complete (D24). Journey 3 (consumer/retrofit) also complete, see below.** A thin,
+user-launched, localhost-only local server that reads a
 project's resolved `ult-repo-layout` state through four labeled boxes (What, How,
 Guidelines, Trip-wire) and a server-rendered directory picker, and lets you resolve
 each `PENDING` layout decision `discover` left behind — confirm the default, pick a
@@ -153,6 +154,43 @@ soon"`) — a reserved slot for a user-guide/FAQ doc that doesn't exist yet.
   README's hero SVG — this one *does* take a client-supplied path and is
   containment-checked accordingly). Full security model in
   [`references/wizard-security-model.md`](references/wizard-security-model.md)'s §8.
+
+## Journey 3 — retrofit a skill library
+
+A second, orthogonal top-level nav entry ("Retrofit a Skill Library"), reachable
+regardless of the layout-onboarding state above — mechanizes `ult-cep-retrofit`'s own
+read → select → draft → apply flow rather than the four labeled boxes:
+
+1. **Target picker** — reuses the same `GET /api/picker` route the layout journey's
+   directory picker uses, unmodified. The target must be a subdirectory of the project
+   being onboarded (vendored library, git submodule, etc.) — an out-of-repo target is
+   deliberately out of v1 scope, the same containment boundary the picker already
+   enforces everywhere else.
+2. **Inventory** — one batched `GET /api/retrofit/inventory` call runs
+   `cep_retrofit.py`'s `inventory()`/`describe()`/`recommend()` for every discovered
+   unit and returns a table (name/type/path/`via_symlink` badge), plus an
+   unclaimed-directories panel with a free-text box rather than a guessed heuristic.
+3. **Select + draft** — per unit, the two code/task-related badges and matched terms
+   drive pre-checked (always editable) contract checkboxes; a reference-mode choice
+   (same-repo relative path, computed by default, or a plugin-qualified manual
+   override) resolves what each drafted sentence points at.
+   **No LLM in the loop:** every drafted sentence is a fixed, contract-specific
+   template — never generated text — always rendered into an editable textarea so a
+   human supplies final wording before anything is written.
+4. **Batch diff preview** — a collapsible per-unit card shows context-before /
+   inserted-block / context-after (pure string-slicing around the insertion point, no
+   diff algorithm needed), with a per-card checkbox to drop a unit from the batch at
+   the last second.
+5. **Apply** — `POST /api/retrofit/apply` writes every remaining checked unit, one file
+   at a time; a write failure on one file is reported for that file alone and never
+   aborts the rest of the batch, and re-applying the same batch afterwards is safe —
+   already-written units are reported as skipped, never duplicated. A live per-unit
+   result list plus an "N retrofitted, M skipped, K failed" summary confirms exactly
+   what landed on disk.
+
+Full mechanism writeup, including the durable `RETROFIT-STATE.json` state file and the
+freshness/idempotency guards on the write path:
+[`references/wizard-retrofit-flow.md`](references/wizard-retrofit-flow.md).
 
 ## Do NOT use for
 

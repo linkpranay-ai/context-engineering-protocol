@@ -42,6 +42,7 @@ LIBRARY_ROOT = Path(__file__).resolve().parent.parent
 SKILL_DIRS = (
     LIBRARY_ROOT / ".github" / "skills" / "ult-cep-wizard",
     LIBRARY_ROOT / ".github" / "skills" / "ult-autoscaffold-content",
+    LIBRARY_ROOT / ".github" / "skills" / "ult-cep-retrofit",
 )
 
 ALLOW_MARKER_RE = re.compile(r"<!--\s*scrub-allow\s*:.*-->")
