@@ -823,5 +823,76 @@ class TestDiscoverRoute(WizardServerTestCase):
         self.assertIsNotNone(payload["artifact_hash_after"])
 
 
+# --------------------------------------------------------------------------
+# Journey 3 Phase A: GET /api/retrofit/inventory
+# --------------------------------------------------------------------------
+
+RETROFIT_FIXTURE_SKILL_MD = """---
+name: widget-reviewer
+description: Use this skill to review code changes and write tests before merging.
+---
+
+# Widget Reviewer
+
+Reviews code changes.
+"""
+
+
+class TestApiRetrofitInventory(WizardServerTestCase):
+    """Route-wiring only (session-gate + happy path + error mapping) - the
+    describe()/recommend() field-level behavior itself is covered directly
+    against wizard_retrofit_inventory.build_inventory() in
+    test_wizard_retrofit_inventory.py, per this file's own module docstring on
+    only needing the real socket for wiring, not per-module logic."""
+
+    EXTRA_SKILLS = (("ult-cep-retrofit", ("cep_retrofit.py",)),)
+
+    def test_no_cookie_is_401(self):
+        resp = self._get("/api/retrofit/inventory")
+        self.assertEqual(resp.status, 401)
+
+    def test_default_target_inventories_the_repo_root(self):
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/retrofit/inventory", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(payload["target_rel_path"], ".")
+        unit_ids = {u["unit_id"] for u in payload["units"]}
+        self.assertIn("widget-reviewer", unit_ids)
+        widget = next(u for u in payload["units"] if u["unit_id"] == "widget-reviewer")
+        self.assertTrue(widget["code_related"])
+        self.assertTrue(widget["task_related"])
+
+    def test_explicit_target_query_param(self):
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get(
+            "/api/retrofit/inventory?target=widget-reviewer", cookie=cookie
+        )
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(payload["target_rel_path"], "widget-reviewer")
+        # With "widget-reviewer" itself as the walk root, its own SKILL.md falls
+        # through to the flat-file heuristic (skill-dir only fires below the
+        # root) - see test_wizard_retrofit_inventory.py for the direct-call
+        # coverage of this same cep_retrofit.py behavior.
+        self.assertEqual(len(payload["units"]), 1)
+        self.assertEqual(payload["units"][0]["unit_id"], "SKILL.md")
+
+    def test_containment_violation_is_400(self):
+        cookie = self._authenticated_cookie()
+        resp = self._get(
+            "/api/retrofit/inventory?target=../escaped", cookie=cookie
+        )
+        self.assertEqual(resp.status, 400)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertIn("error", payload)
+
+
 if __name__ == "__main__":
     unittest.main()

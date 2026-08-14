@@ -73,6 +73,12 @@
       <button type="button" class="topbar-nav-link" id="nav-doc-readme">README</button>
       <button type="button" class="topbar-nav-link" id="nav-doc-case-studies">Case Studies</button>
       <button type="button" class="topbar-nav-link" disabled title="Not written yet">Guide &amp; FAQ</button>
+      <!-- Journey 3 (consumer/retrofit) - a peer nav entry next to Wizard, not
+           a fifth wizard_onboarding_state screen: retrofitting a skill library
+           is orthogonal to this repo's own layout onboarding (see
+           wizard_retrofit_inventory.py's module docstring). Opens
+           #retrofit-overlay the same way the doc buttons open #docs-overlay. -->
+      <button type="button" class="topbar-nav-link" id="nav-retrofit">Retrofit a Skill Library</button>
       <button type="button" class="topbar-nav-link" id="nav-wizard">Wizard</button>
     </nav>
   </header>
@@ -93,6 +99,48 @@
       <button type="button" id="docs-overlay-close" class="secondary">&times; Close</button>
     </div>
     <div id="docs-overlay-body" class="docs-overlay-body"></div>
+  </div>
+
+  <!-- Journey 3 (consumer/retrofit) Phase A - read-only inventory/describe/
+       recommend view over GET /api/retrofit/inventory. Same "replaces
+       #main-content, never a real navigation" posture as #docs-overlay above
+       (see that div's comment) - closing always returns to whatever
+       #main-content was already showing. No write path here yet: Phase B
+       adds reference resolution + draft + diff preview, Phase C adds Apply. -->
+  <div id="retrofit-overlay" class="docs-overlay" style="display: none;" aria-label="Retrofit a skill library">
+    <div class="docs-overlay-bar">
+      <div class="docs-overlay-bar-left">
+        <h2 id="retrofit-overlay-title">Retrofit a Skill Library</h2>
+      </div>
+      <button type="button" id="retrofit-overlay-close" class="secondary">&times; Close</button>
+    </div>
+    <div class="docs-overlay-body retrofit-overlay-body">
+      <p class="retrofit-intro">
+        Point at a skill library <strong>inside this repo</strong> to see which of its
+        skills look code-related or task-related, and which CEP contract(s) each one
+        might want to reference. This view is read-only - nothing is written yet.
+      </p>
+
+      <section id="retrofit-picker" aria-label="Retrofit target picker">
+        <h3>1. Pick a target directory</h3>
+        <p class="picker-desc">
+          Browsing is read-only. Click a directory to open it, then "Inventory this
+          directory" to scan it as a candidate skill library.
+        </p>
+        <p class="picker-path" id="retrofit-picker-current-path">.</p>
+        <button type="button" id="retrofit-picker-up" disabled>&uarr; Up</button>
+        <button type="button" id="retrofit-picker-use-dir">Inventory this directory</button>
+        <ul id="retrofit-picker-entries"></ul>
+      </section>
+
+      <section id="retrofit-inventory" aria-label="Inventory results" style="display: none;">
+        <h3>2. Inventory</h3>
+        <p class="retrofit-inventory-target" id="retrofit-inventory-target"></p>
+        <p id="retrofit-inventory-message" role="status"></p>
+        <ul id="retrofit-unclaimed-dirs" class="retrofit-unclaimed-list"></ul>
+        <ul id="retrofit-units-list" class="retrofit-units-list"></ul>
+      </section>
+    </div>
   </div>
 
   <main id="main-content">

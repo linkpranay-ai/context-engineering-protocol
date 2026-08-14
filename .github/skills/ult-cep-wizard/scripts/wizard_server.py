@@ -97,6 +97,7 @@ import wizard_onboarding_state  # noqa: E402
 import wizard_originhost  # noqa: E402
 import wizard_picker  # noqa: E402
 import wizard_preflight  # noqa: E402
+import wizard_retrofit_inventory  # noqa: E402
 import wizard_stub_content  # noqa: E402
 
 BIND_HOST = "127.0.0.1"
@@ -233,6 +234,9 @@ def _make_handler(ctx: _ServerContext):
                 return
             if path == "/api/decisions":
                 self._handle_api_decisions()
+                return
+            if path == "/api/retrofit/inventory":
+                self._handle_api_retrofit_inventory()
                 return
             if path == "/api/docs":
                 self._handle_api_docs()
@@ -404,6 +408,26 @@ def _make_handler(ctx: _ServerContext):
                         {"name": e.name, "rel_path": e.rel_path} for e in result.entries
                     ],
                 },
+            )
+
+        def _handle_api_retrofit_inventory(self) -> None:
+            """Journey 3 Phase A - read-only, same session-gate-only posture as
+            `_handle_api_picker` (no CSRF/mutating gate: nothing is written).
+            `target` defaults to "." (the repo root itself) so a first load with
+            no query string still returns something rather than erroring."""
+            if self._require_session() is None:
+                return
+            query = urlsplit(self.path).query
+            target_rel_path = parse_qs(query).get("target", ["."])[0]
+            try:
+                result = wizard_retrofit_inventory.build_inventory(
+                    ctx.repo_root, target_rel_path
+                )
+            except wizard_retrofit_inventory.RetrofitInventoryError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(
+                HTTPStatus.OK, wizard_retrofit_inventory.to_json_dict(result)
             )
 
         def _handle_api_decisions(self) -> None:

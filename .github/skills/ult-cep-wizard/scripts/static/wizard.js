@@ -669,8 +669,10 @@
         // Studies section - there's no separate nav button for any of them.
         activeId = "nav-doc-case-studies";
       }
+    } else if (retrofitOverlayIsOpen()) {
+      activeId = "nav-retrofit";
     }
-    ["nav-wizard", "nav-doc-protocol", "nav-doc-readme", "nav-doc-case-studies"].forEach(
+    ["nav-wizard", "nav-doc-protocol", "nav-doc-readme", "nav-doc-case-studies", "nav-retrofit"].forEach(
       function (id) {
         document
           .getElementById(id)
@@ -740,6 +742,9 @@
   // README while a case study is open) or from inside the overlay itself
   // (e.g. clicking a case study from the index).
   function navigateDocs(view) {
+    if (retrofitOverlayIsOpen()) {
+      closeRetrofitOverlay();
+    }
     if (docsOverlayIsOpen() && docsCurrentView) {
       docsBackStack.push(docsCurrentView);
     }
@@ -753,6 +758,195 @@
     }
     renderDocView(docsBackStack.pop());
     updateDocsBackButton();
+  }
+
+  // ------------------------------------------------------------------------
+  // Journey 3 (consumer/retrofit) Phase A - read-only inventory view over
+  // GET /api/retrofit/inventory (wizard_retrofit_inventory.py). Orthogonal to
+  // loadState()'s four-screen router (see index.html's comment on
+  // #retrofit-overlay): opening/closing this overlay never touches
+  // showStateSections. Independent picker state (retrofitCurrentPath) so
+  // browsing here never disturbs the layout-decisions picker's own
+  // currentPath/currentTarget above.
+  //
+  // Contract pre-check rule mirrors ult-cep-retrofit/SKILL.md Step 4 exactly:
+  // code_related -> CONSUMING-COMPILED-GUIDELINES.md + CONSUMING-CODE-GRAPH.md;
+  // task_related -> CONSUMING-CONTEXT-PACKAGE.md; neither -> no default. A unit
+  // that's both gets all three pre-checked. Checkboxes are always editable and,
+  // in Phase A, purely client-side display - nothing is persisted or written
+  // yet (Phase B adds POST /api/retrofit/select and a durable state file).
+  // ------------------------------------------------------------------------
+
+  var CONTRACT_CODE = ["CONSUMING-COMPILED-GUIDELINES.md", "CONSUMING-CODE-GRAPH.md"];
+  var CONTRACT_TASK = ["CONSUMING-CONTEXT-PACKAGE.md"];
+  var ALL_CONTRACTS = CONTRACT_TASK.concat(CONTRACT_CODE);
+
+  var retrofitCurrentPath = ".";
+
+  function retrofitOverlayIsOpen() {
+    return document.getElementById("retrofit-overlay").style.display !== "none";
+  }
+
+  function showRetrofitOverlay() {
+    if (docsOverlayIsOpen()) {
+      closeDocsOverlay();
+    }
+    document.getElementById("retrofit-overlay").style.display = "";
+    document.getElementById("main-content").style.display = "none";
+    updateActiveNav();
+  }
+
+  function closeRetrofitOverlay() {
+    document.getElementById("retrofit-overlay").style.display = "none";
+    document.getElementById("main-content").style.display = "";
+    updateActiveNav();
+  }
+
+  function loadRetrofitPicker(relPath) {
+    fetchJson("/api/picker?path=" + encodeURIComponent(relPath)).then(function (result) {
+      var pathLabel = document.getElementById("retrofit-picker-current-path");
+      var upButton = document.getElementById("retrofit-picker-up");
+      var list = document.getElementById("retrofit-picker-entries");
+      list.innerHTML = "";
+
+      if (!result.ok) {
+        pathLabel.textContent = relPath;
+        upButton.disabled = true;
+        list.appendChild(
+          el("li", { text: (result.body && result.body.error) || "Could not list this directory." })
+        );
+        return;
+      }
+
+      var data = result.body;
+      retrofitCurrentPath = data.rel_path;
+      pathLabel.textContent = data.rel_path;
+      upButton.disabled = data.parent_rel_path === null;
+      upButton.onclick = function () {
+        if (data.parent_rel_path !== null) {
+          loadRetrofitPicker(data.parent_rel_path);
+        }
+      };
+
+      data.entries.forEach(function (entry) {
+        var button = el("button", { type: "button", text: entry.name });
+        button.addEventListener("click", function () {
+          loadRetrofitPicker(entry.rel_path);
+        });
+        list.appendChild(el("li", null, [button]));
+      });
+    });
+  }
+
+  function renderRetrofitContractCheckboxes(unit) {
+    var wrap = el("div", { class: "retrofit-unit-contracts" });
+    var preChecked = {};
+    if (unit.code_related) {
+      CONTRACT_CODE.forEach(function (c) {
+        preChecked[c] = true;
+      });
+    }
+    if (unit.task_related) {
+      CONTRACT_TASK.forEach(function (c) {
+        preChecked[c] = true;
+      });
+    }
+    ALL_CONTRACTS.forEach(function (contract) {
+      var label = el("label", { class: "retrofit-contract-label" });
+      var checkbox = el("input", { type: "checkbox" });
+      if (preChecked[contract]) {
+        checkbox.checked = true;
+      }
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(" " + contract));
+      wrap.appendChild(label);
+    });
+    return wrap;
+  }
+
+  function renderRetrofitUnitRow(unit) {
+    var details = el("details", { class: "retrofit-unit-row" });
+    var summary = el("summary");
+    summary.appendChild(el("span", { class: "retrofit-unit-name", text: unit.name || unit.unit_id }));
+    summary.appendChild(el("span", { class: "retrofit-unit-type-badge", text: unit.type }));
+    summary.appendChild(el("span", { class: "retrofit-unit-path", text: unit.path }));
+    if (unit.code_related) {
+      summary.appendChild(el("span", { class: "retrofit-relate-badge code", text: "code" }));
+    }
+    if (unit.task_related) {
+      summary.appendChild(el("span", { class: "retrofit-relate-badge task", text: "task" }));
+    }
+    if (unit.via_symlink) {
+      summary.appendChild(el("span", { class: "retrofit-relate-badge symlink", text: "via symlink" }));
+    }
+    details.appendChild(summary);
+
+    var body = el("div", { class: "retrofit-unit-detail" });
+    if (unit.describe_error) {
+      body.appendChild(
+        el("p", { class: "retrofit-unit-error", text: "Could not read this unit: " + unit.describe_error })
+      );
+    } else {
+      if (unit.description) {
+        body.appendChild(el("p", { class: "retrofit-unit-desc", text: unit.description }));
+      }
+      var terms = (unit.matched_code_terms || []).concat(unit.matched_task_terms || []);
+      if (terms.length) {
+        body.appendChild(el("p", { class: "retrofit-unit-terms", text: "Matched terms: " + terms.join(", ") }));
+      }
+      body.appendChild(renderRetrofitContractCheckboxes(unit));
+    }
+    details.appendChild(body);
+    return details;
+  }
+
+  function renderRetrofitInventory(result) {
+    document.getElementById("retrofit-inventory-target").textContent =
+      "Target: " + result.target_rel_path;
+
+    var unclaimedList = document.getElementById("retrofit-unclaimed-dirs");
+    unclaimedList.innerHTML = "";
+    (result.unclaimed_dirs || []).forEach(function (dir) {
+      unclaimedList.appendChild(
+        el("li", { class: "retrofit-unclaimed-item", text: "Unclaimed: " + dir })
+      );
+    });
+
+    var unitsList = document.getElementById("retrofit-units-list");
+    unitsList.innerHTML = "";
+    if (result.units.length === 0) {
+      unitsList.appendChild(
+        el("li", { class: "retrofit-units-empty", text: "No candidate skill units found here." })
+      );
+      return;
+    }
+    result.units.forEach(function (unit) {
+      unitsList.appendChild(renderRetrofitUnitRow(unit));
+    });
+  }
+
+  function setRetrofitInventoryMessage(text, isError) {
+    var message = document.getElementById("retrofit-inventory-message");
+    message.textContent = text || "";
+    message.classList.toggle("error", Boolean(isError));
+  }
+
+  function loadRetrofitInventory(targetRelPath) {
+    document.getElementById("retrofit-inventory").style.display = "";
+    setRetrofitInventoryMessage("Scanning…");
+    fetchJson("/api/retrofit/inventory?target=" + encodeURIComponent(targetRelPath)).then(
+      function (result) {
+        if (!result.ok) {
+          setRetrofitInventoryMessage(
+            (result.body && result.body.error) || "Could not inventory this directory.",
+            true
+          );
+          return;
+        }
+        setRetrofitInventoryMessage("");
+        renderRetrofitInventory(result.body);
+      }
+    );
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -770,7 +964,20 @@
       navigateDocs({ kind: "doc", id: "case-studies-readme" });
     });
     document.getElementById("nav-wizard").addEventListener("click", function () {
+      if (retrofitOverlayIsOpen()) {
+        closeRetrofitOverlay();
+      }
       closeDocsOverlay();
+    });
+    document.getElementById("nav-retrofit").addEventListener("click", function () {
+      showRetrofitOverlay();
+      loadRetrofitPicker(retrofitCurrentPath);
+    });
+    document.getElementById("retrofit-overlay-close").addEventListener("click", function () {
+      closeRetrofitOverlay();
+    });
+    document.getElementById("retrofit-picker-use-dir").addEventListener("click", function () {
+      loadRetrofitInventory(retrofitCurrentPath);
     });
     document.getElementById("docs-overlay-back").addEventListener("click", function () {
       docsBack();

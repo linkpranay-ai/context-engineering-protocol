@@ -877,6 +877,234 @@ button.secondary:hover {
   overflow-wrap: anywhere;
 }
 
+/* Journey 3 (consumer/retrofit) Phase A - #retrofit-overlay reuses the
+   .docs-overlay/.docs-overlay-bar/.docs-overlay-body container classes
+   wholesale (see index.html's comment on that div), so only its own inner
+   sections need new rules here. Picker sub-widget mirrors #picker's own
+   look (picker-desc/picker-path are already shared, unscoped classes) but
+   needs its own ids styled since #retrofit-picker-* are distinct elements
+   from #picker-*, kept independent on purpose (see wizard.js's comment on
+   retrofitCurrentPath). */
+.retrofit-intro {
+  margin: 0 0 1.1rem 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#retrofit-picker,
+#retrofit-inventory {
+  background: var(--panel-alt-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+}
+
+#retrofit-picker h3,
+#retrofit-inventory h3 {
+  margin: 0 0 0.4rem 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: var(--navy-800);
+}
+
+#retrofit-picker-use-dir {
+  font-size: 0.85rem;
+  padding: 0.32rem 0.7rem;
+  margin-left: 0.5rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 6px;
+}
+
+#retrofit-picker-use-dir:hover {
+  background: var(--orange-bright);
+}
+
+#retrofit-picker-up {
+  font-size: 0.85rem;
+  padding: 0.32rem 0.65rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--navy-700);
+}
+
+#retrofit-picker-up:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+#retrofit-picker-entries {
+  list-style: none;
+  margin: 0.5rem 0 0 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+#retrofit-picker-entries li button {
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+#retrofit-picker-entries li button:hover,
+#retrofit-picker-up:not(:disabled):hover {
+  background: var(--cyan-pale);
+}
+
+.retrofit-inventory-target {
+  margin: 0 0 0.35rem 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--navy-700);
+  word-break: break-all;
+}
+
+#retrofit-inventory-message {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+#retrofit-inventory-message.error {
+  color: var(--danger);
+}
+
+.retrofit-unclaimed-list {
+  list-style: none;
+  margin: 0 0 0.6rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.retrofit-unclaimed-item {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.retrofit-units-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.retrofit-units-empty {
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.retrofit-unit-row {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+}
+
+.retrofit-unit-row summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.retrofit-unit-name {
+  font-weight: 700;
+  color: var(--navy-800);
+}
+
+.retrofit-unit-type-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--faint);
+}
+
+.retrofit-unit-path {
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.retrofit-relate-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.retrofit-relate-badge.code {
+  background: var(--cyan-pale);
+  color: #0C7A93;
+}
+
+.retrofit-relate-badge.task {
+  background: #FF6A4226;
+  color: #B84A2E;
+}
+
+.retrofit-relate-badge.symlink {
+  background: var(--border);
+  color: var(--navy-700);
+}
+
+.retrofit-unit-detail {
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.retrofit-unit-desc,
+.retrofit-unit-terms {
+  margin: 0 0 0.4rem 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.retrofit-unit-error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--danger);
+}
+
+.retrofit-unit-contracts {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.retrofit-contract-label {
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+  color: var(--navy-700);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 /* Drop the tagline before it ever has to wrap (see .tagline's own comment) -
    at this width the nav row alone is already competing for space with the
    brand block, so a subtitle is the first thing to go, not the last. */
