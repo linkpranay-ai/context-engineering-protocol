@@ -1187,6 +1187,21 @@ button.secondary:hover {
   color: var(--muted);
 }
 
+.retrofit-draft-jump {
+  margin: 0.4rem 0 0 0;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+  color: var(--success);
+  background: var(--success-bg);
+  border-radius: 4px;
+}
+
+.retrofit-draft-jump a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 #retrofit-batch-cards {
   display: flex;
   flex-direction: column;

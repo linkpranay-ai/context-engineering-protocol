@@ -900,10 +900,19 @@
     var info = el("p", { class: "retrofit-draft-info" });
     var textarea = el("textarea", { class: "retrofit-draft-textarea", rows: "4" });
     textarea.style.display = "none";
+    // Confirmation shown only when this draft actually landed in the batch
+    // (draft_text non-empty - the all-satisfied/idempotent case never gets
+    // added, see renderRetrofitBatchPreview's own filter). Answers "what
+    // now?" right where the human is looking, instead of relying on them to
+    // notice step 3 appeared somewhere below a possibly long unit list.
+    var jumpNote = el("p", { class: "retrofit-draft-jump" });
+    jumpNote.style.display = "none";
 
     function renderResult(entry) {
       info.textContent = "";
       textarea.style.display = "none";
+      jumpNote.style.display = "none";
+      jumpNote.textContent = "";
       if (!entry) {
         return;
       }
@@ -926,6 +935,19 @@
       if (typeof entry.draft_text === "string" && entry.draft_text) {
         textarea.value = entry.draft_text;
         textarea.style.display = "";
+
+        jumpNote.textContent = "";
+        jumpNote.appendChild(document.createTextNode("✓ Added to the batch. "));
+        var jumpLink = el("a", { href: "#retrofit-batch-preview", text: "Review it in step 3 ↓" });
+        jumpLink.addEventListener("click", function (event) {
+          event.preventDefault();
+          var section = document.getElementById("retrofit-batch-preview");
+          if (section) {
+            section.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        });
+        jumpNote.appendChild(jumpLink);
+        jumpNote.style.display = "";
       }
     }
 
@@ -946,6 +968,7 @@
 
     panel.appendChild(info);
     panel.appendChild(textarea);
+    panel.appendChild(jumpNote);
     return { panel: panel, renderResult: renderResult };
   }
 
@@ -1098,7 +1121,7 @@
       draftMessage.textContent = "Saving…";
       postJson("/api/retrofit/select", {
         unit_id: unit.unit_id,
-        primary_file: unit.path,
+        primary_file: unit.primary_file,
         include: includeCheckbox.checked,
         contracts: contracts,
         reference_mode: referenceMode,

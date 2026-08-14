@@ -29,3 +29,4 @@ graphify-out/
 # reference only. See its own OBSOLETE.md for why. Ignored explicitly (not
 # just left untracked) so it can never be pushed by accident.
 case-studies/cep-retrofit-mattpocock-skills-copilot/
+cache/cep-retrofit/
