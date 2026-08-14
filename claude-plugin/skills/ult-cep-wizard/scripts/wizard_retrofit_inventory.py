@@ -65,8 +65,11 @@ def _import_cep_retrofit(repo_root):
 class RetrofitUnit:
     unit_id: str
     type: str  # "skill-dir" | "manifest-dir" | "flat-file"
-    path: str  # relative to the retrofit target root
-    primary_file: str  # relative to the retrofit target root
+    path: str  # relative to ctx.repo_root (rewritten from cep_retrofit's
+    # target-root-relative value in build_inventory(); see the _repo_rel()
+    # helper there for why - this is what every downstream consumer
+    # (select/draft/apply) already assumes primary_file means).
+    primary_file: str  # relative to ctx.repo_root, same rewrite as `path`
     via_symlink: bool
     real_path: str
     name: str = ""
@@ -109,16 +112,36 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
     except (OSError, NotADirectoryError) as exc:
         raise RetrofitInventoryError(str(exc)) from exc
 
+    # cep_retrofit.inventory() returns path/primary_file relative to `target`
+    # (the directory it was pointed at). Every downstream consumer of a unit
+    # (POST /api/retrofit/select's check_containment(repo_root, primary_file),
+    # wizard_retrofit_draft.build_draft(), wizard_retrofit_apply.apply_batch())
+    # instead treats primary_file as relative to repo_root - the same
+    # convention wizard_picker.py's rel_path already uses everywhere else in
+    # this wizard. So every unit's path/primary_file is rewritten here, once,
+    # to be repo_root-relative before it ever reaches the frontend, rather
+    # than leaving each downstream caller to reconstruct target_rel_path +
+    # primary_file itself. Computed up front (not after the loop, as this used
+    # to be written) since the loop below needs it for every unit.
+    target_rel = target.relative_to(Path(repo_root).resolve()).as_posix()
+
+    def _repo_rel(child_rel: str) -> str:
+        if target_rel == ".":
+            return child_rel
+        return f"{target_rel}/{child_rel}"
+
     units: List[RetrofitUnit] = []
     for raw_unit in raw["units"]:
         unit = RetrofitUnit(
             unit_id=raw_unit["unit_id"],
             type=raw_unit["type"],
-            path=raw_unit["path"],
-            primary_file=raw_unit["primary_file"],
+            path=_repo_rel(raw_unit["path"]),
+            primary_file=_repo_rel(raw_unit["primary_file"]),
             via_symlink=raw_unit["via_symlink"],
             real_path=raw_unit["real_path"],
         )
+        # describe() still needs the original target-relative value, since it
+        # reads straight off disk via `target`, not repo_root.
         primary_abs = target / raw_unit["primary_file"]
         try:
             desc = cr.describe(str(primary_abs))
@@ -133,7 +156,6 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
             unit.describe_error = str(exc)
         units.append(unit)
 
-    target_rel = target.relative_to(Path(repo_root).resolve()).as_posix()
     return RetrofitInventoryResult(
         target_rel_path=target_rel,
         units=units,

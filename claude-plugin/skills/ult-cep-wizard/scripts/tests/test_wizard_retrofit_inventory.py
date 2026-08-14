@@ -141,6 +141,11 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         self.assertTrue(skill_dir.task_related)
         self.assertIn("review", skill_dir.matched_code_terms)
         self.assertIn("changes", skill_dir.matched_task_terms)
+        # target_rel_path is "." here, so repo-root-relative and
+        # target-relative happen to coincide - see
+        # test_inventory_against_a_library_subdirectory below for the case
+        # where they don't.
+        self.assertEqual(skill_dir.primary_file, "widget-reviewer/SKILL.md")
 
         flat_file = by_id["second-widget.md"]
         self.assertEqual(flat_file.type, "flat-file")
@@ -148,6 +153,7 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         self.assertFalse(flat_file.code_related)
         self.assertTrue(flat_file.task_related)
         self.assertIn("plans", flat_file.matched_task_terms)
+        self.assertEqual(flat_file.primary_file, "second-widget.md")
 
     def test_to_json_dict_round_trips_as_plain_dict(self):
         result = wri.build_inventory(str(self.root), ".")
@@ -172,6 +178,40 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         self.assertEqual(unit.type, "flat-file")
         self.assertEqual(unit.name, "widget-reviewer")
         self.assertEqual(result.unclaimed_dirs, [])
+        self.assertEqual(unit.primary_file, "widget-reviewer/SKILL.md")
+
+    def test_inventory_against_a_library_subdirectory(self):
+        # Regression test: the real Journey 3 shape per the plan's own scope
+        # decision #2 (v1 target must be a subdirectory of ctx.repo_root, e.g.
+        # a vendored library) - target is a *container* directory holding
+        # multiple units below it, distinct from test_inventory_against_a_
+        # subdirectory_target above where target *is* a unit's own directory
+        # (and so target-relative and repo-root-relative primary_file values
+        # happened to coincide, masking this exact bug). Caught by a real
+        # Playwright walkthrough against this exact shape (target =
+        # "_manual-retrofit-fixture", not "."): every unit's primary_file was
+        # returned target-relative (e.g. "second-widget.md") while
+        # POST /api/retrofit/select's check_containment(repo_root,
+        # primary_file) and wizard_retrofit_draft.build_draft() both assume
+        # repo-root-relative, so every select/draft call 400'd with "<file>
+        # is not a file".
+        _write(self.root / "library" / "widget-reviewer" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+        self.assertEqual(result.target_rel_path, "library")
+
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"widget-reviewer", "second-widget.md"})
+        self.assertEqual(by_id["widget-reviewer"].primary_file, "library/widget-reviewer/SKILL.md")
+        self.assertEqual(by_id["widget-reviewer"].path, "library/widget-reviewer")
+        self.assertEqual(by_id["second-widget.md"].primary_file, "library/second-widget.md")
+        self.assertEqual(by_id["second-widget.md"].path, "library/second-widget.md")
+
+        # And the repo-root-relative value is exactly what a real select call
+        # against repo_root (not `target`) must be able to resolve.
+        for unit in result.units:
+            self.assertTrue((self.root / unit.primary_file).is_file())
 
 
 class TestDescribeErrorIsolation(RetrofitInventoryTestCase):
