@@ -101,12 +101,16 @@
     <div id="docs-overlay-body" class="docs-overlay-body"></div>
   </div>
 
-  <!-- Journey 3 (consumer/retrofit) Phase A - read-only inventory/describe/
-       recommend view over GET /api/retrofit/inventory. Same "replaces
-       #main-content, never a real navigation" posture as #docs-overlay above
-       (see that div's comment) - closing always returns to whatever
-       #main-content was already showing. No write path here yet: Phase B
-       adds reference resolution + draft + diff preview, Phase C adds Apply. -->
+  <!-- Journey 3 (consumer/retrofit) Phase A+B - inventory/describe/recommend
+       view (Phase A, read-only, over GET /api/retrofit/inventory) plus
+       selection + reference resolution + draft + batch diff preview
+       (Phase B, over the /api/retrofit/select|draft|draft-override|state
+       routes). Same "replaces #main-content, never a real navigation"
+       posture as #docs-overlay above (see that div's comment) - closing
+       always returns to whatever #main-content was already showing. Still no
+       write path: every draft here is computed and persisted to
+       RETROFIT-STATE.json, never spliced into a real file - Phase C adds
+       Apply. -->
   <div id="retrofit-overlay" class="docs-overlay" style="display: none;" aria-label="Retrofit a skill library">
     <div class="docs-overlay-bar">
       <div class="docs-overlay-bar-left">
@@ -117,8 +121,9 @@
     <div class="docs-overlay-body retrofit-overlay-body">
       <p class="retrofit-intro">
         Point at a skill library <strong>inside this repo</strong> to see which of its
-        skills look code-related or task-related, and which CEP contract(s) each one
-        might want to reference. This view is read-only - nothing is written yet.
+        skills look code-related or task-related, select which CEP contract(s) each
+        one should reference, and draft a pointer to insert. Every draft is deterministic
+        template text, always editable, and nothing is written to any file yet.
       </p>
 
       <section id="retrofit-picker" aria-label="Retrofit target picker">
@@ -134,11 +139,32 @@
       </section>
 
       <section id="retrofit-inventory" aria-label="Inventory results" style="display: none;">
-        <h3>2. Inventory</h3>
+        <h3>2. Inventory, select, and draft</h3>
         <p class="retrofit-inventory-target" id="retrofit-inventory-target"></p>
         <p id="retrofit-inventory-message" role="status"></p>
         <ul id="retrofit-unclaimed-dirs" class="retrofit-unclaimed-list"></ul>
         <ul id="retrofit-units-list" class="retrofit-units-list"></ul>
+      </section>
+
+      <section id="retrofit-batch-preview" aria-label="Batch diff preview" style="display: none;">
+        <h3>3. Review the batch</h3>
+        <p class="picker-desc">
+          Every unit below has a saved, drafted insertion. Uncheck a card to leave it out
+          of a future batch apply. Applying is not available yet - Phase C wires
+          "Apply changes" up to an actual write.
+        </p>
+        <div id="retrofit-batch-cards"></div>
+        <div class="retrofit-batch-footer">
+          <span id="retrofit-batch-apply-count">0 changes</span>
+          <button
+            type="button"
+            id="retrofit-batch-apply-button"
+            disabled
+            title="Applying lands in Phase C - this batch is preview-only for now"
+          >
+            Apply changes
+          </button>
+        </div>
       </section>
     </div>
   </div>

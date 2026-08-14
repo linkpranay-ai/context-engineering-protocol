@@ -894,5 +894,241 @@ class TestApiRetrofitInventory(WizardServerTestCase):
         self.assertIn("error", payload)
 
 
+class TestApiRetrofitState(WizardServerTestCase):
+    """Route-wiring only for GET /api/retrofit/state - the state file's own
+    load/save/mutation behavior is covered directly in
+    test_wizard_retrofit_state.py."""
+
+    def test_no_cookie_is_401(self):
+        resp = self._get("/api/retrofit/state")
+        self.assertEqual(resp.status, 401)
+
+    def test_no_staged_units_returns_an_empty_skeleton(self):
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/retrofit/state", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(payload["units"], {})
+
+
+class TestApiRetrofitContractLocations(WizardServerTestCase):
+    def test_no_cookie_is_401(self):
+        resp = self._get("/api/retrofit/contract-locations")
+        self.assertEqual(resp.status, 401)
+
+    def test_finds_a_contract_present_in_the_repo(self):
+        _write(
+            self.repo_root / "context-engineering" / "CONSUMING-CONTEXT-PACKAGE.md",
+            "content\n",
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/retrofit/contract-locations", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(
+            payload["contract_locations"]["CONSUMING-CONTEXT-PACKAGE.md"],
+            "context-engineering/CONSUMING-CONTEXT-PACKAGE.md",
+        )
+        self.assertIsNone(payload["contract_locations"]["CONSUMING-CODE-GRAPH.md"])
+
+
+class TestApiRetrofitSelect(WizardServerTestCase):
+    EXTRA_SKILLS = (("ult-cep-retrofit", ("cep_retrofit.py",)),)
+
+    def test_no_cookie_is_401(self):
+        resp = self._post_json("/api/retrofit/select", {})
+        self.assertEqual(resp.status, 401)
+
+    def test_missing_csrf_header_is_403(self):
+        cookie = self._authenticated_cookie()
+        resp = self._post_json(
+            "/api/retrofit/select",
+            {"unit_id": "widget-reviewer", "primary_file": "widget-reviewer/SKILL.md"},
+            cookie=cookie,
+        )
+        self.assertEqual(resp.status, 403)
+
+    def test_missing_required_field_is_400(self):
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/retrofit/select", {"unit_id": "widget-reviewer"}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+
+    def test_unknown_contract_is_400(self):
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/retrofit/select",
+            {
+                "unit_id": "widget-reviewer",
+                "primary_file": "widget-reviewer/SKILL.md",
+                "contracts": ["NOT-A-REAL-CONTRACT.md"],
+            },
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+
+    def test_containment_violation_is_400(self):
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/retrofit/select",
+            {"unit_id": "widget-reviewer", "primary_file": "../escaped/SKILL.md"},
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+
+    def test_successful_select_persists_and_is_visible_via_state(self):
+        _write(self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD)
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/retrofit/select",
+            {
+                "unit_id": "widget-reviewer",
+                "primary_file": "widget-reviewer/SKILL.md",
+                "contracts": ["CONSUMING-CONTEXT-PACKAGE.md"],
+                "reference_mode": "same-repo",
+                "reference_args": {"CONSUMING-CONTEXT-PACKAGE.md": "context-engineering/CONSUMING-CONTEXT-PACKAGE.md"},
+            },
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(payload["selection"]["include"])
+
+        state = json.loads(self._get("/api/retrofit/state", cookie=cookie).read().decode("utf-8"))
+        self.assertIn("widget-reviewer", state["units"])
+
+
+class TestApiRetrofitDraft(WizardServerTestCase):
+    EXTRA_SKILLS = (("ult-cep-retrofit", ("cep_retrofit.py",)),)
+
+    def _select(self, cookie, csrf, **overrides):
+        payload = {
+            "unit_id": "widget-reviewer",
+            "primary_file": "widget-reviewer/SKILL.md",
+            "contracts": ["CONSUMING-CONTEXT-PACKAGE.md"],
+            "reference_mode": "same-repo",
+            "reference_args": {
+                "CONSUMING-CONTEXT-PACKAGE.md": "context-engineering/CONSUMING-CONTEXT-PACKAGE.md"
+            },
+        }
+        payload.update(overrides)
+        resp = self._post_json("/api/retrofit/select", payload, cookie=cookie, csrf=csrf)
+        self.assertEqual(resp.status, 200)
+
+    def test_no_cookie_is_401(self):
+        resp = self._post_json("/api/retrofit/draft", {})
+        self.assertEqual(resp.status, 401)
+
+    def test_missing_csrf_header_is_403(self):
+        cookie = self._authenticated_cookie()
+        resp = self._post_json(
+            "/api/retrofit/draft", {"unit_id": "widget-reviewer"}, cookie=cookie,
+        )
+        self.assertEqual(resp.status, 403)
+
+    def test_draft_without_a_prior_select_is_400(self):
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/retrofit/draft", {"unit_id": "never-selected"}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+
+    def test_successful_draft_persists_context_and_is_visible_via_state(self):
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md",
+            RETROFIT_FIXTURE_SKILL_MD + "\n## See Also\n\nOther docs.\n",
+        )
+        cookie, csrf = self._authenticated_session()
+        self._select(cookie, csrf)
+
+        resp = self._post_json(
+            "/api/retrofit/draft", {"unit_id": "widget-reviewer"}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertFalse(payload["all_satisfied"])
+        self.assertIn("context-engineering/CONSUMING-CONTEXT-PACKAGE.md", payload["selection"]["draft_text"])
+        self.assertEqual(payload["selection"]["insertion_point"]["method"], "see-also")
+
+        state = json.loads(self._get("/api/retrofit/state", cookie=cookie).read().decode("utf-8"))
+        entry = state["units"]["widget-reviewer"]
+        self.assertIn("Other docs.", entry["context_after"] + entry["context_before"])
+
+
+class TestApiRetrofitDraftOverride(WizardServerTestCase):
+    EXTRA_SKILLS = (("ult-cep-retrofit", ("cep_retrofit.py",)),)
+
+    def test_no_cookie_is_401(self):
+        resp = self._post_json("/api/retrofit/draft-override", {})
+        self.assertEqual(resp.status, 401)
+
+    def test_missing_csrf_header_is_403(self):
+        cookie = self._authenticated_cookie()
+        resp = self._post_json(
+            "/api/retrofit/draft-override",
+            {"unit_id": "widget-reviewer", "draft_text": "x"},
+            cookie=cookie,
+        )
+        self.assertEqual(resp.status, 403)
+
+    def test_override_without_a_prior_draft_is_400(self):
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/retrofit/select",
+            {"unit_id": "widget-reviewer", "primary_file": "widget-reviewer/SKILL.md"},
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+        resp = self._post_json(
+            "/api/retrofit/draft-override",
+            {"unit_id": "widget-reviewer", "draft_text": "human text"},
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+
+    def test_successful_override_persists_and_is_visible_via_state(self):
+        _write(self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD)
+        cookie, csrf = self._authenticated_session()
+        self._post_json(
+            "/api/retrofit/select",
+            {
+                "unit_id": "widget-reviewer",
+                "primary_file": "widget-reviewer/SKILL.md",
+                "contracts": ["CONSUMING-CONTEXT-PACKAGE.md"],
+                "reference_mode": "same-repo",
+                "reference_args": {
+                    "CONSUMING-CONTEXT-PACKAGE.md": "context-engineering/CONSUMING-CONTEXT-PACKAGE.md"
+                },
+            },
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self._post_json(
+            "/api/retrofit/draft", {"unit_id": "widget-reviewer"}, cookie=cookie, csrf=csrf,
+        )
+
+        resp = self._post_json(
+            "/api/retrofit/draft-override",
+            {"unit_id": "widget-reviewer", "draft_text": "human-edited pointer text"},
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(payload["selection"]["draft_text"], "human-edited pointer text")
+        self.assertTrue(payload["selection"]["draft_overridden"])
+
+        state = json.loads(self._get("/api/retrofit/state", cookie=cookie).read().decode("utf-8"))
+        self.assertEqual(
+            state["units"]["widget-reviewer"]["draft_text"], "human-edited pointer text"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

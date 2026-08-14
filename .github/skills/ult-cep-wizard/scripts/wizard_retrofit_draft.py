@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""wizard_retrofit_draft.py - reference-resolution and template-drafting for
+Journey 3 (consumer/retrofit) Phase B (D24, ult-cep-wizard).
+
+No LLM in the loop (Journey 3 plan's own scope decision 1): every drafted
+sentence is a fixed, contract-specific template with the resolved reference
+substituted in - never generated text. The frontend always presents the
+result in an editable textarea (see wizard_retrofit_state.set_draft_override)
+so a human supplies final wording; this module's output is a starting point,
+never treated as final.
+
+Contract order and reference resolution follow ult-cep-retrofit/SKILL.md Step
+5/6 exactly:
+  - Step 6.4: multiple confirmed contracts for one skill are combined into
+    ONE block at ONE insertion point, in the fixed order CONTRACT_ORDER
+    below - never separate passes that could compute different insertion
+    points and scatter pointers through the file.
+  - Step 5: exactly two v1-supported reference shapes, ask-don't-assume:
+    same-repo (a relative path, computed here) or plugin-qualified (a
+    human-supplied `/<plugin>:<skill>` reference, validated but never
+    auto-detected). Anything else - CEP vendored at a subpath, or living in
+    an entirely separate unvendored location - is out of v1 scope per
+    SKILL.md's own "When something doesn't fit flow" section; the calling
+    UI is expected to skip the affected unit rather than this module
+    inventing a resolution.
+
+`build_draft()` is the one orchestration entry point wizard_server.py calls:
+idempotency check first (cep_retrofit.check_pointer, by contract identity),
+then - only for whatever remains - insertion-point detection plus this
+module's own resolve_reference/draft_insertion_text. Everything else here is
+a pure function (resolve_reference, draft_insertion_text,
+detect_contract_locations) with no side effects beyond the bounded
+filesystem walk detect_contract_locations does to compute a default.
+"""
+from __future__ import annotations
+
+import importlib
+import os
+import posixpath
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import wizard_containment as wc  # noqa: E402
+import wizard_content_hash as wch  # noqa: E402
+
+
+class RetrofitDraftError(Exception):
+    """Raised for any refusal in this module - already-user-facing message."""
+
+
+CONTRACT_ORDER = (
+    "CONSUMING-CONTEXT-PACKAGE.md",
+    "CONSUMING-COMPILED-GUIDELINES.md",
+    "CONSUMING-CODE-GRAPH.md",
+)
+
+_TEMPLATE_SENTENCES = {
+    "CONSUMING-CONTEXT-PACKAGE.md": (
+        "If a CEP context package exists for this work, see `{ref}` for how "
+        "to detect, load, and apply it before proceeding."
+    ),
+    "CONSUMING-COMPILED-GUIDELINES.md": (
+        "If compiled project guidelines exist for this codebase, see `{ref}` "
+        "for how to load and apply them before making changes."
+    ),
+    "CONSUMING-CODE-GRAPH.md": (
+        "If a code graph is available for this repo, see `{ref}` for how to "
+        "query it for structural and dependency context before making "
+        "changes."
+    ),
+}
+
+# Small local duplicate of the excluded-directory set every filesystem-
+# scanning helper in this repo keeps locally rather than importing (see
+# ult-autoscaffold-content/scripts/scaffold_state.py's own docstring on this
+# convention) - bounds detect_contract_locations()'s walk the same way
+# cep_retrofit.py's own DEFAULT_EXCLUDES bounds inventory(), without
+# importing that module just for one constant.
+_SCAN_IGNORED_DIR_NAMES = {
+    ".git", ".hg", ".svn", "node_modules", "dist", "build", "target",
+    ".venv", "venv", "__pycache__", ".tox", ".mypy_cache", ".pytest_cache",
+    "site-packages", ".idea", ".vscode",
+}
+
+_PLUGIN_QUALIFIER_RE = re.compile(r"^/[A-Za-z0-9][A-Za-z0-9_-]*:[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+
+def _prune_ignored(dirnames: List[str]) -> None:
+    dirnames[:] = [d for d in dirnames if d not in _SCAN_IGNORED_DIR_NAMES]
+
+
+def detect_contract_locations(repo_root) -> Dict[str, Optional[str]]:
+    """Best-effort default: {contract_filename: repo-relative path or None},
+    the first match found for each of CONTRACT_ORDER's three fixed filenames
+    anywhere under repo_root (deterministic directory-then-name sort order,
+    ignored-dir-pruned walk, same shape cep_retrofit.inventory()'s own walk
+    uses). This is a *default* only - the same-repo reference-resolution UI
+    always shows it as an editable field, never as a silent final answer
+    (SKILL.md Step 5: "ask, don't assume")."""
+    root = Path(repo_root)
+    found: Dict[str, Optional[str]] = {c: None for c in CONTRACT_ORDER}
+    remaining = set(CONTRACT_ORDER)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        _prune_ignored(dirnames)
+        for name in sorted(filenames):
+            if name in remaining:
+                full = Path(dirpath) / name
+                found[name] = full.relative_to(root).as_posix()
+                remaining.discard(name)
+        if not remaining:
+            break
+    return found
+
+
+def resolve_reference(
+    repo_root,
+    unit_dir_rel_path: str,
+    contract_filename: str,
+    mode: str,
+    *,
+    same_repo_contract_rel_path: Optional[str] = None,
+    plugin_qualifier: Optional[str] = None,
+) -> str:
+    """Resolves what string to substitute into the drafted sentence for one
+    contract - see module docstring for the two supported modes.
+    `unit_dir_rel_path` is the directory the reference is written *relative
+    to*: the unit's own directory for a skill-dir/manifest-dir, or the
+    containing directory of the file itself for a flat-file unit (callers
+    compute this once from the unit's `path`, not this function - it has no
+    opinion on unit "type"). Raises RetrofitDraftError on any missing or
+    malformed argument for the selected mode; never silently falls back to
+    the other mode."""
+    if contract_filename not in CONTRACT_ORDER:
+        raise RetrofitDraftError(f"unknown contract {contract_filename!r}")
+
+    if mode == "same-repo":
+        if not same_repo_contract_rel_path or not same_repo_contract_rel_path.strip():
+            raise RetrofitDraftError(
+                "same-repo mode requires same_repo_contract_rel_path"
+            )
+        contract_rel = same_repo_contract_rel_path.strip()
+        try:
+            wc.check_containment(repo_root, contract_rel)
+            wc.check_containment(repo_root, unit_dir_rel_path)
+        except wc.ContainmentError as exc:
+            raise RetrofitDraftError(str(exc)) from exc
+        # posixpath, not os.path - both inputs are already forward-slash,
+        # repo-relative strings, and the result is written into a Markdown
+        # file, which should read forward-slash on every host OS (matches
+        # wizard_decision_staging.py's own forward-slash-only convention),
+        # not whatever os.sep the wizard happens to be running under.
+        start_dir = unit_dir_rel_path if unit_dir_rel_path not in ("", ".") else "."
+        return posixpath.relpath(contract_rel, start_dir)
+
+    if mode == "plugin":
+        if not plugin_qualifier or not plugin_qualifier.strip():
+            raise RetrofitDraftError("plugin mode requires plugin_qualifier")
+        qualifier = plugin_qualifier.strip()
+        if not _PLUGIN_QUALIFIER_RE.match(qualifier):
+            raise RetrofitDraftError(
+                f"{qualifier!r} does not look like a plugin-qualified reference "
+                f"(expected '/<plugin>:<skill>')"
+            )
+        return f"{qualifier}'s {contract_filename}"
+
+    raise RetrofitDraftError(
+        f"unknown reference mode {mode!r} (expected 'same-repo' or 'plugin')"
+    )
+
+
+def draft_insertion_text(contracts: List[str], references: Dict[str, str]) -> str:
+    """Combined block for every contract in `contracts` (any input order),
+    rendered in CONTRACT_ORDER's fixed stable order per SKILL.md Step 6.4,
+    one template sentence per contract with its resolved reference
+    substituted. Raises RetrofitDraftError if a contract isn't a known
+    CONTRACT_ORDER member or has no entry in `references`."""
+    unknown = [c for c in contracts if c not in CONTRACT_ORDER]
+    if unknown:
+        raise RetrofitDraftError(f"unknown contract(s): {', '.join(unknown)}")
+    missing_ref = [c for c in contracts if c not in references]
+    if missing_ref:
+        raise RetrofitDraftError(f"no resolved reference for: {', '.join(missing_ref)}")
+
+    ordered = [c for c in CONTRACT_ORDER if c in contracts]
+    sentences = [_TEMPLATE_SENTENCES[c].format(ref=references[c]) for c in ordered]
+    return "\n\n".join(sentences)
+
+
+def _find_cep_retrofit_scripts_dir(repo_root) -> Path:
+    """Same lookup wizard_retrofit_inventory.py's own (private) version does
+    - duplicated for the same reason wizard_decision_staging.py/
+    wizard_apply.py each duplicate their own confirm_layers.py importer
+    rather than importing one another's: this module must be independently
+    usable, and independently unit-testable, without either of those having
+    already run in the same process."""
+    scripts_dir = Path(repo_root) / ".github" / "skills" / "ult-cep-retrofit" / "scripts"
+    if not (scripts_dir / "cep_retrofit.py").exists():
+        raise RetrofitDraftError(
+            f"ult-cep-retrofit's cep_retrofit.py was not found under {scripts_dir} - "
+            f"is ult-cep-retrofit installed in this repo?"
+        )
+    return scripts_dir
+
+
+def _import_cep_retrofit(repo_root):
+    scripts_dir_str = str(_find_cep_retrofit_scripts_dir(repo_root))
+    if scripts_dir_str not in sys.path:
+        sys.path.insert(0, scripts_dir_str)
+    return importlib.import_module("cep_retrofit")
+
+
+_CONTEXT_WINDOW_LINES = 3
+
+
+def _extract_context(target: Path, insertion_point: Dict[str, Any]) -> "tuple[str, str]":
+    """Best-effort context_before/context_after for the batch diff-preview
+    view's three-`<pre>`-zone cards (Journey 3 plan's Phase B UI
+    requirement) - up to `_CONTEXT_WINDOW_LINES` lines of the target file's
+    own text immediately surrounding `insertion_point["line"]`, a 0-indexed
+    splice index into `target.read_text().splitlines()` per
+    cep_retrofit.find_insertion_point's own contract. No diff algorithm
+    needed: every change here is a pure insertion, never a replacement, so
+    "before" and "after" is just string-slicing around one splice point.
+    Read failures are swallowed (empty/empty) rather than raised - this is a
+    presentation nicety for the preview card, never load-bearing for the
+    draft itself, which already has everything it needs without it."""
+    try:
+        lines = target.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return "", ""
+    line = insertion_point.get("line")
+    if not isinstance(line, int):
+        return "", ""
+    line = max(0, min(line, len(lines)))
+    before = lines[max(0, line - _CONTEXT_WINDOW_LINES):line]
+    after = lines[line:line + _CONTEXT_WINDOW_LINES]
+    return "\n".join(before), "\n".join(after)
+
+
+@dataclass
+class DraftResult:
+    all_satisfied: bool
+    contracts_included: List[str]
+    contracts_skipped_idempotent: List[str]
+    insertion_point: Optional[Dict[str, Any]]
+    draft_text: str
+    target_file_hash: Optional[str]
+    context_before: str
+    context_after: str
+
+
+def build_draft(
+    repo_root,
+    primary_file_rel_path: str,
+    unit_dir_rel_path: str,
+    contracts: List[str],
+    reference_mode: str,
+    reference_args: Dict[str, str],
+) -> DraftResult:
+    """Orchestrates the full Phase B draft computation for one unit:
+
+    1. Containment-checks `primary_file_rel_path` and confirms it's a file.
+    2. Idempotency check first, by contract identity (SKILL.md Step 6.1):
+       `cep_retrofit.check_pointer`. A contract already present is dropped
+       into `contracts_skipped_idempotent`, never re-drafted.
+    3. If everything was already present, returns immediately
+       (`all_satisfied=True`) without ever calling `find_insertion_point` -
+       there is nothing left to insert.
+    4. Otherwise: `find_insertion_point` once, then this module's own
+       `resolve_reference`/`draft_insertion_text` for whatever remains,
+       combined into one block per Step 6.4.
+
+    Raises RetrofitDraftError uniformly on any refusal - missing
+    ult-cep-retrofit install, containment violation, non-file target, or a
+    resolve_reference/draft_insertion_text failure - so callers need only
+    one except clause.
+    """
+    try:
+        target = wc.check_containment(repo_root, primary_file_rel_path)
+    except wc.ContainmentError as exc:
+        raise RetrofitDraftError(str(exc)) from exc
+    if not target.is_file():
+        raise RetrofitDraftError(f"{primary_file_rel_path} is not a file")
+
+    cr = _import_cep_retrofit(repo_root)
+    try:
+        already_present = cr.check_pointer(str(target), contracts)
+        target_file_hash = wch.hash_file(target)
+    except OSError as exc:
+        raise RetrofitDraftError(str(exc)) from exc
+
+    remaining = [c for c in contracts if not already_present.get(c)]
+    skipped_idempotent = [c for c in contracts if already_present.get(c)]
+
+    if not remaining:
+        return DraftResult(
+            all_satisfied=True,
+            contracts_included=[],
+            contracts_skipped_idempotent=skipped_idempotent,
+            insertion_point=None,
+            draft_text="",
+            target_file_hash=target_file_hash,
+            context_before="",
+            context_after="",
+        )
+
+    try:
+        insertion_point = cr.find_insertion_point(str(target))
+    except OSError as exc:
+        raise RetrofitDraftError(str(exc)) from exc
+
+    references: Dict[str, str] = {}
+    for contract in remaining:
+        ref_value = (reference_args or {}).get(contract)
+        if reference_mode == "same-repo":
+            references[contract] = resolve_reference(
+                repo_root, unit_dir_rel_path, contract, "same-repo",
+                same_repo_contract_rel_path=ref_value,
+            )
+        elif reference_mode == "plugin":
+            references[contract] = resolve_reference(
+                repo_root, unit_dir_rel_path, contract, "plugin",
+                plugin_qualifier=ref_value,
+            )
+        else:
+            raise RetrofitDraftError(
+                f"unknown reference_mode {reference_mode!r} "
+                f"(expected 'same-repo' or 'plugin')"
+            )
+
+    draft_text = draft_insertion_text(remaining, references)
+    context_before, context_after = _extract_context(target, insertion_point)
+
+    return DraftResult(
+        all_satisfied=False,
+        contracts_included=remaining,
+        contracts_skipped_idempotent=skipped_idempotent,
+        insertion_point=insertion_point,
+        draft_text=draft_text,
+        target_file_hash=target_file_hash,
+        context_before=context_before,
+        context_after=context_after,
+    )

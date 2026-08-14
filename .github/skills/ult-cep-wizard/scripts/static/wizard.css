@@ -1071,6 +1071,11 @@ button.secondary:hover {
   color: var(--navy-700);
 }
 
+.retrofit-relate-badge.staged {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
 .retrofit-unit-detail {
   margin-top: 0.55rem;
   padding-top: 0.55rem;
@@ -1103,6 +1108,160 @@ button.secondary:hover {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+/* Journey 3 Phase B - selection, reference-resolution, and draft-preview
+   controls added inside each .retrofit-unit-detail alongside the Phase A
+   contract checkboxes above. */
+.retrofit-include-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--navy-700);
+  margin: 0.3rem 0 0.6rem 0;
+}
+
+.retrofit-reference-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+.retrofit-reference-mode label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.retrofit-contract-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.retrofit-contract-ref-input {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-alt-bg);
+  color: var(--navy-900);
+}
+
+.retrofit-draft-panel {
+  margin-top: 0.6rem;
+}
+
+.retrofit-draft-info {
+  margin: 0 0 0.3rem 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.retrofit-draft-textarea {
+  width: 100%;
+  min-height: 5rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-alt-bg);
+  color: var(--navy-900);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.retrofit-draft-message {
+  margin: 0.3rem 0 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+#retrofit-batch-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.retrofit-batch-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  padding: 0.6rem 0.8rem;
+}
+
+.retrofit-batch-card > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.retrofit-batch-card-file {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--navy-900);
+}
+
+.retrofit-diff-method {
+  margin: 0.4rem 0 0.3rem 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.retrofit-diff-context,
+.retrofit-diff-inserted {
+  margin: 0.3rem 0;
+  padding: 0.5rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 6px;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.retrofit-diff-context {
+  background: var(--panel-alt-bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.retrofit-diff-inserted {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success);
+}
+
+.retrofit-batch-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+#retrofit-batch-apply-count {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Drop the tagline before it ever has to wrap (see .tagline's own comment) -
