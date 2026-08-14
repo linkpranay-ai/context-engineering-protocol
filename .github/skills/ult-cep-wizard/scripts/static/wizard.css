@@ -1279,6 +1279,83 @@ button.secondary:hover {
   font-variant-numeric: tabular-nums;
 }
 
+#retrofit-batch-apply-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Journey 3 Phase C - POST /api/retrofit/apply results (renderRetrofitApplyResults
+   in wizard.js). Same summary-line/error-color convention as #apply-message
+   above, plus a per-unit list carrying one of three status colors so a
+   partial-batch failure reads at a glance instead of requiring the reason
+   text to be read line by line. */
+#retrofit-apply-summary {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--success);
+}
+
+#retrofit-apply-summary.error {
+  color: var(--danger);
+}
+
+.retrofit-apply-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.retrofit-apply-result-item {
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  background: var(--panel-alt-bg);
+  overflow-wrap: anywhere;
+}
+
+.retrofit-apply-result-status {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+}
+
+.retrofit-apply-result-unit {
+  font-family: ui-monospace, monospace;
+  color: var(--navy-900);
+}
+
+.retrofit-apply-result-reason {
+  color: var(--muted);
+}
+
+.retrofit-apply-result-item.status-applied {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+
+.retrofit-apply-result-item.status-applied .retrofit-apply-result-status {
+  color: var(--success);
+}
+
+.retrofit-apply-result-item.status-failed {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.retrofit-apply-result-item.status-failed .retrofit-apply-result-status {
+  color: var(--danger);
+}
+
+.retrofit-apply-result-item.status-skipped_idempotent .retrofit-apply-result-status {
+  color: var(--navy-700);
+}
+
 /* Drop the tagline before it ever has to wrap (see .tagline's own comment) -
    at this width the nav row alone is already competing for space with the
    brand block, so a subtitle is the first thing to go, not the last. */

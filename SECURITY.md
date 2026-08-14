@@ -36,11 +36,33 @@ in-process — the same code path its CLI uses) to do the actual commit. Full de
 including the exact gate order and each route's own additional guards:
 [`.github/skills/ult-cep-wizard/references/wizard-security-model.md`](.github/skills/ult-cep-wizard/references/wizard-security-model.md).
 
+**`POST /api/retrofit/apply` (Journey 3, D24 Phase C) widens that write surface on
+purpose.** Where `/api/stage`/`/api/apply` only ever touch two CEP-owned artifacts
+(`context-layout-discovery.md`, `context-config.yaml`), retrofitting a consumer skill
+library means writing a pointer sentence into *whatever file under the project the
+target picker can reach* — that's the whole point of the journey. The blast radius is
+larger; the controls around it are not new or weaker. The route sits behind the exact
+same three gates as every other mutating route (`_origin_host_ok()` →
+`_require_session()` → `check_csrf()`); every target path still goes through
+`wizard_containment.check_containment` before anything is read or written; every write
+is still atomic (`wizard_atomic_write.write_text_atomic`, same primitive
+`/api/apply` uses); and each unit in a batch is re-hashed against the copy its diff
+preview was computed from immediately before writing, rejecting (not overwriting) a
+file that changed underneath the session. **v1 deliberately excludes out-of-repo
+targets** — the target directory must be a subdirectory of the project's own repo
+root, the same containment boundary the picker already enforces everywhere else;
+retrofitting a library that lives outside the project (a sibling checkout, an absolute
+path elsewhere on disk) is out of scope until that boundary can be revisited
+on its own. See
+[`.github/skills/ult-cep-wizard/references/wizard-security-model.md`](.github/skills/ult-cep-wizard/references/wizard-security-model.md)
+for the full gate-by-gate detail, alongside `/api/stage`/`/api/apply`/`/api/discover`.
+
 If you find an issue in `ult-cep-wizard` — a containment bypass, an auth/session
-flaw, a CSRF gap, a way to reach `/api/stage`, `/api/apply`, or `/api/discover`
-without clearing all three gates, or anything letting a request from outside
-`127.0.0.1` be treated as trusted — please report it privately per the process below
-rather than opening a public issue.
+flaw, a CSRF gap, a way to reach `/api/stage`, `/api/apply`, `/api/discover`, or
+`/api/retrofit/apply` without clearing all three gates, a way to get
+`/api/retrofit/apply` to write outside the project repo root, or anything letting a
+request from outside `127.0.0.1` be treated as trusted — please report it privately
+per the process below rather than opening a public issue.
 
 ## Reporting a Vulnerability
 

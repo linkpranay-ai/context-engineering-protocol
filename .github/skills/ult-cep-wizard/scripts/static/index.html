@@ -101,16 +101,14 @@
     <div id="docs-overlay-body" class="docs-overlay-body"></div>
   </div>
 
-  <!-- Journey 3 (consumer/retrofit) Phase A+B - inventory/describe/recommend
-       view (Phase A, read-only, over GET /api/retrofit/inventory) plus
-       selection + reference resolution + draft + batch diff preview
-       (Phase B, over the /api/retrofit/select|draft|draft-override|state
-       routes). Same "replaces #main-content, never a real navigation"
-       posture as #docs-overlay above (see that div's comment) - closing
-       always returns to whatever #main-content was already showing. Still no
-       write path: every draft here is computed and persisted to
-       RETROFIT-STATE.json, never spliced into a real file - Phase C adds
-       Apply. -->
+  <!-- Journey 3 (consumer/retrofit) Phase A+B+C - inventory/describe/recommend
+       view (Phase A, read-only, over GET /api/retrofit/inventory), selection +
+       reference resolution + draft + batch diff preview (Phase B, over the
+       /api/retrofit/select|draft|draft-override|state routes), and the actual
+       write path (Phase C, over POST /api/retrofit/apply - see
+       wizard_retrofit_apply.py). Same "replaces #main-content, never a real
+       navigation" posture as #docs-overlay above (see that div's comment) -
+       closing always returns to whatever #main-content was already showing. -->
   <div id="retrofit-overlay" class="docs-overlay" style="display: none;" aria-label="Retrofit a skill library">
     <div class="docs-overlay-bar">
       <div class="docs-overlay-bar-left">
@@ -155,21 +153,29 @@
         <h3>3. Review the batch</h3>
         <p class="picker-desc">
           Every unit below has a saved, drafted insertion. Uncheck a card to leave it out
-          of a future batch apply. Applying is not available yet - Phase C wires
-          "Apply changes" up to an actual write.
+          of the batch. "Apply changes" writes every remaining checked card to disk, one
+          file at a time - a failure on one file is reported for that file and never
+          aborts the rest of the batch, and re-applying the same batch afterwards is safe
+          (already-written units are reported as skipped, not duplicated).
         </p>
         <div id="retrofit-batch-cards"></div>
         <div class="retrofit-batch-footer">
           <span id="retrofit-batch-apply-count">0 changes</span>
-          <button
-            type="button"
-            id="retrofit-batch-apply-button"
-            disabled
-            title="Applying lands in Phase C - this batch is preview-only for now"
-          >
+          <button type="button" id="retrofit-batch-apply-button" disabled>
             Apply changes
           </button>
         </div>
+      </section>
+
+      <!-- Deliberately a sibling of #retrofit-batch-preview, not nested inside
+           it: a successful apply empties the batch (every applied card drops
+           out once its draft_text is cleared), which hides that section - if
+           the result list lived inside it, the report of what just happened
+           would vanish in the same instant it appeared. -->
+      <section id="retrofit-apply-report" aria-label="Apply results" style="display: none;">
+        <h3>4. Apply results</h3>
+        <p id="retrofit-apply-summary" role="status"></p>
+        <ul id="retrofit-apply-results" class="retrofit-apply-results-list"></ul>
       </section>
     </div>
   </div>

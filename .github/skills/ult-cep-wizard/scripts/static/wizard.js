@@ -812,6 +812,14 @@
   var retrofitContractLocations = null;
   var retrofitContractLocationsPromise = null;
   var retrofitGroupCounter = 0;
+  // unit_id -> the {panel, renderResult} handle renderRetrofitDraftPanel
+  // returned for that row's currently-rendered <details> element. Rebuilt
+  // fresh on every renderRetrofitInventory() call (old rows are gone from
+  // the DOM at that point anyway); used after a batch apply (Phase C) to
+  // refresh a still-open row's "Insertion method…"/"Already retrofitted…"
+  // line in place, without forcing a full inventory re-scan that would
+  // collapse every <details> the human had open.
+  var retrofitDraftPanelsByUnitId = {};
 
   function retrofitOverlayIsOpen() {
     return document.getElementById("retrofit-overlay").style.display !== "none";
@@ -1160,6 +1168,7 @@
     body.appendChild(draftPanel.panel);
 
     details.appendChild(body);
+    retrofitDraftPanelsByUnitId[unit.unit_id] = draftPanel;
     return details;
   }
 
@@ -1219,19 +1228,28 @@
     ]);
   }
 
+  // Same "staged, drafted, not excluded from this batch" filter the diff-
+  // preview cards themselves are built from (renderRetrofitBatchPreview) -
+  // shared here so the footer's count, the Apply button's enabled state,
+  // and the actual POST /api/retrofit/apply body can never drift apart.
+  function retrofitBatchUnitIds() {
+    return Object.keys(retrofitState.units || {}).filter(function (unitId) {
+      var entry = retrofitState.units[unitId];
+      return entry && entry.include && entry.draft_text && !retrofitBatchExcludedUnitIds[unitId];
+    });
+  }
+
   function updateRetrofitBatchFooter() {
     var countEl = document.getElementById("retrofit-batch-apply-count");
+    var applyButton = document.getElementById("retrofit-batch-apply-button");
     if (!countEl) {
       return;
     }
-    var total = 0;
-    Object.keys(retrofitState.units || {}).forEach(function (unitId) {
-      var entry = retrofitState.units[unitId];
-      if (entry && entry.include && entry.draft_text && !retrofitBatchExcludedUnitIds[unitId]) {
-        total += 1;
-      }
-    });
+    var total = retrofitBatchUnitIds().length;
     countEl.textContent = total + (total === 1 ? " change" : " changes");
+    if (applyButton) {
+      applyButton.disabled = total === 0;
+    }
   }
 
   // Aggregates every staged unit that has a non-empty draft into the batch
@@ -1264,6 +1282,97 @@
     updateRetrofitBatchFooter();
   }
 
+  function setRetrofitApplySummary(text, isError) {
+    var summary = document.getElementById("retrofit-apply-summary");
+    if (!summary) {
+      return;
+    }
+    summary.textContent = text || "";
+    summary.classList.toggle("error", Boolean(isError));
+  }
+
+  var RETROFIT_APPLY_STATUS_LABEL = {
+    applied: "Retrofitted",
+    skipped_idempotent: "Skipped (already present)",
+    failed: "Failed",
+  };
+
+  // Renders POST /api/retrofit/apply's per-unit results list (SKILL.md Step
+  // 8's own contract: a write failure on one file is reported for that file,
+  // never rolled into a single pass/fail verdict for the whole batch) plus
+  // the "N retrofitted, M skipped, K failed" roll-up the plan's Phase C UI
+  // requirement names explicitly.
+  function renderRetrofitApplyResults(results) {
+    var report = document.getElementById("retrofit-apply-report");
+    var list = document.getElementById("retrofit-apply-results");
+    if (!report || !list) {
+      return;
+    }
+    list.innerHTML = "";
+    var counts = { applied: 0, skipped_idempotent: 0, failed: 0 };
+    results.forEach(function (result) {
+      counts[result.status] = (counts[result.status] || 0) + 1;
+      var item = el("li", { class: "retrofit-apply-result-item status-" + result.status });
+      item.appendChild(
+        el("span", {
+          class: "retrofit-apply-result-status",
+          text: RETROFIT_APPLY_STATUS_LABEL[result.status] || result.status,
+        })
+      );
+      item.appendChild(el("span", { class: "retrofit-apply-result-unit", text: " " + result.unit_id }));
+      if (result.reason) {
+        item.appendChild(el("span", { class: "retrofit-apply-result-reason", text: " — " + result.reason }));
+      }
+      list.appendChild(item);
+    });
+    setRetrofitApplySummary(
+      counts.applied + " retrofitted, " + counts.skipped_idempotent + " skipped, " +
+        counts.failed + " failed.",
+      counts.failed > 0
+    );
+    report.style.display = "";
+  }
+
+  // Applies every currently-staged, non-excluded batch unit (same set
+  // retrofitBatchUnitIds() computes for the footer/button state) via one
+  // POST /api/retrofit/apply call, then refreshes everything that could have
+  // changed as a result: the durable state (draft_text/contracts cleared for
+  // whatever actually got written), any still-open unit row's draft panel
+  // (so "Insertion method…" flips to "Already retrofitted…" in place instead
+  // of looking untouched), and the batch preview itself (applied units drop
+  // out once their draft_text is empty - see renderRetrofitBatchPreview's own
+  // filter).
+  function applyRetrofitBatch() {
+    var unitIds = retrofitBatchUnitIds();
+    if (unitIds.length === 0) {
+      return;
+    }
+    var applyButton = document.getElementById("retrofit-batch-apply-button");
+    if (applyButton) {
+      applyButton.disabled = true;
+    }
+    setRetrofitApplySummary("Applying…", false);
+    postJson("/api/retrofit/apply", { unit_ids: unitIds }).then(function (result) {
+      if (!result.ok) {
+        setRetrofitApplySummary((result.body && result.body.error) || "Apply failed.", true);
+        if (applyButton) {
+          applyButton.disabled = false;
+        }
+        return;
+      }
+      renderRetrofitApplyResults(result.body.results || []);
+      loadRetrofitState().then(function () {
+        unitIds.forEach(function (unitId) {
+          var panel = retrofitDraftPanelsByUnitId[unitId];
+          if (panel) {
+            panel.renderResult(retrofitState.units[unitId]);
+          }
+        });
+        renderRetrofitBatchPreview();
+      });
+    });
+  }
+
   function renderRetrofitInventory(result) {
     document.getElementById("retrofit-inventory-target").textContent =
       "Target: " + result.target_rel_path;
@@ -1278,6 +1387,10 @@
 
     var unitsList = document.getElementById("retrofit-units-list");
     unitsList.innerHTML = "";
+    // Every existing row is about to be discarded - drop the stale handles
+    // along with them so a leftover entry can never be mistaken for a still-
+    // live row later (see the variable's own comment).
+    retrofitDraftPanelsByUnitId = {};
     if (result.units.length === 0) {
       unitsList.appendChild(
         el("li", { class: "retrofit-units-empty", text: "No candidate skill units found here." })
@@ -1298,6 +1411,11 @@
   function loadRetrofitInventory(targetRelPath) {
     document.getElementById("retrofit-inventory").style.display = "";
     setRetrofitInventoryMessage("Scanning…");
+    // A fresh scan of a (possibly different) target starts a fresh batch -
+    // an apply report left over from a previous target would otherwise sit
+    // there looking like it still describes what's on screen now.
+    document.getElementById("retrofit-apply-report").style.display = "none";
+    retrofitBatchExcludedUnitIds = {};
     loadRetrofitState().then(function () {
       fetchJson("/api/retrofit/inventory?target=" + encodeURIComponent(targetRelPath)).then(
         function (result) {
@@ -1345,6 +1463,9 @@
     });
     document.getElementById("retrofit-picker-use-dir").addEventListener("click", function () {
       loadRetrofitInventory(retrofitCurrentPath);
+    });
+    document.getElementById("retrofit-batch-apply-button").addEventListener("click", function () {
+      applyRetrofitBatch();
     });
     document.getElementById("docs-overlay-back").addEventListener("click", function () {
       docsBack();

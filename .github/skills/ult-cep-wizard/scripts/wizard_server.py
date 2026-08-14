@@ -80,7 +80,7 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -98,6 +98,7 @@ import wizard_onboarding_state  # noqa: E402
 import wizard_originhost  # noqa: E402
 import wizard_picker  # noqa: E402
 import wizard_preflight  # noqa: E402
+import wizard_retrofit_apply  # noqa: E402
 import wizard_retrofit_draft  # noqa: E402
 import wizard_retrofit_inventory  # noqa: E402
 import wizard_retrofit_state  # noqa: E402
@@ -296,6 +297,9 @@ def _make_handler(ctx: _ServerContext):
                 return
             if path == "/api/retrofit/draft-override":
                 self._handle_api_retrofit_draft_override()
+                return
+            if path == "/api/retrofit/apply":
+                self._handle_api_retrofit_apply()
                 return
 
             self._reject(HTTPStatus.NOT_FOUND, "Not found.")
@@ -622,6 +626,107 @@ def _make_handler(ctx: _ServerContext):
                 return
             wizard_retrofit_state.save_state(ctx.repo_root, state)
             self._send_json(HTTPStatus.OK, {"unit_id": unit_id, "selection": entry})
+
+        def _handle_api_retrofit_apply(self) -> None:
+            """Journey 3 Phase C - writes every requested unit's already-
+            drafted insertion to disk, one file at a time
+            (wizard_retrofit_apply.apply_batch). A per-unit failure is a
+            normal, expected outcome here, not a request-level error - this
+            always answers HTTP 200 with a per-unit results list; only a
+            structurally malformed request (missing/non-list unit_ids) gets
+            its own 400, matching SKILL.md Step 8's own stated contract that
+            a write failure on one file never aborts the rest of the batch.
+
+            For every unit that actually gets written, the corresponding
+            RETROFIT-STATE.json entry is reset to the same "nothing left to
+            insert here" shape build_draft() itself uses when everything is
+            already satisfied (draft_text="", insertion_point=None,
+            contracts_included=[]) - see wizard_retrofit_apply's module
+            docstring for why this is what makes a resubmitted batch safe by
+            construction. State is persisted after each successful write
+            (not once at the end) so a mid-batch crash never leaves
+            RETROFIT-STATE.json out of sync with files actually written to
+            disk."""
+            body = self._read_json_body()
+            if body is None:
+                return
+            unit_ids = body.get("unit_ids")
+            if (
+                not isinstance(unit_ids, list)
+                or not unit_ids
+                or not all(isinstance(u, str) for u in unit_ids)
+            ):
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "unit_ids must be a non-empty list of strings"},
+                )
+                return
+
+            state = wizard_retrofit_state.load_state(ctx.repo_root)
+            results_by_id: Dict[str, Dict[str, Any]] = {}
+            inputs: List[wizard_retrofit_apply.ApplyUnitInput] = []
+            for unit_id in unit_ids:
+                try:
+                    entry = wizard_retrofit_state.find_unit(state, unit_id)
+                except wizard_retrofit_state.RetrofitStateError as exc:
+                    results_by_id[unit_id] = {
+                        "unit_id": unit_id,
+                        "status": "failed",
+                        "reason": str(exc),
+                        "contracts_applied": [],
+                        "contracts_skipped_idempotent": [],
+                    }
+                    continue
+                if not entry.get("include", False):
+                    results_by_id[unit_id] = {
+                        "unit_id": unit_id,
+                        "status": "failed",
+                        "reason": "not included in the selection",
+                        "contracts_applied": [],
+                        "contracts_skipped_idempotent": [],
+                    }
+                    continue
+                inputs.append(
+                    wizard_retrofit_apply.ApplyUnitInput(
+                        unit_id=unit_id,
+                        primary_file=entry.get("primary_file"),
+                        insertion_point=entry.get("insertion_point"),
+                        draft_text=entry.get("draft_text") or "",
+                        contracts_included=list(entry.get("contracts_included") or []),
+                        target_file_hash=entry.get("target_file_hash"),
+                    )
+                )
+
+            for result in wizard_retrofit_apply.apply_batch(ctx.repo_root, inputs):
+                if result.status == "applied":
+                    applied_entry = wizard_retrofit_state.find_unit(state, result.unit_id)
+                    skipped = list(
+                        applied_entry.get("contracts_skipped_idempotent") or []
+                    ) + list(result.contracts_applied)
+                    wizard_retrofit_state.set_draft(
+                        state,
+                        result.unit_id,
+                        draft_text="",
+                        insertion_point=None,
+                        contracts_included=[],
+                        contracts_skipped_idempotent=skipped,
+                        target_file_hash=result.target_file_hash_after,
+                        context_before="",
+                        context_after="",
+                    )
+                    wizard_retrofit_state.save_state(ctx.repo_root, state)
+                results_by_id[result.unit_id] = {
+                    "unit_id": result.unit_id,
+                    "status": result.status,
+                    "reason": result.reason,
+                    "contracts_applied": result.contracts_applied,
+                    "contracts_skipped_idempotent": result.contracts_skipped_idempotent,
+                }
+
+            self._send_json(
+                HTTPStatus.OK,
+                {"results": [results_by_id[unit_id] for unit_id in unit_ids]},
+            )
 
         def _handle_api_decisions(self) -> None:
             if self._require_session() is None:

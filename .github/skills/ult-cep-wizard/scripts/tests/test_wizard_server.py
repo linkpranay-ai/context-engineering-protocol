@@ -1130,5 +1130,151 @@ class TestApiRetrofitDraftOverride(WizardServerTestCase):
         )
 
 
+class TestApiRetrofitApply(WizardServerTestCase):
+    """Route-wiring for POST /api/retrofit/apply - the per-unit write mechanics
+    themselves are covered directly against wizard_retrofit_apply.apply_batch()
+    in test_wizard_retrofit_apply.py, per this file's own module docstring on
+    only needing the real socket for wiring, not per-module logic. Includes
+    the plan's own explicitly-called-out full happy-path walk (inventory ->
+    select -> draft -> apply) as its own test."""
+
+    EXTRA_SKILLS = (("ult-cep-retrofit", ("cep_retrofit.py",)),)
+
+    def _walk_to_draft(self, cookie, csrf, unit_id="widget-reviewer"):
+        """Runs select + draft for one unit against RETROFIT_FIXTURE_SKILL_MD
+        (with a "## See Also" heading so the insertion point is deterministic),
+        mirroring TestApiRetrofitDraft's own _select/draft sequence."""
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md",
+            RETROFIT_FIXTURE_SKILL_MD + "\n## See Also\n\nOther docs.\n",
+        )
+        resp = self._post_json(
+            "/api/retrofit/select",
+            {
+                "unit_id": unit_id,
+                "primary_file": "widget-reviewer/SKILL.md",
+                "contracts": ["CONSUMING-CONTEXT-PACKAGE.md"],
+                "reference_mode": "same-repo",
+                "reference_args": {
+                    "CONSUMING-CONTEXT-PACKAGE.md": "context-engineering/CONSUMING-CONTEXT-PACKAGE.md"
+                },
+            },
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+        resp = self._post_json(
+            "/api/retrofit/draft", {"unit_id": unit_id}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+
+    def test_no_cookie_is_401(self):
+        resp = self._post_json("/api/retrofit/apply", {"unit_ids": ["widget-reviewer"]})
+        self.assertEqual(resp.status, 401)
+
+    def test_missing_csrf_header_is_403(self):
+        cookie = self._authenticated_cookie()
+        resp = self._post_json(
+            "/api/retrofit/apply", {"unit_ids": ["widget-reviewer"]}, cookie=cookie,
+        )
+        self.assertEqual(resp.status, 403)
+
+    def test_missing_unit_ids_is_400(self):
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json("/api/retrofit/apply", {}, cookie=cookie, csrf=csrf)
+        self.assertEqual(resp.status, 400)
+
+    def test_empty_unit_ids_is_400(self):
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/retrofit/apply", {"unit_ids": []}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+
+    def test_non_list_unit_ids_is_400(self):
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/retrofit/apply", {"unit_ids": "widget-reviewer"}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+
+    def test_unknown_unit_id_is_reported_failed_not_aborting_the_batch(self):
+        cookie, csrf = self._authenticated_session()
+        self._walk_to_draft(cookie, csrf)
+        resp = self._post_json(
+            "/api/retrofit/apply",
+            {"unit_ids": ["widget-reviewer", "never-selected"]},
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        by_id = {r["unit_id"]: r for r in payload["results"]}
+        self.assertEqual(by_id["widget-reviewer"]["status"], "applied")
+        self.assertEqual(by_id["never-selected"]["status"], "failed")
+
+    def test_full_happy_path_walk_inventory_select_draft_apply(self):
+        """The plan's own explicitly-named Phase C test: inventory -> select ->
+        draft -> apply against a fabricated-name fixture library, verifying the
+        target file on disk actually contains the inserted contract text."""
+        cookie, csrf = self._authenticated_session()
+
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md",
+            RETROFIT_FIXTURE_SKILL_MD + "\n## See Also\n\nOther docs.\n",
+        )
+        resp = self._get("/api/retrofit/inventory", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        inventory = json.loads(resp.read().decode("utf-8"))
+        unit_ids = {u["unit_id"] for u in inventory["units"]}
+        self.assertIn("widget-reviewer", unit_ids)
+
+        self._walk_to_draft(cookie, csrf)
+
+        resp = self._post_json(
+            "/api/retrofit/apply",
+            {"unit_ids": ["widget-reviewer"]},
+            cookie=cookie,
+            csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        result = payload["results"][0]
+        self.assertEqual(result["status"], "applied")
+        self.assertIn("CONSUMING-CONTEXT-PACKAGE.md", result["contracts_applied"][0])
+
+        on_disk = (self.repo_root / "widget-reviewer" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("context-engineering/CONSUMING-CONTEXT-PACKAGE.md", on_disk)
+
+        state = json.loads(self._get("/api/retrofit/state", cookie=cookie).read().decode("utf-8"))
+        entry = state["units"]["widget-reviewer"]
+        self.assertEqual(entry["draft_text"], "")
+        self.assertIn("CONSUMING-CONTEXT-PACKAGE.md", entry["contracts_skipped_idempotent"])
+
+    def test_reapplying_the_same_unit_after_success_is_skipped_idempotent(self):
+        cookie, csrf = self._authenticated_session()
+        self._walk_to_draft(cookie, csrf)
+
+        first = self._post_json(
+            "/api/retrofit/apply", {"unit_ids": ["widget-reviewer"]}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(json.loads(first.read().decode("utf-8"))["results"][0]["status"], "applied")
+        on_disk_after_first = (self.repo_root / "widget-reviewer" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        second = self._post_json(
+            "/api/retrofit/apply", {"unit_ids": ["widget-reviewer"]}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(second.status, 200)
+        result = json.loads(second.read().decode("utf-8"))["results"][0]
+        self.assertEqual(result["status"], "skipped_idempotent")
+
+        on_disk_after_second = (self.repo_root / "widget-reviewer" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(on_disk_after_first, on_disk_after_second)
+
+
 if __name__ == "__main__":
     unittest.main()
