@@ -315,7 +315,32 @@ def _render_list(
         if not real_match:
             break
         level = _indent_level(real_match.group(1))
-        text = real_match.group(2)
+        text_parts = [real_match.group(2)]
+        i += 1
+
+        # Lazy continuation: PROTOCOL.md/README.md/CASE-STUDY.md all wrap a
+        # list item's prose onto indented lines below the marker (see e.g.
+        # PROTOCOL.md's "1. **Nobody checks...**" item) rather than putting
+        # the whole item on one line. Without absorbing these, each
+        # continuation line broke item_re.match above and ended the list
+        # right there - so a 3-item list rendered as three separate
+        # one-item <ol>s (each restarting the browser's auto-numbering at
+        # "1."), with the continuation text falling out as an unindented
+        # paragraph between them (confirmed via screenshot review of
+        # PROTOCOL.md's rendered "1. The problem this protocol addresses"
+        # section). A line only continues the current <li> if it's indented
+        # (aligns with the convention every real doc here already uses) and
+        # isn't itself a new item of either list style.
+        while (
+            i < len(lines)
+            and lines[i].strip()
+            and lines[i][:1].isspace()
+            and not _OL_ITEM.match(lines[i])
+            and not _UL_ITEM.match(lines[i])
+        ):
+            text_parts.append(lines[i].strip())
+            i += 1
+        text = " ".join(text_parts)
 
         while level > stack[-1][0]:
             out.append(f"<{tag}>")
@@ -325,7 +350,6 @@ def _render_list(
             out.append(f"</{tag}>")
 
         out.append(f"<li>{_process_inline(text, asset_prefix, doc_dir, link_resolver)}</li>")
-        i += 1
 
     while len(stack) > 1:
         stack.pop()

@@ -6,8 +6,36 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
 
 ## [Unreleased]
 
+## [0.5.0]
+
+33 commits since v0.4.0. Headline: two skills go from nonexistent to fully shipped —
+`ult-autoscaffold-content` (fills empty-case skeleton content a repo's own layout can't supply,
+in four phases: generation, large-repo triage, optional domain-pack consumption, wizard/CI
+integration) and Journey 3 of `ult-cep-wizard` (mechanizes `ult-cep-retrofit`'s read → draft →
+apply flow as a second, orthogonal wizard journey, also in four phases). `ult-layout-wizard` is
+renamed `ult-cep-wizard` and gains a full visual design pass, a guided brownfield-onboarding
+mode, and an in-app docs viewer. `ult-repo-layout` gains a standalone
+`layout_decision_grammar.py` module. All of it is exercised together against a real, unrelated
+55K-line OSS repo (`robotframework-wizard-ui` case study) plus two more UI bugs found via direct
+Playwright walkthroughs and fixed.
+
 ### Added
 
+- **`ult-autoscaffold-content` (new skill, four phases).** Generates skeleton content for the
+  "empty case" — files a repo's own layout conventions can't supply on their own (a missing
+  `CONTRIBUTING.md`, an undocumented module, a domain glossary with no source of truth) — so
+  `ult-repo-layout`'s scaffolding doesn't leave placeholder gaps for a human to fill by hand.
+  - **Phase A** — empty-case content generation: detects which scaffolded slots have no real
+    source material behind them and generates first-draft content for each.
+  - **Phase B** — large-repo triage/tiering + resume/checkpoint: `scaffold_state.py` tiers
+    candidate modules by `in_degree` (graphify-derived), and a durable `TRIAGE-STATE.json`
+    lets a long run against a large repo survive an interruption and resume rather than
+    restart.
+  - **Phase C** — domain-pack strawman schema + optional consumption: an optional structured
+    domain-pack input a project can supply to steer generated content, consumed only if
+    present.
+  - **Phase D** — wizard integration + CI wiring: surfaced inside `ult-cep-wizard`'s
+    onboarding flow and wired into `.github/workflows/ci.yml`.
 - **`ult-cep-wizard`: Journey 3 (consumer/retrofit) wizard UI, shipped in four
   independently-mergeable phases.** Mechanizes `ult-cep-retrofit`'s read → select → draft →
   apply flow as a second, orthogonal wizard journey (not a fifth `wizard_onboarding_state`
@@ -49,13 +77,37 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
     `.github/skills/ult-cep-wizard/references/wizard-retrofit-flow.md` (Journey-3 analogue of
     the existing onboarding-journey reference docs); `catalog/check_radisys_scrub.py`'s
     `SKILL_DIRS` extended to cover `ult-cep-retrofit`.
-  - Exercised end-to-end via the `robotframework-wizard-ui` case study (a real, unrelated
-    OSS repo) and 87 new automated tests (63 pure-function/state unit tests across the
-    inventory/draft/state/apply modules plus 24 real-bound-socket route-wiring tests,
-    including one full happy-path walk verifying the target file's actual on-disk content).
+  - Exercised end-to-end via 87 new automated tests (63 pure-function/state unit tests across
+    the inventory/draft/state/apply modules plus 24 real-bound-socket route-wiring tests,
+    including one full happy-path walk verifying the target file's actual on-disk content) and
+    manual Playwright walkthroughs against fabricated fixture libraries.
+- **`ult-cep-wizard`: renamed from `ult-layout-wizard`, Phase 2 (guided brownfield onboarding),
+  and a full visual design pass.** The rename reflects the wizard's scope having grown beyond
+  layout-only onboarding (it now also drives retrofit — see above). Phase 2 adds a four-state
+  router and `POST /api/discover` so a brownfield repo gets a guided, question-by-question
+  onboarding flow instead of a blank form; a parallel greenfield (init) guide-only flow keeps
+  new-project onboarding equally structured. Design pass: a redesigned top bar with consistent
+  section widths, a refined color scheme, the approved CEP ribbon logo integrated into both the
+  wizard topbar and `hero.svg`, and an in-app docs viewer (renders `case-studies/README.md` as
+  the Case Studies landing doc, with back-navigation and escaped-pipe-aware Markdown table
+  rendering).
+- **`ult-repo-layout`: `layout_decision_grammar.py` extraction.** Pulls the layout-decision
+  grammar used by both `discover_layers.py` and `wizard_e2e_check.py` out into its own
+  standalone module, with CI and docs updated to match.
+- **`case-studies/robotframework-wizard-ui`**: a new case study exercising the redesigned
+  wizard's layout-onboarding UI and `ult-autoscaffold-content` Phase B against a real,
+  unrelated 55K-line OSS repo (RobotFramework's `libdoc` lazy-languages feature).
 
 ### Fixed
 
+- **`ult-cep-wizard` docs viewer: scroll position not reset between docs, and an
+  ordered/unordered-list continuation-line bug that broke numbering.** Found via a manual
+  Playwright walkthrough of the docs viewer: switching docs left scroll position wherever it
+  was on the previous doc instead of resetting to the top; and a list item whose text wrapped
+  onto an indented continuation line (the convention used throughout `PROTOCOL.md`) broke the
+  list after the first item, restarting the browser's auto-numbering (`1./1./1.` instead of
+  `1./2./3.`) because the continuation line didn't match the list-item pattern and each
+  subsequent item started a fresh `<ol>`/`<ul>`.
 - **`ult-autoscaffold-content` Phase B: silent tiering corruption on graphify cwd/path-relativity
   mismatch.** If `graphify update` ran from a different working directory than `scan --repo-root`
   expected, every `source_file` in `graph.json` carried a different leading path segment, so
@@ -69,6 +121,13 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   immediately, persisted to `TRIAGE-STATE.json`'s `repo_scan.graph_module_overlap_warning`, and
   echoed in `render-index`'s `CEP-INDEX.md` output — surfaced wherever an operator looks, never
   silent.
+- **`ult-cep-retrofit` inventory: returned target-relative paths instead of repo-root-relative**,
+  breaking any downstream consumer (including the wizard's own inventory view) that assumed
+  paths were relative to the repo root.
+- Doc-accuracy corrections found via self-review: a stale D24 glossary row still describing
+  Phase 0 as read-only after later phases shipped write behavior; a stale `SECURITY.md` Scope
+  claim written before the retrofit write path went live; README/user-guide updates to reflect
+  `ult-autoscaffold-content` and `demo-write-user-stories` now existing.
 
 ## [0.4.0]
 

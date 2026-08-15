@@ -723,6 +723,17 @@
       }
       showDocsOverlay(result.body.title);
       document.getElementById("docs-overlay-body").innerHTML = result.body.html;
+      // #docs-overlay is a normal in-flow block (replaces #main-content, not
+      // a fixed-position/own-scroll panel - see wizard.css's comment on
+      // .docs-overlay), so the *window* is what's scrolled while reading a
+      // long doc like case-studies/README.md. Without resetting that here,
+      // navigating to a new doc (e.g. clicking a case study from partway
+      // down the index) left the window at its old scrollY, landing the
+      // freshly-rendered doc's content mid-page instead of at its top.
+      // Default to the top of the overlay; a link's own fragment (see
+      // below) then overrides that to a heading further down *within* the
+      // doc that was just rendered.
+      document.getElementById("docs-overlay").scrollIntoView({ block: "start" });
       // A link rendered by wizard_markdown.py's link_resolver (e.g.
       // case-studies/README.md's own "../README.md#measured-impact" link)
       // may carry a fragment identifying a heading inside *this* doc -

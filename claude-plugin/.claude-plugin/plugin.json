@@ -1,6 +1,6 @@
 {
   "name": "context-engineering-protocol",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Source-cited, human-approved context packages (code graph + requirements + conventions) for AI coding agents -- assembled before a generation task runs, not guessed at afterward.",
   "author": {
     "name": "Pranay Mishra"
