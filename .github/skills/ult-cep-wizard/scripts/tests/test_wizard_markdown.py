@@ -165,6 +165,37 @@ class TestLists(unittest.TestCase):
             wm.render("1. one\n2. two"), "<ol><li>one</li><li>two</li></ol>"
         )
 
+    def test_ordered_list_item_with_indented_continuation_line(self):
+        # Regression for PROTOCOL.md's "1. The problem this protocol
+        # addresses" section: a 3-item list where each item wraps onto an
+        # indented continuation line (real convention used throughout
+        # PROTOCOL.md/README.md/every CASE-STUDY.md) used to break the list
+        # after item 1 - the continuation line didn't match _OL_ITEM, so
+        # _render_list returned early and the caller started a *new* <ol>
+        # for item 2, then another for item 3, each restarting the browser's
+        # auto-numbering at "1." (found via screenshot review of the
+        # rendered docs viewer: "1. / 1. / 1." instead of "1. / 2. / 3.").
+        result = wm.render(
+            "1. one\n   still one\n2. two\n   still two\n3. three"
+        )
+        self.assertEqual(
+            result,
+            "<ol><li>one still one</li><li>two still two</li><li>three</li></ol>",
+        )
+
+    def test_unordered_list_item_with_indented_continuation_line(self):
+        result = wm.render("- one\n  still one\n- two")
+        self.assertEqual(
+            result, "<ul><li>one still one</li><li>two</li></ul>"
+        )
+
+    def test_ordered_list_continuation_line_supports_inline_markup(self):
+        result = wm.render("1. **bold** start\n   plain *italic* end")
+        self.assertEqual(
+            result,
+            "<ol><li><strong>bold</strong> start plain <em>italic</em> end</li></ol>",
+        )
+
 
 class TestBlockquote(unittest.TestCase):
     def test_blockquote(self):
