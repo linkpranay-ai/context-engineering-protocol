@@ -313,8 +313,8 @@ Codex) is **generated from it** by `catalog/export_adapters.py` — never hand-d
 against a real corpus of actual PRs, design docs, and postmortems.** The mechanism described below
 (the ledger schema, `decision_ledger.py`'s query/disposition/audit-trail plumbing, and Step 7.7's
 integration into `ult-context-generate`) is real and tested: both
-[`cep-retrofit-mattpocock-skills`](../case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md) and
-[`cep-retrofit-superpowers`](../case-studies/cep-retrofit-superpowers/CASE-STUDY.md) ran a real
+[`cep-retrofit-mattpocock-skills`](case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md) and
+[`cep-retrofit-superpowers`](case-studies/cep-retrofit-superpowers/CASE-STUDY.md) ran a real
 `decision_ledger.py query` and spliced its real output into an approved package, materially changing
 generated output in both cases. What those two runs used, though, is a small, explicitly-disclosed
 **fixture** ledger (2-3 constructed entries per case) — not a ledger distilled from a real project's
@@ -402,9 +402,9 @@ that doesn't exist, the same never-silently-commit-to-a-wrong-parse discipline a
 §3.2. Both validation runs below confirm this safety rail fires correctly on a fresh, unrelated clone
 rather than producing a dead pointer.
 
-**Evidence:** [`cep-retrofit-mattpocock-skills`](../case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md)
+**Evidence:** [`cep-retrofit-mattpocock-skills`](case-studies/cep-retrofit-mattpocock-skills/CASE-STUDY.md)
 (`mattpocock/skills`, 71 units) and
-[`cep-retrofit-superpowers`](../case-studies/cep-retrofit-superpowers/CASE-STUDY.md)
+[`cep-retrofit-superpowers`](case-studies/cep-retrofit-superpowers/CASE-STUDY.md)
 (`obra/superpowers`, 62 units, a pristine clone rather than this repo's own already-adapted copies of
 the same skills) — 0 misclassifications across both, plus a deep with/without-CEP comparison of one
 retrofitted skill's generated output per library (§7's trip-wire mechanism exercised on top of both).

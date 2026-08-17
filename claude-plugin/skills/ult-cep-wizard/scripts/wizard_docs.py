@@ -84,9 +84,10 @@ def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
     landing doc - the wizard's top nav links here, not to an auto-generated
     list), its two supporting docs (SYNTHESIS.md, TEMPLATE.md - reachable
     only via links inside case-studies/README.md, not their own nav button),
-    then one entry per case-studies/*/CASE-STUDY.md sorted by directory
-    slug. `root` defaults to install_root() - overridable for tests only,
-    never by a request."""
+    one entry per case-studies/*/CASE-STUDY.md sorted by directory slug,
+    then FAQ.md last - matching the top bar's left-to-right nav order
+    (Concept / Protocol / README / Case Studies / FAQ). `root` defaults to
+    install_root() - overridable for tests only, never by a request."""
     root = root or install_root()
     docs: List[DocEntry] = []
 
@@ -137,6 +138,10 @@ def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
                 continue
             title = _case_study_title(cs_path, fallback_slug=child.name)
             docs.append(DocEntry(f"case-study-{child.name}", title, "case-study", cs_path))
+
+    faq = root / "FAQ.md"
+    if faq.is_file():
+        docs.append(DocEntry("faq", "FAQ", "doc", faq))
 
     return docs
 

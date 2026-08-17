@@ -635,6 +635,7 @@
       // not an auto-generated list - so its availability tracks that one
       // doc, the same way the other two nav buttons track theirs.
       ["nav-doc-case-studies", !!byId["case-studies-readme"]],
+      ["nav-doc-faq", !!byId.faq],
     ].forEach(function (pair) {
       var button = document.getElementById(pair[0]);
       button.disabled = !pair[1];
@@ -666,6 +667,8 @@
         activeId = "nav-doc-protocol";
       } else if (docsCurrentView.id === "readme") {
         activeId = "nav-doc-readme";
+      } else if (docsCurrentView.id === "faq") {
+        activeId = "nav-doc-faq";
       } else {
         // Every other doc id (case-studies-readme, case-studies-synthesis,
         // case-studies-template, case-study-*) lives under the Case
@@ -675,7 +678,7 @@
     } else if (retrofitOverlayIsOpen()) {
       activeId = "nav-retrofit";
     }
-    ["nav-wizard", "nav-doc-concept", "nav-doc-protocol", "nav-doc-readme", "nav-doc-case-studies", "nav-retrofit"].forEach(
+    ["nav-wizard", "nav-doc-concept", "nav-doc-protocol", "nav-doc-readme", "nav-doc-case-studies", "nav-doc-faq", "nav-retrofit"].forEach(
       function (id) {
         document
           .getElementById(id)
@@ -1464,6 +1467,9 @@
     });
     document.getElementById("nav-doc-case-studies").addEventListener("click", function () {
       navigateDocs({ kind: "doc", id: "case-studies-readme" });
+    });
+    document.getElementById("nav-doc-faq").addEventListener("click", function () {
+      navigateDocs({ kind: "doc", id: "faq" });
     });
     document.getElementById("nav-wizard").addEventListener("click", function () {
       if (retrofitOverlayIsOpen()) {

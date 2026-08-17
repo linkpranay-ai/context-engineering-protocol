@@ -21,6 +21,26 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   What-L3's codegraph, so a separate How-L3 tier would duplicate it; workflow/process content
   belongs under How-L2 instead. Layer count and boundaries remain an implementation choice, not
   a protocol requirement.
+- **`FAQ.md`**: a new 24-question FAQ covering getting started, core concepts, day-to-day usage,
+  maturity/piloting status, extending CEP, and evidence/limitations — cross-linked to
+  `CONCEPT.md`, `PROTOCOL.md`, `GLOSSARY.md`, and the case studies. Available in `ult-cep-wizard`'s
+  in-app docs viewer as a new "FAQ" nav entry (last in the nav order), filling a placeholder that
+  was already reserved for it in the UI.
+
+### Fixed
+
+- **`cep-retrofit-mattpocock-skills` case study restored.** `README.md` and `PROTOCOL.md` §8 have
+  cited this write-up as live evidence since it was first published (`e6295a9`), but the
+  `CASE-STUDY.md` file itself was later removed locally (`90a5cf46`) to make room for an unrelated
+  Copilot cross-runtime experiment, and that removal was never reverted — leaving both citations
+  pointing at a file that doesn't exist. Restored `CASE-STUDY.md` from its original commit (the
+  Copilot experiment's own vendored-skill/decision-ledger fixtures were not restored — that's a
+  separate, disclosed-obsolete experiment, not this case's own supporting files). Also fixed an
+  unrelated pre-existing bug found while verifying the fix: `PROTOCOL.md` §7/§8's case-study links
+  used an extra `../` even though `PROTOCOL.md` lives at the repo root, breaking both the
+  mattpocock and superpowers citations there. `case-studies/README.md`'s two summary tables and its
+  closing paragraph, which previously said this write-up was "deliberately not kept," now include
+  and correctly describe it.
 
 ## [0.5.0]
 
