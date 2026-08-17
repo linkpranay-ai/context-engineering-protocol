@@ -62,13 +62,16 @@
     </div>
 
     <!-- Docs nav (UI design pass): populated from GET /api/docs by
-         loadDocsNav() in wizard.js. Protocol/README are fixed entries; Case
-         Studies opens an index of every case-studies/*/CASE-STUDY.md found.
-         Guide & FAQ has no content yet - disabled until it's written. Wizard
-         is this tool's own screen - a peer nav entry, not a special corner
-         control, so leaving docs and coming back both work the same way
-         (click a nav button) instead of relying on the overlay's own Close. -->
+         loadDocsNav() in wizard.js. Concept/Protocol/README are fixed
+         entries - Concept comes first since it's meant to be read before
+         the protocol spec; Case Studies opens an index of every
+         case-studies/*/CASE-STUDY.md found. Guide & FAQ has no content yet
+         - disabled until it's written. Wizard is this tool's own screen - a
+         peer nav entry, not a special corner control, so leaving docs and
+         coming back both work the same way (click a nav button) instead of
+         relying on the overlay's own Close. -->
     <nav class="topbar-nav" aria-label="CEP documentation">
+      <button type="button" class="topbar-nav-link" id="nav-doc-concept">Concept</button>
       <button type="button" class="topbar-nav-link" id="nav-doc-protocol">Protocol</button>
       <button type="button" class="topbar-nav-link" id="nav-doc-readme">README</button>
       <button type="button" class="topbar-nav-link" id="nav-doc-case-studies">Case Studies</button>

@@ -6,6 +6,22 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
 
 ## [Unreleased]
 
+### Added
+
+- **`CONCEPT.md`**: a new conceptual/mental-model document, meant to be read before
+  `PROTOCOL.md` — placed first in `README.md`'s nav line and pointed to from `PROTOCOL.md`'s
+  intro. Includes a "Contents" table linking to all 22 sections, and short "How CEP does this"
+  cross-reference pointers on the sections backed by a shipped mechanism (layers, How-L1/L2,
+  Constraints, Trip-Wires, Gap/Conflict/Staleness, Human Approval, the Context Package, context
+  reuse, and the addendum mechanism for context lifecycle).
+- **`ult-cep-wizard`**: `CONCEPT.md` is now the first entry in the in-app docs viewer's nav,
+  ahead of Protocol — same read-before-Protocol ordering as the README and PROTOCOL.md pointer.
+- **`PROTOCOL.md` §2**: a new "Why there's no How-L3" note explaining, as normative text, that
+  the structural/pattern-level part of "how similar work has been done" is already surfaced by
+  What-L3's codegraph, so a separate How-L3 tier would duplicate it; workflow/process content
+  belongs under How-L2 instead. Layer count and boundaries remain an implementation choice, not
+  a protocol requirement.
+
 ## [0.5.0]
 
 33 commits since v0.4.0. Headline: two skills go from nonexistent to fully shipped —

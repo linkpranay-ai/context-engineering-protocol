@@ -32,6 +32,23 @@ class TestListDocs(unittest.TestCase):
         self.assertEqual(ids, ["protocol", "readme"])
         self.assertEqual(docs[0].kind, "doc")
 
+    def test_concept_found_when_present(self):
+        # Concept must be first in list order - the wizard's nav order
+        # mirrors this, and Concept is meant to be read before Protocol.
+        (self.root / "CONCEPT.md").write_text("# Concept", encoding="utf-8")
+        (self.root / "PROTOCOL.md").write_text("# Protocol", encoding="utf-8")
+        (self.root / "README.md").write_text("# Readme", encoding="utf-8")
+        docs = wd.list_docs(self.root)
+        ids = [d.doc_id for d in docs]
+        self.assertEqual(ids, ["concept", "protocol", "readme"])
+        self.assertEqual(docs[0].kind, "doc")
+
+    def test_concept_omitted_when_missing_not_errored(self):
+        (self.root / "PROTOCOL.md").write_text("# Protocol", encoding="utf-8")
+        (self.root / "README.md").write_text("# Readme", encoding="utf-8")
+        docs = wd.list_docs(self.root)
+        self.assertEqual([d.doc_id for d in docs], ["protocol", "readme"])
+
     def test_readme_omitted_when_missing_not_errored(self):
         (self.root / "PROTOCOL.md").write_text("# Protocol", encoding="utf-8")
         docs = wd.list_docs(self.root)

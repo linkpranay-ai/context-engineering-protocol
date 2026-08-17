@@ -79,16 +79,20 @@ def _first_h1_title(path: Path, fallback: str) -> str:
 
 
 def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
-    """Ordered list of every doc currently available to serve: Protocol,
-    README, case-studies/README.md (the Case Studies section's landing doc -
-    the wizard's top nav links here, not to an auto-generated list), its two
-    supporting docs (SYNTHESIS.md, TEMPLATE.md - reachable only via links
-    inside case-studies/README.md, not their own nav button), then one entry
-    per case-studies/*/CASE-STUDY.md sorted by directory slug. `root`
-    defaults to install_root() - overridable for tests only, never by a
-    request."""
+    """Ordered list of every doc currently available to serve: Concept,
+    Protocol, README, case-studies/README.md (the Case Studies section's
+    landing doc - the wizard's top nav links here, not to an auto-generated
+    list), its two supporting docs (SYNTHESIS.md, TEMPLATE.md - reachable
+    only via links inside case-studies/README.md, not their own nav button),
+    then one entry per case-studies/*/CASE-STUDY.md sorted by directory
+    slug. `root` defaults to install_root() - overridable for tests only,
+    never by a request."""
     root = root or install_root()
     docs: List[DocEntry] = []
+
+    concept = root / "CONCEPT.md"
+    if concept.is_file():
+        docs.append(DocEntry("concept", "Concept", "doc", concept))
 
     protocol = root / "PROTOCOL.md"
     if protocol.is_file():

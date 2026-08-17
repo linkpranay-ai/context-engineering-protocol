@@ -627,6 +627,7 @@
     });
 
     [
+      ["nav-doc-concept", !!byId.concept],
       ["nav-doc-protocol", !!byId.protocol],
       ["nav-doc-readme", !!byId.readme],
       // "Case Studies" now navigates straight to case-studies/README.md's
@@ -659,7 +660,9 @@
   function updateActiveNav() {
     var activeId = "nav-wizard";
     if (docsCurrentView && docsCurrentView.kind === "doc") {
-      if (docsCurrentView.id === "protocol") {
+      if (docsCurrentView.id === "concept") {
+        activeId = "nav-doc-concept";
+      } else if (docsCurrentView.id === "protocol") {
         activeId = "nav-doc-protocol";
       } else if (docsCurrentView.id === "readme") {
         activeId = "nav-doc-readme";
@@ -672,7 +675,7 @@
     } else if (retrofitOverlayIsOpen()) {
       activeId = "nav-retrofit";
     }
-    ["nav-wizard", "nav-doc-protocol", "nav-doc-readme", "nav-doc-case-studies", "nav-retrofit"].forEach(
+    ["nav-wizard", "nav-doc-concept", "nav-doc-protocol", "nav-doc-readme", "nav-doc-case-studies", "nav-retrofit"].forEach(
       function (id) {
         document
           .getElementById(id)
@@ -1450,6 +1453,9 @@
     loadDocsNav();
     updateActiveNav();
 
+    document.getElementById("nav-doc-concept").addEventListener("click", function () {
+      navigateDocs({ kind: "doc", id: "concept" });
+    });
     document.getElementById("nav-doc-protocol").addEventListener("click", function () {
       navigateDocs({ kind: "doc", id: "protocol" });
     });

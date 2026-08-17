@@ -10,10 +10,13 @@
 
 </p>
 
-**[Protocol](PROTOCOL.md) · [Glossary](GLOSSARY.md) · [Conformance](CONFORMANCE.md) ·
+**[Concept](CONCEPT.md) · [Protocol](PROTOCOL.md) · [Glossary](GLOSSARY.md) · [Conformance](CONFORMANCE.md) ·
 [Quickstart](#quickstart) · [Skills](#skills-in-this-repo) · [Runtime support](#runtime-support) ·
 [Evidence](EVIDENCE.md) · [Roadmap](ROADMAP.md) · [Evidence methodology](EVIDENCE-METHODOLOGY.md) ·
 [Contributing](CONTRIBUTING.md)**
+
+> **New here? Start with [`CONCEPT.md`](CONCEPT.md)** — the conceptual model CEP is built on,
+> written to be read *before* the protocol specification below.
 
 > Don't let the agent guess what's true. Make it prove the context agrees, then get a human to
 > sign off before it writes a line of code.

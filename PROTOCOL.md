@@ -5,11 +5,12 @@
 
 This document explains the protocol in depth: the layer model, the cross-cutting Constraints
 dimension, the gap → conflict → staleness state machine, the human-approval gate, and the newly
-piloted How-L1 layer, not yet field-validated against a real corpus. For a shorter overview and a
-skill-by-skill index, see [`README.md`](README.md). For term definitions, see
-[`GLOSSARY.md`](GLOSSARY.md). For what's planned next, see [`ROADMAP.md`](ROADMAP.md). For how to
-check whether an implementation actually conforms to this spec, see
-[`CONFORMANCE.md`](CONFORMANCE.md).
+piloted How-L1 layer, not yet field-validated against a real corpus. For the conceptual model this
+protocol is built on — *why* context needs to be engineered this way — read [`CONCEPT.md`](CONCEPT.md)
+first. For a shorter overview and a skill-by-skill index, see [`README.md`](README.md). For term
+definitions, see [`GLOSSARY.md`](GLOSSARY.md). For what's planned next, see
+[`ROADMAP.md`](ROADMAP.md). For how to check whether an implementation actually conforms to this
+spec, see [`CONFORMANCE.md`](CONFORMANCE.md).
 
 ## Interpretation of MUST/SHOULD/MAY
 
@@ -61,6 +62,15 @@ describes what the *industry* does, not what *this product* does or requires. Wh
 item gets pulled into a context package, it's tagged `what_l1_fallback: true` and shown to the
 human reviewer in a dedicated block — informative, never treated as authoritative for this
 product without a human saying so.
+
+**Why there's no How-L3:** the table above lists How-L1 and How-L2 but no How-L3, even though
+CONCEPT.md discusses a third How tier for "how similar work has been done" in this codebase.
+That's a deliberate scope decision, not an oversight: the structural, pattern-level part of that
+question is already surfaced by What-L3's codegraph, so a separate How-L3 would duplicate it.
+Workflow- and process-level conventions, if an organization wants them made explicit, belong
+under How-L2. The layer count and boundaries above are the reference implementation's choice, not
+a protocol requirement — an organization may add, merge, or drop tiers (including reintroducing a
+How-L3) to match its own complexity.
 
 ### 2.1 The third dimension: Constraints (D11)
 
