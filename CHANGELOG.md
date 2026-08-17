@@ -45,6 +45,27 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   even though `PROTOCOL.md` lives at the repo root, breaking both the mattpocock and superpowers
   citations there. `case-studies/README.md`'s two summary tables and its closing paragraph, which
   previously said this write-up was "deliberately not kept," now include and correctly describe it.
+- **Doc drift from the last two case studies and two wizard phases, closed across six files.**
+  `README.md`, `EVIDENCE.md`, and `EVIDENCE-METHODOLOGY.md` still described the generation-quality
+  evidence as a single vendored consuming skill run once or twice; it's now been run four times,
+  across two independently-designed consuming skills (`spw-write-user-story` and the ground-up
+  `demo-write-user-stories`) and four domains — the new `ripgrep-trim-user-stories` and
+  `robotframework-wizard-ui` case studies are folded into all three docs' tables/prose, along with
+  a disclosed tooling-only side-quest (`ripgrep-crlf-replace-terminator`, not a full protocol case)
+  near the retrieval-cost table. `README.md`'s "five real-codebase cases" claim is corrected to ten,
+  and a stale "seven prior cases" reference is corrected to eight. `CONFORMANCE.md` §4 now lists
+  Trip-wire (`PROTOCOL.md` §7) and CEP-retrofit (`PROTOCOL.md` §8) among the optional capabilities —
+  both real, shipped, piloting-status, and previously undocumented there.
+  `consuming-a-context-package.md` gains a special-handling callout for `institutional_memory_hits[]`
+  entries, mirroring the existing `what_l1_fallback: true` one, since a trip-wire hit's disposition
+  is consumer-relevant in the same way. `project-setup-context-engineering.md`'s wizard description
+  no longer says Phase 0 is "browse-only" — `ult-cep-wizard` has run a real in-browser Discover step
+  and applied pending layout decisions since D24 Phase 1/2 shipped. `README.md` also gains a
+  top-nav link and a Quickstart pointer to `FAQ.md`, which existed and was wired into the wizard's
+  nav but wasn't linked from either. Verified: every new/changed relative link and heading anchor
+  across all six files resolves against the wizard's own `_slugify`, all six render cleanly through
+  `wizard_markdown.render()`, the full wizard test suite (371 tests) and all four catalog gates
+  stayed green.
 
 ## [0.5.0]
 

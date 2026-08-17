@@ -18,17 +18,20 @@ Both paths are valid end states — pick based on project size and how much any
 downstream work needs to be grounded in real code/requirements structure. You can
 start Simple and add the Complex pieces later; nothing in Simple needs to be undone.
 
-**Checking what's already resolved:** once `ult-repo-layout` has run at least once
-(`init` or `discover`) in this project, you can see what it resolved — the What/How
-layer paths, the Guidelines slot, the Trip-wire ledger status — in a browser instead
-of re-reading `context-config.yaml` by hand:
+**Checking what's already resolved — or letting the wizard onboard the project for
+you:** you can see the What/How layer paths, the Guidelines slot, and the Trip-wire
+ledger status in a browser instead of re-reading `context-config.yaml` by hand:
 ```
 python .github/skills/ult-cep-wizard/scripts/wizard_server.py .
 ```
-See [`ult-cep-wizard`](../../.github/skills/ult-cep-wizard/SKILL.md). This is a
-status view that composes with the steps below, not a replacement for them — it won't
-run `init`/`discover` for you, and Phase 0 is browse-only (no writes yet). If the
-What/How boxes resolve to an empty path, the wizard shows a stub prompt pointing at
+See [`ult-cep-wizard`](../../.github/skills/ult-cep-wizard/SKILL.md). This composes
+with the steps below, not a replacement for them, but it now does more than show
+status: if `ult-repo-layout` hasn't run yet in this project, the wizard guides you
+through a real in-browser **Run Discover** step instead of requiring the CLI first,
+and once state is resolved it lets you confirm, pick a custom directory, skip, or
+disable each pending layout decision and **Apply** them into `context-config.yaml`
+directly — no separate `ult-repo-layout confirm` step required. If the What/How boxes
+resolve to an empty path, the wizard shows a stub prompt pointing at
 `ult-autoscaffold-content` (see steps 5-6 below) rather than a bare "not configured."
 
 ---

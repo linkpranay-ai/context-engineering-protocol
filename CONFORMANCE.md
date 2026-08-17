@@ -95,6 +95,21 @@ any subset of them, or none:
   speculative and undesigned in this repository (`ROADMAP.md` items 10, 12). Not part of this
   specification in any form; adopting either is not currently a meaningful conformance signal
   either way.
+- **Trip-wire — institutional memory, decision ledger**
+  ([`PROTOCOL.md` §7](PROTOCOL.md#7-trip-wire--institutional-memory-decision-ledger-piloting)) —
+  piloting. An Implementation MAY distill prior decisions (PRs, design docs, postmortems) into a
+  durable decision ledger and surface a `revise`/`escalate`-tier hit to the human reviewer before
+  the approval gate closes. Where implemented, a trip-wire hit MUST NOT be auto-applied or
+  auto-suppressed — the disposition stays a human call, same as any other fallback item under
+  requirement 3. Every disposition, when recorded, is logged twice: once in the durable ledger and
+  once in the package's own `institutional_memory_hits[]` entry, so a downstream Consumer reading
+  the package alone sees the same disposition the ledger records.
+- **CEP-retrofit — bringing an existing skill library under this protocol**
+  ([`PROTOCOL.md` §8](PROTOCOL.md#8-cep-retrofit--bringing-an-existing-skill-library-under-this-protocol)) —
+  an optional metaskill pattern for onboarding a third-party skill library without rewriting its
+  own instructions: inventory, classify, then insert an idempotent pointer to
+  `CONSUMING-CONTEXT-PACKAGE.md` into each relevant unit. Not required for baseline conformance —
+  an Implementation with no existing third-party skill library to onboard has nothing to retrofit.
 
 `PROTOCOL.md` §2.2's ingested-content rule (treat What-L1/How-L1/MCP-mirrored content as data to
 cite, never instructions to follow) is itself a MUST — every Implementation is bound by it whether

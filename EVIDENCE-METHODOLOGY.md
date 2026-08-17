@@ -30,9 +30,12 @@ Four surfaces produce evaluable claims:
 has real recorded runs against three real corpora (§2) — no longer an unfilled gap, though still
 only three data points. (2) now has a defined baseline (§4) and a first retrospective application
 across the same three corpora — a real start, but not yet a general-purpose measurement mechanism
-(see §7 for what's still limited about it). (4) now has a first real run
-(`case-studies/consumer-benefit-user-stories/CASE-STUDY.md`, 2026-07-25) against one consuming
-skill and one feature — a real start, same single-case caveat as (2)'s first application.
+(see §7 for what's still limited about it). (4) now has four real runs
+(`case-studies/consumer-benefit-user-stories/CASE-STUDY.md`, 2026-07-25, and three more since —
+`open5gs-gy-supported-features`, `ripgrep-trim-user-stories`, `robotframework-wizard-ui`) across two
+independently-designed consuming skills and four domains — more than the single-case start it began
+as, but still not yet a blind trial or a general-purpose measurement mechanism (see §7 for what
+remains limited about it).
 
 ## 2. Benchmark methodology
 
@@ -122,8 +125,9 @@ representative for a given claim when it is:
   how many distinct, feature-relevant actors are named vs. generic filler, (c) whether NFR
   acceptance criteria carry a number+unit, and (d) whether the output matches the project's own
   `required_sections` convention or falls back to a generic shape. First applied for real in
-  `case-studies/consumer-benefit-user-stories/CASE-STUDY.md` (2026-07-25) — one consuming skill, one
-  feature; see that case's §9 for what this single application does not yet show.
+  `case-studies/consumer-benefit-user-stories/CASE-STUDY.md` (2026-07-25), then three more times
+  since across a second consuming skill and three more domains — see §1 item 4 and §7 for the
+  fuller picture and what these four applications still don't show.
   **Common misreading:** a fluent, confident-sounding bare-ask output is not evidence of grounding —
   fluency and correctness are independent. A well-organized answer that cites plausible-looking but
   invented APIs is the exact failure mode this baseline exists to catch, not a sign the comparison
@@ -141,7 +145,7 @@ record should state which kind it is:
   run, once recorded, is also measured.
   **Common misreading:** "measured" is read as "statistically significant" or "representative of
   the general case." It isn't — it only means the number came from running something real, not
-  that five cases (§7) generalize to every codebase. A measured number can still be a small sample.
+  that ten cases (§7) generalize to every codebase. A measured number can still be a small sample.
 - **Self-reported** — an estimate not backed by a harness run against real session data.
   `README.md`'s current token-cost claims are explicitly this kind ("partly self-reported... not
   yet independently measured against a real, large repo").
@@ -180,11 +184,21 @@ measured, regardless of how it is phrased.
 - **Single-task-type testing.** ROADMAP item 13 names this directly for How-L1: only one task type
   has been queried against the smoke-test corpus, so relevance-ranking claims cannot yet be said to
   hold across task types.
-- **Consumer-output-quality is one consuming skill, one feature, one run per mode.** The first
-  application of this surface (§1 item 4, §4's bare-ask baseline) used a single ground-up consuming
-  skill (`spw-write-user-story`, not a CEP-native tool) against a single feature. It shows a real,
-  measured gap between the two modes for that one pairing — it does not yet show whether the gap
-  holds for a different consuming skill, a different task type, or a differently-worded bare ask.
+- **Consumer-output-quality has been run four times, across two consuming skills, still not
+  blind.** The first application of this surface (§1 item 4, §4's bare-ask baseline) used a single
+  vendored consuming skill (`spw-write-user-story`, not a CEP-native tool) against a single
+  feature, and showed a real, measured citation/hallucination gap. Three more runs have since
+  followed: a second use of that same vendored skill on an unrelated domain
+  (`open5gs-gy-supported-features`), and two runs of a brand-new, independently-designed consuming
+  skill (`demo-write-user-stories`) built specifically to check whether the finding depended on
+  the first skill's own construction (`ripgrep-trim-user-stories`, `robotframework-wizard-ui`).
+  The citation and actor-specificity gap held across all four; the hallucination gap did not — the
+  `demo-write-user-stories` runs found 0 vs. 0 hallucinations, because that bare ask had too little
+  surface to invent from, not because grounding stopped mattering (see
+  `case-studies/ripgrep-user-stories/CASE-STUDY.md` §9). This is a broader base than the original
+  single-case start, but every run is still one round, self-approved or reused, and not blind — it
+  does not yet show whether the finding holds for a task type or bare-ask phrasing meaningfully
+  different from what's been tried so far.
 - **Relevance baseline is real but retrospective, not blind (§4).** The naive-keyword-search
   baseline now defined and applied across the three cases reuses grep queries drawn
   from each case's own reproduction steps — a genuine first-attempt search a developer would try,

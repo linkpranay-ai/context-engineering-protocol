@@ -43,12 +43,20 @@ baselines, applied retrospectively (see limitations in `SYNTHESIS.md`).
 |---|---|---|---|---|
 | [consumer-benefit-user-stories](case-studies/consumer-benefit-user-stories/CASE-STUDY.md) | UI framework | 8 vs. 0 | 0 vs. 2 | Full vs. none |
 | [open5gs-gy-supported-features](case-studies/open5gs-gy-supported-features/CASE-STUDY.md) | Telecom protocol stack | 18 vs. 0 | 0 vs. 1 (same fabricated concept as above) | Full (7/7) vs. none (0/7) |
+| [ripgrep-trim-user-stories](case-studies/ripgrep-user-stories/CASE-STUDY.md) | Rust CLI (ripgrep) | 9/9 vs. 0 | 0 vs. 0 — see case §9, this run's headline is citation/actor grounding, not hallucination-suppression | N/A — skipped by design |
 
 **Measured**, per `EVIDENCE-METHODOLOGY.md` §5 — same consuming skill, same feature, run twice (with
-an approved context package vs. a bare ask).
+an approved context package vs. a bare ask). The first two rows share one vendored consuming skill
+(`spw-write-user-story`); the third uses an independently-designed, ground-up one
+(`demo-write-user-stories`), also repeated on a fourth, RobotFramework case not shown in this table
+because it doesn't share these three columns' exact shape — see
+[`README.md#measured-impact`](README.md#measured-impact) for that case and two more (a retrofit-based
+generative comparison and a tooling-only side-quest).
 
 ## What this doesn't yet show
 
-Five cases, one consuming skill for the generation-quality axis, no blind trials, no live human
-reviewer yet. Full disclosure of every limitation: [`case-studies/SYNTHESIS.md`](case-studies/SYNTHESIS.md)
-and [`EVIDENCE-METHODOLOGY.md`](EVIDENCE-METHODOLOGY.md) §7.
+Ten case studies total; the direct bare-ask-vs-CEP generation-quality axis above has been run four
+times across two independently-designed consuming skills and four domains (UI framework, telecom,
+Rust CLI, RobotFramework/large-repo) — still no blind trials, no live human reviewer. Full disclosure
+of every limitation: [`case-studies/SYNTHESIS.md`](case-studies/SYNTHESIS.md) and
+[`EVIDENCE-METHODOLOGY.md`](EVIDENCE-METHODOLOGY.md) §7.

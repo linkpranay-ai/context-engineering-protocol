@@ -13,7 +13,7 @@
 **[Concept](CONCEPT.md) · [Protocol](PROTOCOL.md) · [Glossary](GLOSSARY.md) · [Conformance](CONFORMANCE.md) ·
 [Quickstart](#quickstart) · [Skills](#skills-in-this-repo) · [Runtime support](#runtime-support) ·
 [Evidence](EVIDENCE.md) · [Roadmap](ROADMAP.md) · [Evidence methodology](EVIDENCE-METHODOLOGY.md) ·
-[Contributing](CONTRIBUTING.md)**
+[FAQ](FAQ.md) · [Contributing](CONTRIBUTING.md)**
 
 > **New here? Start with [`CONCEPT.md`](CONCEPT.md)** — the conceptual model CEP is built on,
 > written to be read *before* the protocol specification below.
@@ -29,7 +29,7 @@ runs, instead of letting the agent free-read the repo and guess.
 completely unrelated codebases — a UI framework and a telecom protocol stack. The CEP-grounded run
 produced 26 real, checkable citations and zero inventions across both. See [Evidence](EVIDENCE.md)
 for the full measured breakdown, plus field-validated runs across Claude Code, GitHub Copilot,
-Codex, and Cursor, across five real-codebase cases including one deliberate negative control.
+Codex, and Cursor, across ten real-codebase cases including one deliberate negative control.
 
 Built for Claude Code / GitHub Copilot, with Cursor and OpenAI Codex field-validated as well (see
 [Runtime support](#runtime-support) below). Beyond code: the same mechanism that stops an agent
@@ -113,6 +113,10 @@ for the two setup paths:
   context package, then handed to a downstream generation skill. 9 steps, using
   [`demo-consume-context`](.github/skills/demo-consume-context/SKILL.md) as a worked example of
   what "consuming" a context package looks like.
+
+Common setup and scope questions ("do I have to run the full pipeline, or can I just compile
+guidelines," "what's implemented vs. still piloting," "what's a trip-wire") are answered in
+[`FAQ.md`](FAQ.md).
 
 ## Skills in this repo
 
@@ -251,21 +255,50 @@ retrospective against a task whose answer was already known, not a blind trial �
 [`case-studies/SYNTHESIS.md`](case-studies/SYNTHESIS.md) for the full analysis, limitations, and
 what these three cases do and don't support.
 
-**The table above measures retrieval cost. Two further cases measure a different question: does an
-approved package make a downstream consuming skill's *generated output* better, not just cheaper to
-produce?** Running a real, ground-up user-story-writing skill once against an approved context
-package and once from a bare ask, on the same feature, found a measured gap on every dimension
-checked — in two unrelated domains:
+**A related tooling-only side-quest** (not a full protocol case — no context package, no
+approval gate) ran `ult-codegraph`/`graphify` alone against a real Rust bug fix in `ripgrep`
+([PR #3100](https://github.com/BurntSushi/ripgrep/pull/3100)): `graphify explain` cheaply and
+correctly resolved the load-bearing symbols, at ~84x fewer tokens than the naive-grep-narrowed
+file set (239 words vs. 20,115) — but `graphify path`/`affected`, starting from the CLI flag's
+own definition symbol, failed outright, a disclosed structural limitation of AST-only graphs
+against ripgrep's one-struct-per-flag pattern. See
+[ripgrep-crlf-replace-terminator](case-studies/ripgrep-crlf-replace/CASE-STUDY.md) for the full,
+mixed result — a real win and a real, disclosed gap in the same run.
+
+**The table above measures retrieval cost. Three further cases measure a different question: does
+an approved package make a downstream consuming skill's *generated output* better, not just
+cheaper to produce?** Running a real, ground-up user-story-writing skill once against an approved
+context package and once from a bare ask, on the same feature, found a measured citation and
+actor-specificity gap in every case — across three domains, using two independently-designed
+consuming skills:
 
 | Case | Domain | Real citations: with CEP vs. bare ask | Hallucinations: with CEP vs. bare ask | Distinct actors named: with CEP vs. bare ask | Org-convention structure |
 |---|---|---|---|---|---|
 | [consumer-benefit-user-stories](case-studies/consumer-benefit-user-stories/CASE-STUDY.md) | UI framework (Python) | 8 vs. 0 | 0 vs. 2 (an invented method + an imported web-accessibility concept with no counterpart in the codebase) | 5 vs. 2 generic | Full vs. none |
 | [open5gs-gy-supported-features](case-studies/open5gs-gy-supported-features/CASE-STUDY.md) | Telecom protocol stack (C) | 18 vs. 0 | 0 vs. 1 (the *same* imported web-accessibility concept, this time in a codebase with no UI at all) | 5 vs. 2 generic | Full (7/7) vs. none (0/7) |
+| [ripgrep-trim-user-stories](case-studies/ripgrep-user-stories/CASE-STUDY.md) | Rust CLI (ripgrep) | 9/9 vs. 0 | 0 vs. 0 — see case §9: this case's headline finding is citation/actor grounding, not hallucination-suppression | 2 specific vs. 2 generic | N/A — skipped by design (this case's consuming skill doesn't consume org conventions) |
 
 The bare-ask mode's failure isn't just slower — it's a *materially different and partly wrong*
 answer, with no signal to the consuming developer that anything was invented. The repeated
 web-accessibility hallucination across two unrelated domains suggests an ungrounded consuming
-skill's invention risk isn't bounded by domain plausibility.
+skill's invention risk isn't bounded by domain plausibility. The third case, run with an
+independently-designed consuming skill (`demo-write-user-stories`, not the vendored
+`spw-write-user-story` the first two use) on a Rust CLI codebase, repeats the citation and
+actor-specificity gap but finds *no* hallucination gap (0 vs. 0) — that bare ask had too little
+surface to invent from, not too little grounding, so the hallucination-suppression finding above
+should not be read as universal.
+
+**A fourth case reuses `demo-write-user-stories` to close two different gaps at once, on a real
+55K-line RobotFramework codebase**: it's the first case to drive `ult-cep-wizard`'s browser UI
+end-to-end via Playwright (real before/after screenshots, not curl) and the first to exercise
+`ult-autoscaffold-content`'s Phase B large-repo triage/tiering path directly (13 modules tiered,
+13/13 `CONTEXT.md` files generated for both What-L2 and How-L2). It also repeats the
+citation/actor-specificity finding above (9/9 citations vs. 0, 2 specific actors vs. 2 generic)
+and validates a stretch-goal code-change proposal against real unit tests (`libdoc` 47/47,
+`running` 362/362, identically before and after). See
+[robotframework-wizard-ui](case-studies/robotframework-wizard-ui/CASE-STUDY.md) for the full
+walkthrough, including a disclosed `graphify` cwd/path-relativity bug found and fixed along the
+way.
 
 **The benefit also compounds past the user-story file itself.** Both cases found the same
 mechanical effect: every story an approved context package grounds carries a machine-checkable
@@ -303,7 +336,7 @@ Both pairs found real, grep-verified defects in the pristine (no-CEP) baseline t
 run avoided — duplicate AVP dictionary declarations and a fabricated test target referencing a file
 that doesn't exist. These two cases are also the first to exercise **Trip-wire** and
 **Metaskill-retrofit origin** in [`case-studies/README.md`](case-studies/README.md#feature-coverage)'s
-feature-coverage table, both previously ➖ across all seven prior cases.
+feature-coverage table, both previously ➖ across all eight other cases.
 
 ## What's not yet done
 

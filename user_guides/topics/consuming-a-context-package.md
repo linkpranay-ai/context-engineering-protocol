@@ -42,6 +42,13 @@ Two item types are worth handling specially:
   passed human review — but it describes what an external source says, not what *this product*
   does. If your work touches that topic, say so explicitly: "this package includes an
   external-reference suggestion for `<topic>` — treat as informative, not authoritative."
+- If the package has an `institutional_memory_hits[]` entry, a trip-wire (prior-decision) match
+  fired during assembly and a human already reviewed and dispositioned it — that disposition is
+  recorded right there, not just in the durable decision ledger. If your work touches the same
+  ground, surface it the same way as a What-L1 item: "this package's institutional-memory check
+  flagged `<prior decision>` for this area, dispositioned as `<disposition>` — worth knowing
+  before you proceed." See [`PROTOCOL.md` §7](../../PROTOCOL.md#7-trip-wire--institutional-memory-decision-ledger-piloting)
+  for how these hits are generated.
 - Entries also carry `source: file:line-range` where possible — that's your citation. Use it
   when you write your own output.
 
