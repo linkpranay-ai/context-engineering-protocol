@@ -33,14 +33,18 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   cited this write-up as live evidence since it was first published (`e6295a9`), but the
   `CASE-STUDY.md` file itself was later removed locally (`90a5cf46`) to make room for an unrelated
   Copilot cross-runtime experiment, and that removal was never reverted — leaving both citations
-  pointing at a file that doesn't exist. Restored `CASE-STUDY.md` from its original commit (the
-  Copilot experiment's own vendored-skill/decision-ledger fixtures were not restored — that's a
-  separate, disclosed-obsolete experiment, not this case's own supporting files). Also fixed an
-  unrelated pre-existing bug found while verifying the fix: `PROTOCOL.md` §7/§8's case-study links
-  used an extra `../` even though `PROTOCOL.md` lives at the repo root, breaking both the
-  mattpocock and superpowers citations there. `case-studies/README.md`'s two summary tables and its
-  closing paragraph, which previously said this write-up was "deliberately not kept," now include
-  and correctly describe it.
+  pointing at a file that doesn't exist. Restored `CASE-STUDY.md` from its original commit, along
+  with its own supporting evidence artifacts — `mode-1/2/3-*-output.md` and
+  `decision-ledger-fixture/*.json`/`.yaml` — since those back the write-up's "Measured" claims
+  about exact model output and trip-wire hits, and this repo has no other way to independently
+  check them (unlike the claims checkable against the real `Textualize/textual` target repo).
+  `vendored-skill/*.SKILL.md` (mattpocock's own third-party skill content, not this project's
+  generated output) was deliberately left out — that's a separate, disclosed-obsolete Copilot
+  experiment's concern, not this case's own supporting files. Also fixed an unrelated pre-existing
+  bug found while verifying the fix: `PROTOCOL.md` §7/§8's case-study links used an extra `../`
+  even though `PROTOCOL.md` lives at the repo root, breaking both the mattpocock and superpowers
+  citations there. `case-studies/README.md`'s two summary tables and its closing paragraph, which
+  previously said this write-up was "deliberately not kept," now include and correctly describe it.
 
 ## [0.5.0]
 
