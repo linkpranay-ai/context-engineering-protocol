@@ -407,6 +407,40 @@ against real corpora before being called "Implemented," not adopted on descripti
 path proves out slots into the existing mirror-then-index pattern (items 9/11): a conversion step
 populates `what_l1.path`/`how_l1.path`, with zero changes to `md_index.py` itself.
 
+## 18. Typed causal edges between decision-ledger entries
+
+**Status: speculative, not started.** Today a `decision_ledger.py` entry's only recorded
+relationship to another entry is `supersedes`/`superseded_by` (linear — "this replaced that") or
+`aliases` (merge tracking, see `ledger-schema.md`). There's no way to record that one decision
+*caused* or *influenced* a later, still-independent one — e.g. "chose Kafka for the event bus"
+shaping a later, unrelated "chose at-least-once delivery semantics" decision — without one
+superseding the other, which isn't what actually happened.
+
+The idea comes from [`semantica-agi/semantica`](https://github.com/semantica-agi/semantica)'s
+Decision Intelligence module, which stores decisions as graph nodes linked by typed causal edges
+(`CAUSED`, `INFLUENCED`, `PRECEDENT_FOR`), queryable via a causal-ancestry walk
+(`trace_decision_chain()`). That library is not a fit for CEP as a whole — full ingest-to-KG
+platform, base install pulls in `torch`/`transformers`/`sentence-transformers`/`spacy`/
+`opencv-python`/`librosa`/`faiss-cpu` unconditionally (heavier than the Docling stack weighed
+under item 17), overlaps What-L3/What-L1/How-L1/Trip-wire with one monolith dependency instead of
+CEP's existing narrow, evidence-validated mechanisms for each, and its current release is a
+security patch for issues including missing auth on API routes and Cypher/SPARQL injection. Its
+own semantic-similarity precedent search (`find_similar_decisions()`) is also not new here — it's
+the same embedding-based-recall approach item 1's GraphRAG/SelfCite disposition already considered
+and declined in favor of deterministic exact-match. Only the causal-edge-typing idea is being kept.
+
+A CEP-sized version would stay inside the ledger's existing discipline: a `related_decisions:
+[{entry_id, relationship: CAUSED | INFLUENCED | PRECEDENT_FOR}]` field on a ledger entry, validated
+by `decision_ledger.py`, populated the same way `supersedes` already is today — literal, tag-based,
+no embeddings, no query-time model calls, `complexity_budget`-bounded like every other
+`decision_ledger.py query` path. Distillation of *which* relationship type applies would still need
+the same LLM-proposes/human-confirms-at-`SUGGESTED`-confidence flow the ledger already uses for
+every other field, not a new mechanism.
+
+**Not started because no consuming skill has hit this gap yet** — the same "don't build ahead of a
+confirmed need" bar item 10 applies. Revisit if/when a real trip-wire consumer needs to distinguish
+"this decision replaced that one" from "this decision was shaped by that one."
+
 ## Not on this roadmap
 
 Some things are deliberately out of scope rather than deferred:
