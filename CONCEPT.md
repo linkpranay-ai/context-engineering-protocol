@@ -34,10 +34,11 @@ It is intentionally conceptual. It explains *why* CEP exists and the mental mode
 16. [Toward Composable Process Standards](#16-toward-composable-process-standards)
 17. [The Deeper Idea: Controlling the Agent's Epistemic Boundary](#17-the-deeper-idea-controlling-the-agents-epistemic-boundary)
 18. [What CEP Is—and Is Not](#18-what-cep-isand-is-not)
-19. [The Core Model](#19-the-core-model)
-20. [Protocol, Implementation, and Evidence](#20-protocol-implementation-and-evidence)
-21. [The Vision](#21-the-vision)
-22. [The Core Idea in One Sentence](#22-the-core-idea-in-one-sentence)
+19. [What Is New Here?](#19-what-is-new-here)
+20. [The Core Model](#20-the-core-model)
+21. [Protocol, Implementation, and Evidence](#21-protocol-implementation-and-evidence)
+22. [The Vision](#22-the-vision)
+23. [The Core Idea in One Sentence](#23-the-core-idea-in-one-sentence)
 
 ---
 
@@ -897,7 +898,23 @@ The protocol is the underlying logic and contract that connects them.
 
 ---
 
-## 19. The Core Model
+## 19. What Is New Here?
+
+Context engineering is an emerging and broad discipline. CEP does not claim to invent retrieval, memory, RAG, agent context management, or context optimization. Its focus is narrower: engineering context as an authoritative, intent-bound, validated, reusable artifact for software engineering.
+
+The distinctive elements are the explicit treatment of:
+
+- **[What and How as separate authority dimensions](#3-what-a-good-engineer-needs-to-know)** — not one undifferentiated "relevant information" pool.
+- **[Constraints and trip-wires as first-class context](#5-constraints-the-solution-has-boundaries)**, not implicit rules an agent is expected to infer.
+- **[Gap, conflict, and staleness as different epistemic states](#8-three-different-kinds-of-uncertainty)**, each demanding a different response — not one generic "uncertain" bucket.
+- **[Discovery separated from authority](#9-retrieval-is-not-authority)** — finding information and trusting it for a given intent are different steps.
+- **[Human approval as an authority boundary](#11-human-approval-is-an-authority-boundary)**, not a review of agent output after the fact.
+- **[Context packages as reusable lifecycle artifacts](#12-the-context-package)**, constructed once and consumed across stories, design, coding, and testing.
+- **[Organizational process as context that can ultimately become executable and machine-validated](#15-from-organizational-process-to-engineering-execution)**, rather than a document read once during training.
+
+---
+
+## 20. The Core Model
 
 The complete conceptual model can be summarized as:
 
@@ -964,7 +981,7 @@ The invariant is the logic:
 
 ---
 
-## 20. Protocol, Implementation, and Evidence
+## 21. Protocol, Implementation, and Evidence
 
 CEP deliberately separates four things that are often conflated.
 
@@ -998,7 +1015,7 @@ The value of the protocol should not depend on whether an organization uses this
 
 ---
 
-## 21. The Vision
+## 22. The Vision
 
 AI-native engineering will not simply be about making agents capable of writing more code.
 
@@ -1066,7 +1083,7 @@ It is:
 
 ---
 
-## 22. The Core Idea in One Sentence
+## 23. The Core Idea in One Sentence
 
 If the entire Context Engineering Protocol had to be reduced to one principle:
 
