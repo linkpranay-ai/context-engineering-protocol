@@ -18,7 +18,7 @@
     {
       "id": "ult-autoscaffold-content-03-negative",
       "type": "negative",
-      "input": "We have coding standards spread across CONTRIBUTING.md, a wiki, and some PDFs — can you pull it all together into one consistent style write-up for new hires?",
+      "input": "We have style write-ups spread across CONTRIBUTING.md, a wiki, and some PDFs — can you pull it all together into one consistent write-up for new hires?",
       "not_expected_skill": "autoscaffold-content",
       "notes": "Compiling existing scattered guideline sources is compiling-project-guidelines's job, not this skill's — this skill only generates new starter content for an empty, already-resolved layer, never reconciles existing docs. Reworded off the skill's own description vocabulary (compile/conventions/guideline/documents) to clear the keyword-overlap trigger gate while keeping the same intent."
     },
@@ -49,6 +49,34 @@
       "input": "Can you put together a telecom vocabulary and citations starter file for our vertical that I can wire in later?",
       "not_expected_skill": "autoscaffold-content",
       "notes": "This skill only ever consumes a user-supplied domain pack (Step 4.5) — it has no mechanism to author or generate one; OSS ships zero built-in packs and there's no separate authoring skill for this either. Reworded off the skill's own description vocabulary (domain/pack/yaml/scaffolding/terminology) to clear the keyword-overlap trigger gate while keeping the same intent."
+    },
+    {
+      "id": "ult-autoscaffold-content-08",
+      "type": "positive",
+      "input": "There's no CODING-STANDARDS.md anywhere in this repo and How-L2 is already resolved — can you generate a real starting one from whatever lint/format config we actually have?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Step 5c trigger: a repo-wide coding-standards doc that doesn't exist yet, against an already-resolved How-L2 path — existence-gated generation, not compilation of scattered sources."
+    },
+    {
+      "id": "ult-autoscaffold-content-09",
+      "type": "positive",
+      "input": "We don't have any TESTING-GUIDELINES.md yet. Can you draft one based on whatever test framework config is actually in this repo?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Step 5c trigger, testing-guidelines variant of case 08 — same existence-gated repo-wide doc generation."
+    },
+    {
+      "id": "ult-autoscaffold-content-10",
+      "type": "positive",
+      "input": "We already generated per-module docs for core/ and utils/ in the big triage run — the graph shows they're tightly coupled. Can you write a starter doc for that interface boundary?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Step 5d trigger: an interface-boundary doc for a graph-crossing pair whose both endpoint modules were already generated — the eligibility condition list-interfaces --eligible-only checks for."
+    },
+    {
+      "id": "ult-autoscaffold-content-11-negative",
+      "type": "negative",
+      "input": "We keep our formatting and review rules written down in CONTRIBUTING.md, a Confluence page, and an old wiki article — can you merge all three into one consistent policy for the team?",
+      "not_expected_skill": "autoscaffold-content",
+      "notes": "Guards the trigger-collision risk between this skill's new Step 5c (generates a NEW coding-standards doc only when none exists) and compiling-project-guidelines (compiles/reconciles EXISTING scattered sources, now including this skill's own How-L2 output per compiling-project-guidelines' Step 1 6th discovery bullet). Multiple existing sources being reconciled is the compiling-project-guidelines signal, not this skill's."
     }
   ]
 }

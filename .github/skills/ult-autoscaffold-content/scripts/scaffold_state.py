@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
 """scaffold_state.py -- only code that reads/writes TRIAGE-STATE.json.
 
-D24 Phase B (`ult-autoscaffold-content`): large-repo triage/tiering and
-resume/checkpoint. See D24-WIZARD-REMAINING-WORK.md (design repo) for the
-full phase sequence this belongs to -- this docstring covers CLI surface
-only.
+Large-repo triage/tiering and resume/checkpoint for
+`ult-autoscaffold-content`. This docstring covers CLI surface only -- see
+the skill's SKILL.md for the full workflow this belongs to.
 
 Python 3 stdlib only (argparse, json, os, re, sys, datetime, pathlib) --
 vendorable, no pip install step, same posture as decision_ledger.py
 (ult-institutional-memory-distill/scripts/).
 
-Graph access pattern (flagged deliberately -- see ult-codegraph's
-CONSUMING-CODE-GRAPH.md): `scan --graph-mode graphify` loads
+Graph access pattern: `scan --graph-mode graphify` loads
 graphify-out/graph.json ONCE per run for structural aggregation (per-module
-fan-in), not the repeated scoped-query pattern that doc's step 2 recommends
-for normal per-question consumption during a task. That guidance targets
-repeated per-question use; a one-time full-graph load for module tiering is
-a different, one-shot access pattern -- not a violation of it. Every write
-subcommand still states which mode was used (graph vs. heuristic), per that
-same doc's step 3 requirement, in both this script's output and the
-render-index artifact.
+fan-in) -- a deliberate one-time full-graph load, not the repeated
+scoped-query pattern ult-codegraph's CONSUMING-CODE-GRAPH.md recommends for
+normal per-question consumption; see the skill's SKILL.md Step 3.5 for why
+that's not a violation of that guidance. Every write subcommand still
+states which mode was used (graph vs. heuristic), per that same doc's step
+3 requirement, in both this script's output and the render-index artifact.
 
 Subcommands:
+  scaffold_state.py probe-size --repo-root <path>
+    Read-only count of top-level candidate directories that clear
+    MIN_FILES_FOR_SIZE_GATE files each (same pruning _top_level_candidate_
+    dirs()/_iter_files() already apply, no state file, no writes) --
+    SKILL.md Step 4's small/large repo-size gate reads this before
+    choosing a Phase A/Phase B path. See SMALL_REPO_MAX_MODULES/
+    LARGE_REPO_MIN_MODULES below for the default thresholds; the band
+    between the two is deliberately left with no default at all.
+
   scaffold_state.py scan <state.json> --repo-root <path>
       --graph-mode graphify|heuristic [--graph-path <graphify-out/graph.json>]
       [--rescan]
@@ -58,10 +64,9 @@ Subcommands:
     graphify-out/graph.json is loaded once (see docstring above). in_degree
     is the count of DISTINCT OTHER modules with at least one
     imports_from/imports/calls edge landing in this module -- not raw edge
-    count, so one caller with many call sites doesn't inflate rank
-    (coplit_handoff.md's own worked example: common/utils/ at 482 LOC but
-    58 dependents correctly lands Tier 1, which a size heuristic alone
-    would misfile Tier 3).
+    count, so one caller with many call sites doesn't inflate rank (e.g. a
+    482-LOC utils/ module with 58 distinct dependents correctly lands
+    Tier 1, which a size heuristic alone would misfile Tier 3).
 
     A module already "generated" or "skipped" is never touched, rescan or
     not -- prior work is never silently discarded. Without --rescan, a
@@ -82,13 +87,50 @@ Subcommands:
     Deterministic render of current state to Markdown (mechanical
     formatting only, no judgment -- same shape as discover_layers.py's
     render_discovery_artifact). Printed to stdout if --out is omitted;
-    this is CEP-INDEX.md's generator, never hand-edited.
+    this is CEP-INDEX.md's generator, never hand-edited. Includes the
+    per-tier module sections above, plus a "Repo-wide docs" section
+    (coding-standards/testing-guidelines status) and an "Interface
+    boundaries" section (see below).
 
   scaffold_state.py show <state.json>
     Prints schema_version, graph mode/source, and per-tier
     pending/generated/skipped counts -- the resume-detection input for
     SKILL.md's resume-check step, and the intended read surface for
     Phase 3's future `status` CLI (no second schema needed later).
+
+  scaffold_state.py mark-repo-doc-generated <state.json> <coding_standards|testing_guidelines> --output <path>
+    Marks one repo-wide doc kind "generated", records its output path and
+    timestamp. Refuses (ERROR, exit 1) if not currently "pending" -- same
+    refusal discipline as mark-generated.
+
+  scaffold_state.py mark-repo-doc-skipped <state.json> <coding_standards|testing_guidelines> --reason <text>
+    Marks one repo-wide doc kind "skipped" with a human-supplied reason.
+
+  scaffold_state.py mark-interface-generated <state.json> <interface-id> --output <path>
+    Marks one interface-boundary pair "generated", records its output path
+    and timestamp. Refuses (ERROR, exit 1) if not currently "pending".
+
+  scaffold_state.py mark-interface-deferred <state.json> <interface-id> --reason <text>
+    Marks one interface-boundary pair "deferred" with a human-supplied
+    reason (SKILL.md Step 5d: typically "endpoint <x> not yet generated
+    this run").
+
+  scaffold_state.py list-interfaces <state.json> [--eligible-only]
+    Prints the interfaces list. --eligible-only filters to "pending" pairs
+    whose both endpoint modules are already "generated" in this same
+    state -- the exact tier-gating rule SKILL.md Step 5d applies, exposed
+    here so the agent doesn't hand-read/hand-cross-reference the JSON.
+
+Interfaces (populated only when --graph-mode graphify; scan()'s one-time
+graph.json load, same access pattern as in-degree above): one entry per
+distinct crossing-module-boundary pair, deduplicated and stored in a
+stable sorted (module_a, module_b) order regardless of which direction the
+underlying graph edges point -- see _graph_crossing_edges()'s docstring.
+Like modules, a settled ("generated"/"deferred") interface entry is never
+silently touched by a later scan -- same "state is a record of decisions
+made" posture. In heuristic mode the interfaces list is left exactly as it
+was (empty if never scanned in graphify mode) -- there's no crossing-edge
+data to compute it from.
 
 Every write subcommand rewrites the whole file, stable key order, 2-space
 indent -- decision_ledger.py's exact convention, so diffs in a write-gate
@@ -154,6 +196,33 @@ TIER1_MIN_FILE_COUNT = 50
 # posture as the tier thresholds above -- no cited design-doc number.
 GRAPH_MODULE_OVERLAP_WARN_THRESHOLD = 0.5
 
+# SKILL.md Step 4's small/large repo-size gate -- flagged implementation
+# defaults, same posture as the tier thresholds above (no design-doc-cited
+# number). A top-level candidate directory only counts toward this gate
+# once it clears MIN_FILES_FOR_SIZE_GATE files (recursively, same pruning
+# _iter_files() already applies) -- this filters out conventionally
+# near-empty structural directories (a docs/ folder holding one README, a
+# scripts/ folder holding one file) from inflating the count; it does not
+# try to distinguish "real subsystem" from "conventional project
+# scaffolding" by name, since scan()'s own module enumeration doesn't
+# either -- whatever this probe counts, a real Phase B scan would enumerate
+# the same way.
+#
+# <= SMALL_REPO_MAX_MODULES substantive directories classifies as small by
+# default; >= LARGE_REPO_MIN_MODULES classifies as large by default. The
+# band between the two has no safe default on purpose -- SKILL.md Step 4
+# asks the user directly rather than guessing.
+MIN_FILES_FOR_SIZE_GATE = 5
+SMALL_REPO_MAX_MODULES = 2
+LARGE_REPO_MIN_MODULES = 8
+
+# Repo-wide convention docs SKILL.md Step 5c can generate -- exactly these
+# two kinds, both existence-gated (never overwrite a file that's already
+# there). Fixed tuple, not user-extensible: a third kind needs its own
+# references/*.md + templates/*.md pair and SKILL.md step, not a config
+# flag here.
+REPO_DOC_KINDS = ("coding_standards", "testing_guidelines")
+
 
 class GraphRepoRootMismatchError(ValueError):
     """Raised when a graphify-mode graph shares ZERO top-level module names
@@ -207,6 +276,41 @@ def _top_level_candidate_dirs(repo_root):
 
 
 # --------------------------------------------------------------------------- #
+# SKILL.md Step 4's small/large repo-size gate                               #
+# --------------------------------------------------------------------------- #
+
+def probe_size(repo_root):
+    """Cheap, read-only repo-size signal for SKILL.md Step 4's small/large
+    gate. Counts top-level candidate directories under repo_root
+    (_top_level_candidate_dirs()'s pruning) that clear
+    MIN_FILES_FOR_SIZE_GATE files each (_iter_files()'s own recursive
+    pruning) -- a conventionally near-empty structural directory (docs/
+    with one README) doesn't inflate the count. No state file, no writes.
+
+    Returns {"substantive_modules": [...names...], "count": N,
+    "classification": "small"|"ambiguous"|"large"}. See
+    SMALL_REPO_MAX_MODULES/LARGE_REPO_MIN_MODULES above for the default
+    thresholds; the ambiguous band has no safe default on purpose."""
+    repo_root = Path(repo_root)
+    substantive = [
+        name for name in _top_level_candidate_dirs(repo_root)
+        if sum(1 for _ in _iter_files(repo_root / name)) >= MIN_FILES_FOR_SIZE_GATE
+    ]
+    count = len(substantive)
+    if count <= SMALL_REPO_MAX_MODULES:
+        classification = "small"
+    elif count >= LARGE_REPO_MIN_MODULES:
+        classification = "large"
+    else:
+        classification = "ambiguous"
+    return {
+        "substantive_modules": substantive,
+        "count": count,
+        "classification": classification,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Tier 0: generated/vendor detection                                         #
 # --------------------------------------------------------------------------- #
 
@@ -256,14 +360,22 @@ def _module_of(source_file):
     return parts[0]
 
 
-def _graph_in_degrees(graph):
-    """{module_name: in_degree}, in_degree = count of DISTINCT OTHER
-    modules with >=1 DEPENDENCY_RELATIONS edge landing in this module."""
+def _node_module_map(graph):
+    """{node_id: module_name} for every graph node whose source_file maps to
+    a module (see _module_of()). Shared by every graph-aggregation function
+    below so each one loads the graph's nodes exactly once per call site."""
     node_module = {}
     for node in graph.get("nodes", []):
         module = _module_of(node.get("source_file"))
         if module is not None:
             node_module[node.get("id")] = module
+    return node_module
+
+
+def _graph_in_degrees(graph):
+    """{module_name: in_degree}, in_degree = count of DISTINCT OTHER
+    modules with >=1 DEPENDENCY_RELATIONS edge landing in this module."""
+    node_module = _node_module_map(graph)
 
     senders = {}
     for link in graph.get("links", []):
@@ -276,6 +388,97 @@ def _graph_in_degrees(graph):
         senders.setdefault(dst_module, set()).add(src_module)
 
     return {module: len(s) for module, s in senders.items()}
+
+
+def _interface_id(module_a, module_b):
+    """Stable id for an unordered module pair -- callers must already have
+    sorted (module_a, module_b), this just joins them."""
+    return "{}--{}".format(module_a, module_b)
+
+
+def _graph_crossing_edges(graph):
+    """One entry per distinct pair of modules connected by >=1
+    DEPENDENCY_RELATIONS edge crossing the module boundary, deduplicated and
+    stored in a stable sorted (module_a, module_b) order regardless of which
+    direction the underlying graph edge points -- an interface boundary is
+    the pair, not the direction. `weight` is the number of qualifying edges
+    observed for that pair (both directions combined); `relations` is the
+    sorted set of distinct relation values seen.
+
+    Returns a list of {"module_a", "module_b", "relations": [...],
+    "weight": N} dicts, sorted by (module_a, module_b) for a stable diff."""
+    node_module = _node_module_map(graph)
+
+    pairs = {}
+    for link in graph.get("links", []):
+        relation = link.get("relation")
+        if relation not in DEPENDENCY_RELATIONS:
+            continue
+        src_module = node_module.get(link.get("source"))
+        dst_module = node_module.get(link.get("target"))
+        if not src_module or not dst_module or src_module == dst_module:
+            continue
+        module_a, module_b = sorted((src_module, dst_module))
+        entry = pairs.setdefault(
+            (module_a, module_b), {"weight": 0, "relations": set()}
+        )
+        entry["weight"] += 1
+        entry["relations"].add(relation)
+
+    return [
+        {
+            "module_a": module_a,
+            "module_b": module_b,
+            "relations": sorted(data["relations"]),
+            "weight": data["weight"],
+        }
+        for (module_a, module_b), data in sorted(pairs.items())
+    ]
+
+
+def _merge_interfaces(existing_interfaces, crossing_edges):
+    """Merge a fresh _graph_crossing_edges() result into the prior
+    `interfaces` list, same "state is a record of decisions made" posture
+    scan()'s module-merge loop already applies:
+
+    - A pair already settled ("generated"/"deferred") is never touched,
+      even if this scan's weight/relations differ from what was recorded.
+    - A pair still "pending" is refreshed with the latest weight/relations
+      (cheap repeat scans should reflect current graph state until a
+      decision is made).
+    - A previously-unseen pair is added as a new "pending" entry.
+    - A pair no longer present in this scan's crossing_edges keeps its
+      history -- not silently dropped, mirroring the module-merge loop's
+      same rule for modules no longer present on disk.
+    """
+    existing_by_id = {e["id"]: e for e in existing_interfaces}
+    seen_ids = set()
+    merged = []
+
+    for edge in crossing_edges:
+        interface_id = _interface_id(edge["module_a"], edge["module_b"])
+        seen_ids.add(interface_id)
+        prior = existing_by_id.get(interface_id)
+        if prior is not None and prior["status"] != "pending":
+            merged.append(prior)
+            continue
+        merged.append({
+            "id": interface_id,
+            "module_a": edge["module_a"],
+            "module_b": edge["module_b"],
+            "relations": edge["relations"],
+            "weight": edge["weight"],
+            "status": "pending",
+            "output_path": None,
+            "generated_at": None,
+            "defer_reason": None,
+        })
+
+    for interface_id, entry in existing_by_id.items():
+        if interface_id not in seen_ids:
+            merged.append(entry)
+
+    return merged
 
 
 def _graph_module_names(graph):
@@ -392,11 +595,30 @@ def _tier_for_heuristic(file_count, generated):
 # State load/save                                                            #
 # --------------------------------------------------------------------------- #
 
+def _ensure_repo_docs(repo_docs):
+    """Return a repo_docs dict guaranteed to have every REPO_DOC_KINDS key,
+    filling in a fresh "pending" entry for any kind missing (new schema
+    field on an older state file, or a from-scratch empty_state()). Never
+    overwrites a kind already present -- same "don't touch settled state"
+    posture as _merge_interfaces()."""
+    repo_docs = dict(repo_docs or {})
+    for kind in REPO_DOC_KINDS:
+        repo_docs.setdefault(kind, {
+            "status": "pending",
+            "output_path": None,
+            "generated_at": None,
+            "skip_reason": None,
+        })
+    return repo_docs
+
+
 def empty_state():
     return {
         "schema_version": SCHEMA_VERSION,
         "repo_scan": {"graph_source": None, "graph_path": None, "scanned_at": None},
         "modules": [],
+        "interfaces": [],
+        "repo_docs": _ensure_repo_docs({}),
     }
 
 
@@ -415,6 +637,8 @@ def load_state(path):
     state.setdefault("schema_version", SCHEMA_VERSION)
     state.setdefault("repo_scan", {"graph_source": None, "graph_path": None, "scanned_at": None})
     state.setdefault("modules", [])
+    state.setdefault("interfaces", [])
+    state["repo_docs"] = _ensure_repo_docs(state.get("repo_docs"))
     return state
 
 
@@ -429,6 +653,8 @@ def save_state(path, state):
         "schema_version": state.get("schema_version", SCHEMA_VERSION),
         "repo_scan": state.get("repo_scan", {}),
         "modules": state.get("modules", []),
+        "interfaces": state.get("interfaces", []),
+        "repo_docs": _ensure_repo_docs(state.get("repo_docs")),
     }
     path.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
 
@@ -438,6 +664,25 @@ def _find_module(state, module_id):
         if m["id"] == module_id:
             return m
     raise ValueError("no module with id '{}' in state -- run `scan` first".format(module_id))
+
+
+def _find_repo_doc(state, kind):
+    if kind not in REPO_DOC_KINDS:
+        raise ValueError(
+            "unknown repo-doc kind '{}' -- must be one of {}".format(kind, REPO_DOC_KINDS)
+        )
+    return state["repo_docs"][kind]
+
+
+def _find_interface(state, interface_id):
+    for i in state.get("interfaces", []):
+        if i["id"] == interface_id:
+            return i
+    raise ValueError(
+        "no interface with id '{}' in state -- run `scan --graph-mode graphify` first".format(
+            interface_id
+        )
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -463,6 +708,15 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
             _graph_module_names(graph), module_names, graph_path
         )
         in_degrees = _graph_in_degrees(graph)
+        # Same one-time graph load, same access pattern as in_degrees above
+        # -- see _graph_crossing_edges()'s docstring for why this is the
+        # pair, not the direction.
+        state["interfaces"] = _merge_interfaces(
+            state.get("interfaces", []), _graph_crossing_edges(graph)
+        )
+    # Heuristic mode: leave state["interfaces"] exactly as it was (empty if
+    # never scanned in graphify mode) -- there's no crossing-edge data to
+    # compute it from in this mode.
 
     new_modules = []
     seen_ids = set()
@@ -547,6 +801,82 @@ def mark_skipped(state, module_id, reason):
     return module
 
 
+def mark_repo_doc_generated(state, kind, output_path):
+    doc = _find_repo_doc(state, kind)
+    if doc["status"] != "pending":
+        raise ValueError(
+            "repo doc '{}' is already '{}' -- not pending".format(kind, doc["status"])
+        )
+    doc["status"] = "generated"
+    doc["output_path"] = output_path
+    doc["generated_at"] = _now_iso()
+    return doc
+
+
+def mark_repo_doc_skipped(state, kind, reason):
+    doc = _find_repo_doc(state, kind)
+    if doc["status"] != "pending":
+        raise ValueError(
+            "repo doc '{}' is already '{}' -- not pending".format(kind, doc["status"])
+        )
+    doc["status"] = "skipped"
+    doc["skip_reason"] = reason
+    return doc
+
+
+def mark_interface_generated(state, interface_id, output_path):
+    interface = _find_interface(state, interface_id)
+    if interface["status"] != "pending":
+        raise ValueError(
+            "interface '{}' is already '{}' -- not pending".format(
+                interface_id, interface["status"]
+            )
+        )
+    interface["status"] = "generated"
+    interface["output_path"] = output_path
+    interface["generated_at"] = _now_iso()
+    return interface
+
+
+def mark_interface_deferred(state, interface_id, reason):
+    interface = _find_interface(state, interface_id)
+    if interface["status"] != "pending":
+        raise ValueError(
+            "interface '{}' is already '{}' -- not pending".format(
+                interface_id, interface["status"]
+            )
+        )
+    interface["status"] = "deferred"
+    interface["defer_reason"] = reason
+    return interface
+
+
+def list_interfaces(state, eligible_only=False, generated_module_ids=None):
+    """Return the interfaces list, optionally filtered to SKILL.md Step 5d's
+    exact eligibility rule: status == "pending" AND both endpoint modules
+    are already "generated" in this same state.
+
+    generated_module_ids defaults to computing itself from state["modules"]
+    when not supplied -- callers that already have the module list handy
+    (e.g. a single CLI invocation that just loaded state once) may pass it
+    to avoid a second pass; the CLI entry point relies on the default."""
+    interfaces = state.get("interfaces", [])
+    if not eligible_only:
+        return interfaces
+
+    if generated_module_ids is None:
+        generated_module_ids = {
+            m["id"] for m in state.get("modules", []) if m["status"] == "generated"
+        }
+    return [
+        i
+        for i in interfaces
+        if i["status"] == "pending"
+        and (i["module_a"] + "/") in generated_module_ids
+        and (i["module_b"] + "/") in generated_module_ids
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # render-index                                                                #
 # --------------------------------------------------------------------------- #
@@ -617,6 +947,42 @@ def render_index(state, repo_name):
         )
     )
     lines.append("")
+
+    repo_docs = _ensure_repo_docs(state.get("repo_docs"))
+    lines.append("## Repo-wide docs")
+    lines.append("")
+    for kind in REPO_DOC_KINDS:
+        doc = repo_docs[kind]
+        label = kind.replace("_", " ").title()
+        path_note = " -> `{}`".format(doc["output_path"]) if doc.get("output_path") else ""
+        lines.append("- {} -- **{}**{}".format(label, doc["status"], path_note))
+    lines.append("")
+
+    interfaces = state.get("interfaces", [])
+    lines.append("## Interface boundaries")
+    lines.append("")
+    if not interfaces:
+        lines.append("_none -- graph mode not yet scanned, or no crossing-module edges found._")
+        lines.append("")
+    else:
+        for i in sorted(interfaces, key=lambda e: e["id"]):
+            path_note = " -> `{}`".format(i["output_path"]) if i.get("output_path") else ""
+            lines.append(
+                "- `{}` <-> `{}` ({}, weight {}) -- **{}**{}".format(
+                    i["module_a"], i["module_b"], ",".join(i["relations"]), i["weight"],
+                    i["status"], path_note,
+                )
+            )
+        lines.append("")
+        i_generated = sum(1 for i in interfaces if i["status"] == "generated")
+        i_pending = sum(1 for i in interfaces if i["status"] == "pending")
+        i_deferred = sum(1 for i in interfaces if i["status"] == "deferred")
+        lines.append(
+            "**Progress:** {} generated, {} pending, {} deferred ({} interfaces total).".format(
+                i_generated, i_pending, i_deferred, len(interfaces)
+            )
+        )
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -630,6 +996,9 @@ def summarize(state):
     for m in modules:
         counts = by_tier.setdefault(str(m["tier"]), {"pending": 0, "generated": 0, "skipped": 0})
         counts[m["status"]] = counts.get(m["status"], 0) + 1
+
+    repo_docs = _ensure_repo_docs(state.get("repo_docs"))
+    interfaces = state.get("interfaces", [])
     return {
         "schema_version": state.get("schema_version"),
         "repo_scan": state.get("repo_scan", {}),
@@ -638,12 +1007,24 @@ def summarize(state):
         "generated": sum(1 for m in modules if m["status"] == "generated"),
         "pending": sum(1 for m in modules if m["status"] == "pending"),
         "skipped": sum(1 for m in modules if m["status"] == "skipped"),
+        "repo_docs": {kind: doc["status"] for kind, doc in repo_docs.items()},
+        "interfaces": {
+            "total": len(interfaces),
+            "generated": sum(1 for i in interfaces if i["status"] == "generated"),
+            "pending": sum(1 for i in interfaces if i["status"] == "pending"),
+            "deferred": sum(1 for i in interfaces if i["status"] == "deferred"),
+        },
     }
 
 
 # --------------------------------------------------------------------------- #
 # CLI                                                                         #
 # --------------------------------------------------------------------------- #
+
+def _cmd_probe_size(args):
+    print(json.dumps(probe_size(args.repo_root), indent=2))
+    return 0
+
 
 def _cmd_scan(args):
     state = load_state(args.state)
@@ -711,12 +1092,73 @@ def _cmd_show(args):
     return 0
 
 
+def _cmd_mark_repo_doc_generated(args):
+    state = load_state(args.state)
+    try:
+        doc = mark_repo_doc_generated(state, args.kind, args.output)
+    except ValueError as e:
+        print("ERROR: {}".format(e), file=sys.stderr)
+        return 1
+    save_state(args.state, state)
+    print(json.dumps(doc, indent=2))
+    return 0
+
+
+def _cmd_mark_repo_doc_skipped(args):
+    state = load_state(args.state)
+    try:
+        doc = mark_repo_doc_skipped(state, args.kind, args.reason)
+    except ValueError as e:
+        print("ERROR: {}".format(e), file=sys.stderr)
+        return 1
+    save_state(args.state, state)
+    print(json.dumps(doc, indent=2))
+    return 0
+
+
+def _cmd_mark_interface_generated(args):
+    state = load_state(args.state)
+    try:
+        interface = mark_interface_generated(state, args.interface_id, args.output)
+    except ValueError as e:
+        print("ERROR: {}".format(e), file=sys.stderr)
+        return 1
+    save_state(args.state, state)
+    print(json.dumps(interface, indent=2))
+    return 0
+
+
+def _cmd_mark_interface_deferred(args):
+    state = load_state(args.state)
+    try:
+        interface = mark_interface_deferred(state, args.interface_id, args.reason)
+    except ValueError as e:
+        print("ERROR: {}".format(e), file=sys.stderr)
+        return 1
+    save_state(args.state, state)
+    print(json.dumps(interface, indent=2))
+    return 0
+
+
+def _cmd_list_interfaces(args):
+    state = load_state(args.state)
+    print(json.dumps(list_interfaces(state, eligible_only=args.eligible_only), indent=2))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="scaffold_state.py",
         description="Read/write the D24 Phase B triage/checkpoint state (TRIAGE-STATE.json).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_probe = sub.add_parser(
+        "probe-size",
+        help="Count substantive top-level directories (Step 4's small/large gate).",
+    )
+    p_probe.add_argument("--repo-root", required=True)
+    p_probe.set_defaults(func=_cmd_probe_size)
 
     p_scan = sub.add_parser("scan", help="Enumerate modules and assign tiers.")
     p_scan.add_argument("state")
@@ -754,6 +1196,42 @@ def main(argv=None):
     p_show = sub.add_parser("show", help="Print schema_version, graph mode, and per-tier counts.")
     p_show.add_argument("state")
     p_show.set_defaults(func=_cmd_show)
+
+    p_rdgen = sub.add_parser("mark-repo-doc-generated", help="Mark one repo-wide doc generated.")
+    p_rdgen.add_argument("state")
+    p_rdgen.add_argument("kind", choices=REPO_DOC_KINDS)
+    p_rdgen.add_argument("--output", required=True)
+    p_rdgen.set_defaults(func=_cmd_mark_repo_doc_generated)
+
+    p_rdskip = sub.add_parser("mark-repo-doc-skipped", help="Mark one repo-wide doc skipped.")
+    p_rdskip.add_argument("state")
+    p_rdskip.add_argument("kind", choices=REPO_DOC_KINDS)
+    p_rdskip.add_argument("--reason", required=True)
+    p_rdskip.set_defaults(func=_cmd_mark_repo_doc_skipped)
+
+    p_ifgen = sub.add_parser(
+        "mark-interface-generated", help="Mark one interface-boundary pair generated."
+    )
+    p_ifgen.add_argument("state")
+    p_ifgen.add_argument("interface_id")
+    p_ifgen.add_argument("--output", required=True)
+    p_ifgen.set_defaults(func=_cmd_mark_interface_generated)
+
+    p_ifdef = sub.add_parser(
+        "mark-interface-deferred", help="Mark one interface-boundary pair deferred."
+    )
+    p_ifdef.add_argument("state")
+    p_ifdef.add_argument("interface_id")
+    p_ifdef.add_argument("--reason", required=True)
+    p_ifdef.set_defaults(func=_cmd_mark_interface_deferred)
+
+    p_iflist = sub.add_parser("list-interfaces", help="Print the interfaces list.")
+    p_iflist.add_argument("state")
+    p_iflist.add_argument(
+        "--eligible-only", action="store_true",
+        help="Filter to pending pairs whose both endpoint modules are already generated.",
+    )
+    p_iflist.set_defaults(func=_cmd_list_interfaces)
 
     args = parser.parse_args(argv)
     return args.func(args)
