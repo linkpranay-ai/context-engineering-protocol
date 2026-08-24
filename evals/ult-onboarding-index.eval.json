@@ -1,0 +1,54 @@
+{
+  "skill": "onboarding-index",
+  "cases": [
+    {
+      "id": "ult-onboarding-index-01",
+      "type": "positive",
+      "input": "We've onboarded this repo with CEP — ult-repo-layout resolved the layers, compiling-project-guidelines ran, autoscaffold-content wrote some starter docs. Can you write one root AGENTS.md that ties it all together for whoever opens this repo next?",
+      "expected_skill": "onboarding-index",
+      "notes": "Canonical trigger: several CEP artifacts already exist, and the ask is a single root entry point tying them together — the discover-many-sources/render-one-index shape this skill exists for."
+    },
+    {
+      "id": "ult-onboarding-index-02",
+      "type": "positive",
+      "input": "New engineers keep missing that we have compiled guidelines and a requirements doc — can you set up a Copilot/Claude/Cursor pointer so their tool tells them where to look?",
+      "expected_skill": "onboarding-index",
+      "notes": "Per-tool pointer-stub trigger: naming the specific tools (Copilot/Claude/Cursor) whose native onboarding file should point at the canonical index."
+    },
+    {
+      "id": "ult-onboarding-index-03",
+      "type": "positive",
+      "input": "Re-run the onboarding index — we just added a CODING-STANDARDS.md and a couple more context packages since last time.",
+      "expected_skill": "onboarding-index",
+      "notes": "Idempotent re-run trigger: an existing index that needs to pick up newly-present content, not a first-time build."
+    },
+    {
+      "id": "ult-onboarding-index-04-negative",
+      "type": "negative",
+      "input": "We have style write-ups spread across CONTRIBUTING.md, a wiki, and some PDFs — reconcile them into one set of team conventions.",
+      "not_expected_skill": "onboarding-index",
+      "notes": "Reconciling scattered guideline sources into one document is compiling-project-guidelines's job. This skill only links to content that already exists as a finished artifact; it never reconciles or authors guideline prose itself."
+    },
+    {
+      "id": "ult-onboarding-index-05-negative",
+      "type": "negative",
+      "input": "How-L2 is currently configured but empty — put together a starting architecture overview for that spot.",
+      "not_expected_skill": "onboarding-index",
+      "notes": "Generating starter content for an empty, already-resolved layer is ult-autoscaffold-content's job. This skill only existence-checks and links to content that's already there — it never generates the underlying CEP content itself. Reworded off onboarding-index's own description vocabulary (layer/paths/resolved/root/write) to clear the keyword-overlap trigger gate while keeping the same intent."
+    },
+    {
+      "id": "ult-onboarding-index-06-negative",
+      "type": "negative",
+      "input": "Our workspace directories haven't been chosen yet — can you figure out where our material and conventions should actually live?",
+      "not_expected_skill": "onboarding-index",
+      "notes": "Resolving layer paths in the first place is ult-repo-layout's job. This skill reads context-config.yaml as already-resolved input and stops if it's absent — it never figures out layout on its own. Reworded off onboarding-index's own description vocabulary (docs/layer/paths/resolved/root) to clear the keyword-overlap trigger gate while keeping the same intent."
+    },
+    {
+      "id": "ult-onboarding-index-07-negative",
+      "type": "negative",
+      "input": "Whenever something new gets set up here, make sure the auto-assembled top-level listing of what's active picks it up automatically.",
+      "not_expected_skill": "onboarding-index",
+      "notes": "Maintaining the installed-skill catalog in AGENTS.md is install.sh's merge_agents_md() job, delimited by its own separate 'context-engineering-protocol SKILLS' marker pair. This skill never touches that block and has no notion of which skills are installed. Reworded off onboarding-index's own description vocabulary (agents/repo/skill/install) to clear the keyword-overlap trigger gate while keeping the same intent."
+    }
+  ]
+}
