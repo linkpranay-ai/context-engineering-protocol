@@ -7,8 +7,12 @@ boxes for What, How, Guidelines, and Trip-wire, each listing the files currently
 resolved into it." This module is the one place that assembles those four boxes -
 `wizard_server.py`'s status route calls `build_boxes` and serializes the result;
 nothing else in this module talks to the network or the filesystem directly (it reads
-through `wizard_layout_source.LayoutSource` and `wizard_tripwire.read_summary`, both
-of which own their own fresh-every-call guarantees).
+through `wizard_layout_source.LayoutSource`, `wizard_box_files.list_files` and
+`wizard_tripwire.read_summary`, all of which own their own fresh-every-call
+guarantees). Each What/How `BoxPath` now literally holds the files resolved into it
+(via `wizard_box_files`), not just the directory - the "each listing the files
+currently resolved into it" line above used to be aspirational for What/How; this is
+what closes that gap.
 
 What/How are each a *union* of their L2 (always-on) and L1 (opt-in) layer, not two
 separate boxes - four boxes total, matching §18.1's count, and consistent with
@@ -36,6 +40,7 @@ from pathlib import Path
 from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import wizard_box_files as wbf  # noqa: E402
 import wizard_layout_source as wls  # noqa: E402
 import wizard_tripwire as wt  # noqa: E402
 
@@ -45,6 +50,10 @@ class BoxPath:
     path: str
     source: str  # "L2" | "L1" - which underlying layer contributed this path, so the
     # frontend can distinguish a What box's always-on L2 paths from its opt-in L1 ones.
+    files: List[str] = field(default_factory=list)  # relative to `path` itself -
+    # see wizard_box_files.list_files. Capped at wizard_box_files.MAX_FILES_PER_PATH.
+    total_file_count: int = 0  # real count, even when `files` was truncated.
+    truncated: bool = False
 
 
 @dataclass
@@ -73,9 +82,22 @@ class BoxesView:
     tripwire: wt.TripwireSummary
 
 
-def _what_how_box(title: str, l2: wls.LayerState, l1: wls.LayerState) -> WhatHowBox:
-    paths = [BoxPath(path=p, source="L2") for p in l2.resolved_paths]
-    paths += [BoxPath(path=p, source="L1") for p in l1.resolved_paths]
+def _box_path(path: str, source: str, repo_root: Path) -> BoxPath:
+    listing = wbf.list_files(repo_root, path)
+    return BoxPath(
+        path=path,
+        source=source,
+        files=listing.files,
+        total_file_count=listing.total_count,
+        truncated=listing.truncated,
+    )
+
+
+def _what_how_box(
+    title: str, l2: wls.LayerState, l1: wls.LayerState, repo_root: Path
+) -> WhatHowBox:
+    paths = [_box_path(p, "L2", repo_root) for p in l2.resolved_paths]
+    paths += [_box_path(p, "L1", repo_root) for p in l1.resolved_paths]
     return WhatHowBox(
         title=title, l2_enabled=l2.enabled, l1_enabled=l1.enabled, paths=paths
     )
@@ -89,9 +111,14 @@ def build_boxes(source: wls.LayoutSource) -> BoxesView:
     layers = source.read_layers()
     slots = source.read_slots()
 
-    what = _what_how_box("What", layers["layers.what_l2"], layers["layers.what_l1"])
+    what = _what_how_box(
+        "What", layers["layers.what_l2"], layers["layers.what_l1"], source.repo_root
+    )
     how = _what_how_box(
-        "How", layers["how_dimension.how_l2"], layers["how_dimension.how_l1"]
+        "How",
+        layers["how_dimension.how_l2"],
+        layers["how_dimension.how_l1"],
+        source.repo_root,
     )
 
     guidelines_slot = slots.get("compiled_guidelines")

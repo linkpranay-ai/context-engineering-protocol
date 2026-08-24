@@ -50,11 +50,16 @@ this same response rather than a new route) sourced from the same `what`/`how`/
 
 - **What / How** (`WhatHowBox`: `title`, `l2_enabled`, `l1_enabled`, `paths: List[BoxPath]`) —
   the union of the always-on L2 layer and the opt-in L1 layer for that dimension. Each
-  `BoxPath` is just `{path, source}` — `source` says whether that path came from a
-  marker or from a layer key, since a box can show entries from both sources at once
-  and a reader benefits from knowing which. A box with an empty `paths` list is the
-  real, correctly-rendered empty case — not an error state — and is what triggers the
-  empty-case content-scaffolding card (`wizard_stub_content.py`).
+  `BoxPath` is `{path, source, files, total_file_count, truncated}` — `source` says
+  whether that path came from the L2 (always-on) or L1 (opt-in) layer, since a box can
+  show entries from both at once and a reader benefits from knowing which. `files`
+  (`wizard_box_files.list_files`, capped at `MAX_FILES_PER_PATH`) is the actual file
+  listing under that path, relative to the path itself; `total_file_count`/`truncated`
+  carry the real count when the listing was capped. A box with an empty `paths` list is
+  the real, correctly-rendered empty case — not an error state — and is what triggers
+  the empty-case content-scaffolding card (`wizard_stub_content.py`); a `BoxPath` whose
+  `files` list is empty (but which is itself present in `paths`) is a different,
+  narrower case — the path resolved but has nothing in it yet.
 - **Guidelines** (`GuidelinesBox`: `title="Guidelines"`, `available`, `unavailable_reason`,
   `initialized`, `resolved_paths`, `default_path`) — sourced from the
   `compiled_guidelines` slot. `available` is false whenever

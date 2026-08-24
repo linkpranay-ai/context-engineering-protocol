@@ -451,6 +451,39 @@ main {
   margin-left: -1.1rem;
 }
 
+.box-path-group {
+  list-style: none;
+  margin-left: -1.1rem;
+  margin-bottom: 0.4rem;
+}
+
+.box-path-header {
+  font-weight: 600;
+}
+
+.box-path-files {
+  margin: 0.2rem 0 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.box-path-empty {
+  color: var(--faint);
+  font-style: italic;
+  list-style: none;
+  margin-left: -1.1rem;
+}
+
+.box-path-truncated {
+  color: var(--faint);
+  font-style: italic;
+  list-style: none;
+  margin-left: -1.1rem;
+}
+
 .box.unavailable {
   opacity: 0.6;
 }

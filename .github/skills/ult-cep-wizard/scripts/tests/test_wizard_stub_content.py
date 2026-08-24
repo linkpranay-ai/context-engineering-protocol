@@ -86,6 +86,11 @@ class TestWhatHowCard(unittest.TestCase):
         self.assertIn("ult-autoscaffold-content", what_card.prompt_text)
         self.assertIn("ult-autoscaffold-content", how_card.prompt_text)
 
+    def test_prompt_names_autoscaffold_content_artifact_kinds(self):
+        card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
+        self.assertIn("coding-standards", card.prompt_text)
+        self.assertIn("testing-guidelines", card.prompt_text)
+
 
 class TestGuidelinesCard(unittest.TestCase):
     def setUp(self):
