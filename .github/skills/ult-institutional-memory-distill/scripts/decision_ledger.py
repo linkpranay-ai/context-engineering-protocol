@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """decision_ledger.py - the only code that reads or writes DECISION-LEDGER.json.
 
-Trip-wire (CEP-1.0-ROADMAP.md §7, two adversarial-review passes,
-2026-08-01/02): a persistent, project-scoped decision ledger distilled from
+Trip-wire: a persistent, project-scoped decision ledger distilled from
 PRs, design docs, and postmortems, queried every time a context package is
 assembled so a task doesn't quietly repeat a road the org already walked and
 rejected. See references/ledger-schema.md for the full field-level spec --
@@ -577,7 +576,7 @@ def _cmd_show(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="decision_ledger.py",
-        description="Read/write the trip-wire decision ledger (CEP-1.0-ROADMAP.md §7).",
+        description="Read/write the trip-wire decision ledger.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

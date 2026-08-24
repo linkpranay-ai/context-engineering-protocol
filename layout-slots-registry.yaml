@@ -55,24 +55,24 @@ slots:
     project_layout_slot: true
     kind: directory
     default_bucket: outputs
-    pre_d21_default: docs/superpowers/plans/
+    pre_d21_default: output_docs/plans/
     workspace_root_leaf: outputs/plans/
     config_key: ~   # NEW slot (Gap-B) -- no pre-existing config-key fallback
-    producer: writing-plans
+    producer: example-plan-writer   # illustrative -- not shipped in this repo
     consumers:
-      - subagent-driven-development
-      - requesting-code-review
+      - (illustrative -- a plan-executing skill)
+      - (illustrative -- a review-requesting skill)
 
   - id: brainstorm_output
     project_layout_slot: true
     kind: directory
     default_bucket: outputs
-    pre_d21_default: docs/superpowers/specs/
-    workspace_root_leaf: outputs/specs/
+    pre_d21_default: output_docs/brainstorm/
+    workspace_root_leaf: outputs/brainstorm/
     config_key: ~   # NEW slot (Gap-B) -- no pre-existing config-key fallback
-    producer: brainstorming
+    producer: example-brainstorm-writer   # illustrative -- not shipped in this repo
     consumers:
-      - brainstorming/spec-document-reviewer-prompt.md
+      - (illustrative -- its own spec-reviewer prompt)
 
   - id: compiled_guidelines
     project_layout_slot: true
@@ -92,8 +92,8 @@ slots:
     default_bucket: cache
     pre_d21_default: starter_kit/decision_ledger/DECISION-LEDGER.json
     workspace_root_leaf: cache/decision-ledger/DECISION-LEDGER.json
-    config_key: ~   # NEW slot (trip-wire, CEP-1.0-ROADMAP.md §7) -- no pre-existing config-key fallback
-    note: "JSON, not YAML, unlike every other kind:file slot here -- a human-reviewed but machine-read/written structured log (entries + run_state cursors/tombstones + hit_dispositions audit trail), same format family as graphify_graph_path/index_paths below, not prose-shaped like compiled_guidelines. Reviewed via normal PR diff (the §7 write-gate), never hand-edited outside decision_ledger.py."
+    config_key: ~   # NEW slot (trip-wire) -- no pre-existing config-key fallback
+    note: "JSON, not YAML, unlike every other kind:file slot here -- a human-reviewed but machine-read/written structured log (entries + run_state cursors/tombstones + hit_dispositions audit trail), same format family as graphify_graph_path/index_paths below, not prose-shaped like compiled_guidelines. Reviewed via normal PR diff (the ledger's own write-gate, see ledger-schema.md), never hand-edited outside decision_ledger.py."
     producer: ult-institutional-memory-distill
     consumers:
       - ult-context-generate/SKILL.md Step 7.7 (trip-wire query) and Step 9 (disposition write-back)
@@ -139,7 +139,7 @@ slots:
     pre_d21_default: output_docs/security_docs/
     workspace_root_leaf: outputs/security_docs/
     config_key: ~
-    producer: sec-threat-model
+    producer: example-threat-modeler
     consumers: ~   # none registered yet
 
   - id: security_report
@@ -149,7 +149,7 @@ slots:
     pre_d21_default: output_docs/security_report/
     workspace_root_leaf: outputs/security_report/
     config_key: ~
-    producer: security-test-report
+    producer: example-report-writer
     consumers: ~   # none registered yet
 
   - id: project_plan_docs
@@ -159,7 +159,7 @@ slots:
     pre_d21_default: output_docs/project_plan_docs/
     workspace_root_leaf: outputs/project_plan_docs/
     config_key: ~
-    producer: pm-project-plan
+    producer: example-project-planner
     consumers: ~   # none registered yet
 
 # --- existing layers.*/how_dimension.*/graphify.*/cache.* config keys ------
@@ -191,6 +191,7 @@ config_keys:
     default_bucket: inputs
     pre_d21_default: org/
     workspace_root_leaf: inputs/org/
+    note: "ult-autoscaffold-content writes generated starter content directly under this resolved path by naming convention -- no separate slot, since it's content within an already-relocatable layer, not independently-relocatable bookkeeping: CODING-STANDARDS.md, TESTING-GUIDELINES.md, interfaces/<module-a>-to-<module-b>.md, and per-module CONTEXT.md files. compiling-project-guidelines discovers and folds these in like any other source once they exist."
 
   - id: how_l1_path
     project_layout_slot: false
@@ -227,43 +228,11 @@ config_keys:
 # --- starter-kit drop-zones (D21 §16.6, Phase 3d) ---------------------------
 # No marker/resolution mechanism -- regenerated .pointer.md scaffolds at
 # starter_kit/<leaf>/ (pre-D21) or {workspace_root}/inputs/starter-kit/<leaf>/
-# (D21). install.ps1/install.sh's BUNDLE_STARTER_KIT map drives these.
+# (D21). install.ps1's New-ProjectGuidelinesPointer / install.sh's
+# scaffold_pointer drive this, plus /ult-repo-layout init/reconcile. Only
+# project_guidelines is scaffolded -- it's the only drop-zone actually read
+# by a skill shipped in this repo (see references/starter-kit-dropzones.md).
 starter_kit_dropzones:
-  - id: threat_modeling
-    project_layout_slot: false
-    kind: directory
-    default_bucket: inputs
-    pre_d21_default: starter_kit/threat_modeling/
-    workspace_root_leaf: inputs/starter-kit/threat_modeling/
-    consumers:
-      - sec-threat-model
-
-  - id: secure_coding_guidelines
-    project_layout_slot: false
-    kind: directory
-    default_bucket: inputs
-    pre_d21_default: starter_kit/secure_coding_guidelines/
-    workspace_root_leaf: inputs/starter-kit/secure_coding_guidelines/
-    consumers: ~   # none registered yet
-
-  - id: security_test_data
-    project_layout_slot: false
-    kind: directory
-    default_bucket: inputs
-    pre_d21_default: starter_kit/security_test_data/
-    workspace_root_leaf: inputs/starter-kit/security_test_data/
-    consumers:
-      - security-test-report
-
-  - id: project_plan
-    project_layout_slot: false
-    kind: directory
-    default_bucket: inputs
-    pre_d21_default: starter_kit/project_plan/
-    workspace_root_leaf: inputs/starter-kit/project_plan/
-    consumers:
-      - pm-project-plan
-
   - id: project_guidelines
     project_layout_slot: false
     kind: directory

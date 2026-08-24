@@ -1,9 +1,10 @@
 # Decision Ledger JSON Schema
 
-Authority: `CEP-1.0-ROADMAP.md` §7 (private, two adversarial-review passes,
-2026-08-01/02) and §8's `complexity_budget` checklist row. This file is the
-field-level spec; `decision_ledger.py` is the only code that reads or writes
-it — never hand-edit the ledger file itself.
+This file is the field-level spec for the trip-wire decision ledger;
+`decision_ledger.py` is the only code that reads or writes it — never
+hand-edit the ledger file itself. The
+`complexity_budget` block it uses (below) is the same shared schema
+context-package assembly already uses, not a new convention.
 
 Read this before running `/ult-distill-decisions` or before wiring a new
 consumer against the `decision_ledger` layout slot
@@ -21,6 +22,16 @@ existing convention for derived, script-owned artifacts — not
 write, via the write-gate below — JSON diffs review fine in a PR, and
 `decision_ledger.py add-entry`/`alias`/`reject-source` always emit the file
 with stable key order and 2-space indent so diffs stay small and readable.
+
+## Contents
+
+- [Top-level shape](#top-level-shape)
+- [Ledger entry](#ledger-entry)
+- [Cursor (`run_state.cursors[]`) — idempotency, part 1](#cursor-run_statecursors--idempotency-part-1)
+- [Tombstone (`run_state.rejected_sources[]`) — idempotency, part 2](#tombstone-run_staterejected_sources--idempotency-part-2)
+- [Disposition (`hit_dispositions[]`) — the audit trail for hits](#disposition-hit_dispositions--the-audit-trail-for-hits)
+- [`complexity_budget`](#complexity_budget)
+- [Coverage — per aspect, not per package](#coverage--per-aspect-not-per-package)
 
 ## Top-level shape
 
@@ -105,9 +116,8 @@ only considers source artifacts newer than that stream's cursor — advanced
 only past artifacts *fully* processed (entry written or explicitly
 tombstoned), so an out-of-order or later-edited PR/postmortem still gets
 picked up on its own merge/edit event rather than silently skipped by id
-order. This is the fix for the idempotency contradiction the first
-adversarial-review pass found (constraint 2's re-runnable distillation vs.
-constraint 4's never-merge): re-running distillation over already-processed
+order. This resolves the idempotency tension between re-runnable distillation
+and never-merge (only alias): re-running distillation over already-processed
 artifacts is a no-op, not a duplicate-entry generator.
 
 ## Tombstone (`run_state.rejected_sources[]`) — idempotency, part 2
@@ -141,8 +151,7 @@ logged action, not a silent bypass).
 ```
 
 **Tier maps directly to legal `disposition` values** — `decision_ledger.py
-disposition` rejects any combination outside this table (closes the tier/
-disposition vocabulary mismatch the second review pass found):
+disposition` rejects any combination outside this table:
 
 | hit tier   | legal dispositions              |
 |------------|----------------------------------|
@@ -156,19 +165,18 @@ enforced required for `revise`/`escalate` tiers, optional (routine
 one-click acknowledgment) for `proceed`.
 
 **A hit with no matching entry in `hit_dispositions[]` is `unresolved`, not
-dismissed.** The ledger never treats silence as an answer — this is the fix
-for the auto-suppress path both review passes flagged (a hit nobody acted on
-must stay visible in the package's next assembly and in coverage reporting,
-not quietly vanish). `decision_ledger.py query` never writes to
+dismissed.** The ledger never treats silence as an answer — a hit nobody
+acted on must stay visible in the package's next assembly and in coverage
+reporting, not quietly vanish. `decision_ledger.py query` never writes to
 `hit_dispositions[]`; only `decision_ledger.py disposition`, called from
 `ult-context-generate/SKILL.md` Step 9, does.
 
-## `complexity_budget` (CEP-1.0-ROADMAP.md §8)
+## `complexity_budget`
 
 The same shared block used across context-package assembly and derived-
-package composition (historical — declined, see §7's sequencing call), now
-also trip-wire queries. Every `decision_ledger.py query` call is bounded by
-one, passed as `--budget <path-to-json>` or inline flags:
+package composition also bounds trip-wire queries now. Every
+`decision_ledger.py query` call is bounded by one, passed as
+`--budget <path-to-json>` or inline flags:
 
 ```json
 {
@@ -189,8 +197,9 @@ one, passed as `--budget <path-to-json>` or inline flags:
 `max_tool_calls`/`max_entries_scanned` (it is a single deterministic script
 invocation — no model calls, sub-agents, or graph writes of its own; those
 fields exist so the *same* schema can bound the agent-side steps that read
-its output and author the final `institutional_memory_hits[]` entries, per
-§8's "one shared schema, reused identically" rule). `min_evidence_required`
+its output and author the final `institutional_memory_hits[]` entries, one
+shared schema reused identically rather than a second bespoke one).
+`min_evidence_required`
 gates whether a candidate is surfaced as a hit at all — a candidate entry
 with fewer than this many overlapping `topics` tokens is dropped, not
 surfaced as a low-confidence hit.
@@ -205,10 +214,12 @@ that flag in the package's `ledger_coverage` block rather than dropping it.
 
 ## Coverage — per aspect, not per package
 
-The single sharpest finding across both review passes: **false absence**,
-not false positives. "No hits" silently read as "no prior decision here"
-when it actually means "not covered yet" is the same failure mode as the
-trading-firm anecdote, wearing the badge of authority. `decision_ledger.py
+The single sharpest failure mode this schema guards against: **false
+absence**, not false positives. "No hits" silently read as "no prior decision
+here" when it actually means "not covered yet" lets an aspect the query never
+reached masquerade as one that was checked and came up clear — the two look
+identical unless coverage is reported explicitly. Never treat a zero-hit
+result as clearance without checking coverage first. `decision_ledger.py
 query` always reports, per aspect queried:
 
 ```json

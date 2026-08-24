@@ -1,0 +1,47 @@
+{
+  "skill": "institutional-memory-distill",
+  "cases": [
+    {
+      "id": "ult-institutional-memory-distill-01",
+      "type": "positive",
+      "input": "We just merged a PR that reverted our Redis migration -- distill the decision and the reasoning behind it into the decision ledger.",
+      "expected_skill": "institutional-memory-distill",
+      "notes": "Canonical trigger: a single settled PR with real reasoning behind it, asked to become a structured ledger entry -- the distill-one-decision shape this skill exists for."
+    },
+    {
+      "id": "ult-institutional-memory-distill-02",
+      "type": "positive",
+      "input": "Go through our postmortems and old design docs and pull the rejected alternatives into the ledger so we don't repeat them.",
+      "expected_skill": "institutional-memory-distill",
+      "notes": "Multi-source distillation trigger: postmortems and design docs named explicitly as the source streams, rejected alternatives as the thing worth capturing."
+    },
+    {
+      "id": "ult-institutional-memory-distill-03",
+      "type": "positive",
+      "input": "Re-run the distillation over PRs merged since last time and advance the decision ledger's cursor for that stream.",
+      "expected_skill": "institutional-memory-distill",
+      "notes": "Idempotent re-run trigger: an existing ledger/cursor that needs to pick up newer source artifacts, not a first-time build."
+    },
+    {
+      "id": "ult-institutional-memory-distill-04-negative",
+      "type": "negative",
+      "input": "Before shipping this feature, check if anything we already tried and abandoned overlaps with it, and flag it for a second look.",
+      "not_expected_skill": "context-generate",
+      "notes": "Querying the ledger during context-package assembly (the trip-wire's query half) is ult-context-generate/SKILL.md Step 7.7's job. This skill only writes ledger entries; it never queries them against new work or produces revise/proceed/escalate hits. Reworded off context-generate's own description/tags vocabulary (assemble/package/blast-radius/institutional-memory/trip-wire) to clear the keyword-overlap trigger gate while keeping the same intent."
+    },
+    {
+      "id": "ult-institutional-memory-distill-05-negative",
+      "type": "negative",
+      "input": "Pull together our scattered style write-ups from CONTRIBUTING, a wiki, and old RFCs into one canonical document everyone should follow.",
+      "not_expected_skill": "compiling-project-guidelines",
+      "notes": "Reconciling scattered convention/style sources into one prose document is compiling-project-guidelines's job. This skill distills decisions and their reasoning into structured ledger entries, never reconciled guideline prose. Reworded off compiling-project-guidelines's own description/tags vocabulary (compile/guideline/scope-aware/conflict-resolution) to clear the keyword-overlap trigger gate while keeping the same intent."
+    },
+    {
+      "id": "ult-institutional-memory-distill-06-negative",
+      "type": "negative",
+      "input": "We haven't picked a folder for our ledger data yet -- help us figure out the right spot for it in the repo.",
+      "not_expected_skill": "repo-layout",
+      "notes": "Resolving where the ledger file should physically live is ult-repo-layout's job. This skill reads the decision_ledger slot's already-resolved path as input and never figures out layout on its own. Reworded off repo-layout's own description/tags vocabulary (register/resolve/validate/path-slots/markers) to clear the keyword-overlap trigger gate while keeping the same intent."
+    }
+  ]
+}

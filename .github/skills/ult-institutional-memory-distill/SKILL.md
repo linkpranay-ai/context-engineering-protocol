@@ -1,6 +1,6 @@
 ---
-name: ult-institutional-memory-distill
-description: Distill decisions, reasoning, and rejected alternatives from PRs, design docs, and postmortems into the project's decision_ledger, so ult-context-generate's trip-wire can surface institutional memory before new work quietly repeats settled ground.
+name: institutional-memory-distill
+description: Distill decisions, reasoning, and rejected alternatives from PRs, design docs, and postmortems into the project's decision_ledger, so ult-context-generate's trip-wire can surface institutional memory before new work quietly repeats settled ground. Do NOT use to query the ledger against new work or decide revise/proceed/escalate -- that's ult-context-generate/SKILL.md Step 7.7's job.
 namespace: ult
 version: 0.1.0
 origin: ground-up
@@ -26,7 +26,7 @@ root-cause writeup, and then it's gone. Nobody re-reads six-month-old PRs before
 so the same rejected path gets proposed again, argued again, and sometimes shipped again before
 someone remembers why it didn't work last time.
 
-This skill is the **distillation half** of trip-wire (`CEP-1.0-ROADMAP.md` §7): it reads a
+This skill is the **distillation half** of trip-wire: it reads a
 project's own PR history, design docs, and postmortems, and turns *decisions with reasoning* —
 not just decisions — into structured, queryable entries in the project's `decision_ledger`. The
 **query half** lives in `ult-context-generate/SKILL.md` Step 7.7, which checks every new context
@@ -209,8 +209,8 @@ terms someone would actually use when describing related work (`"kafka"`, `"mess
 `"load-testing"`), not paraphrased summaries or single mega-tags. Under-tagging silently reduces
 recall — err toward a few extra concrete tags over one abstract one.
 
-`--source-type` is restricted to `pr`, `design-doc`, `postmortem` (the three types §7 scopes this
-skill to). If a project's real source doesn't map cleanly onto one of these (a Slack thread, an
+`--source-type` is restricted to `pr`, `design-doc`, `postmortem` (the three types this skill is
+scoped to). If a project's real source doesn't map cleanly onto one of these (a Slack thread, an
 email decision), that is a real gap — don't force it into the nearest type; say so to the user and
 treat it as a scope question for a future revision of this skill, not something to paper over with
 a mislabeled `source_type`.
@@ -240,7 +240,7 @@ position. This is the same shape of summary `compiling-project-guidelines` gives
 
 ### Step 8 — Land the ledger diff via a review PR
 
-**The write gate (§7): ledger entries land via a dedicated review PR distinct from the source
+**The write gate: ledger entries land via a dedicated review PR distinct from the source
 PR's own review.** Do not commit ledger changes directly to a protected branch, and do not treat
 a source PR's existing approval as having also approved the ledger entry distilled from it — the
 two are reviewed separately because the ledger entry is a *new claim about why*, not just a record

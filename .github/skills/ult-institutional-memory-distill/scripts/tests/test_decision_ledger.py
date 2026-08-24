@@ -1,4 +1,4 @@
-"""Regression suite for decision_ledger.py (trip-wire, CEP-1.0-ROADMAP.md §7).
+"""Regression suite for decision_ledger.py (trip-wire).
 
 Stdlib unittest only -- no pytest dependency, so this stays vendorable along
 with decision_ledger.py itself. Run with:

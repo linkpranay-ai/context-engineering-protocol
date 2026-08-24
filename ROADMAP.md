@@ -371,10 +371,11 @@ before this item can be considered fully closed.
 comparison before deciding.** What-L1/How-L1 sources are documented today as "hand-dropped `.md`
 files" — there's no PDF ingestion step anywhere in this pipeline, even though the external
 standards this layer targets (3GPP, IETF RFCs, ISO, CMMI, IEEE) are almost always distributed as
-PDF, and typically multi-column and table-heavy. `ult-read-pdf` (this repo's existing PDF reader,
-a thin `pdfjs-dist` wrapper) does flat text-stream extraction only — no heading detection, no
-table reconstruction, no multi-column reading-order correction. That's a real problem here
-specifically: `md_index.py`'s `3gpp`/`rfc`/`ieee` profiles require the input to already carry real
+PDF, and typically multi-column and table-heavy. Neither candidate path below starts from an
+existing PDF reader in this repo — there isn't one. The lightest baseline, a thin wrapper around a
+library like `pdfjs-dist` (flat text-stream extraction only — no heading detection, no table
+reconstruction, no multi-column reading-order correction), would still need to be built first.
+That's a real problem here specifically: `md_index.py`'s `3gpp`/`rfc`/`ieee` profiles require the input to already carry real
 `#`/`##` heading markup, and its own density check exists because feeding it unmarked plaintext
 can silently produce near-zero real headings (calibrated against RFC 6733: ~1 heading for the
 whole document raw vs. ~1 per 43 lines once properly markdown-ified).
@@ -389,16 +390,18 @@ Two candidate paths, deliberately not chosen yet:
   reading-order correction, and optional OCR. Real cost: Docling's standard install pulls in
   `torch`, `torchvision`, `accelerate`, `huggingface-hub`, and `rapidocr` — a multi-GB ML stack
   with first-run model downloads from Hugging Face Hub, a different weight class from every other
-  dependency in this layer (`md_index.py` is stdlib-only by design; `ult-read-pdf` is a single
-  small npm package).
-- **(B) Lighter alternative: heading-reinsertion pass over existing extraction.** Reuse
-  `ult-read-pdf`'s flat-text output (already shipped, zero new dependency), then a one-time LLM
-  pass that proposes *only* heading markers, deterministically verified against the source text —
-  every inserted heading must appear verbatim in the extracted text before it's trusted, the same
-  "LLM proposes, deterministic gate verifies" discipline `docling-graph` itself uses for its
-  template-from-examples flow. Much narrower LLM surface (headings only, not full extraction) and
-  no new heavy dependency — but it does put an LLM step inside ingestion, where today's
-  What-L1/How-L1 mechanism is deliberately zero-LLM end-to-end.
+  dependency in this layer (`md_index.py` is stdlib-only by design; a `pdfjs-dist`-based extractor
+  would be a single small npm package by comparison).
+- **(B) Lighter alternative: heading-reinsertion pass over a thin flat-text extraction.** Build a
+  thin flat-text extraction wrapper (e.g. around `pdfjs-dist`, a single small npm package — no
+  heading detection, no table reconstruction, no multi-column reading-order correction), then a
+  one-time LLM pass that proposes *only* heading markers, deterministically verified against the
+  source text — every inserted heading must appear verbatim in the extracted text before it's
+  trusted, the same "LLM proposes, deterministic gate verifies" discipline `docling-graph` itself
+  uses for its template-from-examples flow. Much narrower LLM surface (headings only, not full
+  extraction) and a far lighter new dependency than (A) — but it does put an LLM step inside
+  ingestion, where today's What-L1/How-L1 mechanism is deliberately zero-LLM end-to-end, and unlike
+  (A) it still starts from a from-scratch extraction wrapper, not something already shipped here.
 
 **Before picking either path**: test both against the same real multi-column standards PDF (a
 3GPP spec or an IETF RFC) and compare the heading count and table fidelity each produces once fed

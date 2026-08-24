@@ -25,7 +25,7 @@ principle. In practice, adding that pointer to an *existing* skill library — c
 at a time, in a format that matches the library's own conventions — takes someone who has read
 `PROTOCOL.md` and the relevant contract(s) end to end. For a library with a dozen or more skills,
 that friction is real, and it sits squarely between CEP and "every retrofitted library becomes a
-live adoption story for free" (`CEP-1.0-ROADMAP.md` §13 entry 11).
+live adoption story for free."
 
 This skill inventories an existing skill library — any shape, seen or unseen — asks a human which
 skills should consume which contract(s), then drafts the minimal pointer insertion, previews every

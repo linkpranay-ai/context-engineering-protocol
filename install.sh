@@ -297,10 +297,9 @@ scaffold_context_config() {
 # scaffold_pointer: (re)writes starter_kit/project_guidelines/.pointer.md.
 # Idempotent and additive — creates the drop-zone directory if absent,
 # overwrites only the pointer file; any other files placed there are left
-# alone. Only the project_guidelines leaf is scaffolded: it's the only one
-# of the 5 documented starter-kit leaves actually read by a skill shipped in
-# this repo (compiling-project-guidelines); the other 4 have no shipped
-# library-source content to point at.
+# alone. project_guidelines is the only documented starter-kit drop-zone —
+# it's the one actually read by a skill shipped in this repo
+# (compiling-project-guidelines).
 scaffold_pointer() {
   local leaf_dir="$TARGET/starter_kit/project_guidelines"
   local dst="$leaf_dir/.pointer.md"
