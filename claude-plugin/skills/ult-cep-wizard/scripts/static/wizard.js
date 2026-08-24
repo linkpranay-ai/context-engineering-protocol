@@ -180,7 +180,29 @@
         return;
       }
       layerPaths.forEach(function (p) {
-        list.appendChild(el("li", { text: p.path }));
+        var group = el("li", { class: "box-path-group" });
+        group.appendChild(el("span", { class: "box-path-header", text: p.path }));
+
+        var files = el("ul", { class: "box-path-files" });
+        if (p.files.length === 0) {
+          // Distinct from the "On, nothing resolved yet." case above: this path
+          // *did* resolve, it just has no files under it yet - the exact
+          // "resolved but empty" state a first-time user needs to be able to
+          // tell apart from "nothing is wired up here at all."
+          files.appendChild(el("li", { class: "box-path-empty", text: "(empty)" }));
+        } else {
+          p.files.forEach(function (f) {
+            files.appendChild(el("li", { text: f }));
+          });
+          if (p.truncated) {
+            var remaining = p.total_file_count - p.files.length;
+            files.appendChild(
+              el("li", { class: "box-path-truncated", text: "+" + remaining + " more files" })
+            );
+          }
+        }
+        group.appendChild(files);
+        list.appendChild(group);
       });
     });
   }

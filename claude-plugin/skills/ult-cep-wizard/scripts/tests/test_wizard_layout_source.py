@@ -131,16 +131,17 @@ class TestReadSlots(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _make_valid_target_repo(root)
-            # writing-plans owns plans_output, but no marker for it exists and its
-            # owning skill isn't installed either - resolve_default still returns
-            # the pre-D21 documented default, matching validate_layout.py's own
+            # example-plan-writer owns plans_output (illustrative, not shipped
+            # in this repo), but no marker for it exists and its owning skill
+            # isn't installed either - resolve_default still returns the
+            # pre-D21 documented default, matching validate_layout.py's own
             # INFO-not-FAIL behavior for an unmarked, uninstalled-owner slot.
             source = wls.LayoutSource(root)
             slots = source.read_slots()
             # Only installed-owning-skill slots are surfaced at all (mirrors
             # validate_layout.py's own _owning_skill_installed filter) - plans_output's
-            # owning skill (writing-plans) isn't installed in this fixture, so it must
-            # not appear.
+            # owning skill (example-plan-writer) isn't installed in this fixture, so it
+            # must not appear.
             self.assertNotIn("plans_output", slots)
 
     def test_slot_read_is_fresh_not_cached(self):

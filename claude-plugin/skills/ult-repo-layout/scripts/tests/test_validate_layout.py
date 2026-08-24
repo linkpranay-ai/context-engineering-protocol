@@ -192,18 +192,18 @@ class TestResolveDefault(unittest.TestCase):
     # -- D21 §16.4 / Phase 3b (Gap-B new slots) --------------------------
 
     def test_plans_output_pre_d21_default_without_config(self):
-        self.assertEqual(vl.resolve_default("plans_output", {}), "docs/superpowers/plans/")
+        self.assertEqual(vl.resolve_default("plans_output", {}), "output_docs/plans/")
 
     def test_plans_output_workspace_root_relative_default(self):
         config = {"layout": {"workspace_root": "docs/"}}
         self.assertEqual(vl.resolve_default("plans_output", config), "docs/outputs/plans/")
 
     def test_brainstorm_output_pre_d21_default_without_config(self):
-        self.assertEqual(vl.resolve_default("brainstorm_output", {}), "docs/superpowers/specs/")
+        self.assertEqual(vl.resolve_default("brainstorm_output", {}), "output_docs/brainstorm/")
 
     def test_brainstorm_output_workspace_root_relative_default(self):
         config = {"layout": {"workspace_root": "docs/"}}
-        self.assertEqual(vl.resolve_default("brainstorm_output", config), "docs/outputs/specs/")
+        self.assertEqual(vl.resolve_default("brainstorm_output", config), "docs/outputs/brainstorm/")
 
     # -- D20 §15.11 / Phase 2 (compiled_guidelines, user_stories_output,
     # security_docs, security_report, project_plan_docs) -----------------
@@ -895,10 +895,10 @@ class TestValidate(unittest.TestCase):
             ok, report = vl.validate(tmp)
             self.assertTrue(ok)
             self.assertTrue(
-                any("plans_output" in line and "using default 'docs/superpowers/plans/'" in line for line in report)
+                any("plans_output" in line and "using default 'output_docs/plans/'" in line for line in report)
             )
             self.assertTrue(
-                any("brainstorm_output" in line and "using default 'docs/superpowers/specs/'" in line for line in report)
+                any("brainstorm_output" in line and "using default 'output_docs/brainstorm/'" in line for line in report)
             )
 
     def test_brainstorm_output_workspace_root_relative_default_used_in_info_message(self):
@@ -909,7 +909,7 @@ class TestValidate(unittest.TestCase):
             self.assertTrue(ok)
             self.assertTrue(
                 any(
-                    "brainstorm_output" in line and "using default 'docs/outputs/specs/'" in line
+                    "brainstorm_output" in line and "using default 'docs/outputs/brainstorm/'" in line
                     for line in report
                 )
             )
@@ -1055,9 +1055,9 @@ class TestValidate(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             for skill in (
-                "ult-context-generate", "writing-plans", "brainstorming",
+                "ult-context-generate", "example-plan-writer", "example-brainstorm-writer",
                 "compiling-project-guidelines", "example-consumer",
-                "sec-threat-model", "security-test-report", "pm-project-plan",
+                "example-threat-modeler", "example-report-writer", "example-project-planner",
                 "ult-institutional-memory-distill", "ult-autoscaffold-content",
             ):
                 (root / ".github" / "skills" / skill).mkdir(parents=True)

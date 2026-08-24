@@ -99,8 +99,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # §15.2 slot registry (Phase 1: context_packages; Phase 3b: + plans_output,
 # brainstorm_output; Phase 2: + compiled_guidelines, user_stories_output,
-# security_docs, security_report, project_plan_docs; trip-wire (CEP-1.0-ROADMAP.md
-# §7): + decision_ledger; D24 Phase B: + autoscaffold_content_state,
+# security_docs, security_report, project_plan_docs; trip-wire:
+# + decision_ledger; D24 Phase B: + autoscaffold_content_state,
 # autoscaffold_content_index)
 # ---------------------------------------------------------------------------
 
@@ -117,17 +117,19 @@ SLOT_REGISTRY = {
     },
     "plans_output": {
         "kind": "directory",
-        "default": "docs/superpowers/plans/",
+        "default": "output_docs/plans/",
         # D21 §16.4 (Gap-B, NEW slot - no pre-existing config-key fallback).
         "workspace_root_leaf": "outputs/plans/",
-        "owning_skill": "writing-plans",
+        # illustrative -- not shipped in this repo
+        "owning_skill": "example-plan-writer",
     },
     "brainstorm_output": {
         "kind": "directory",
-        "default": "docs/superpowers/specs/",
+        "default": "output_docs/brainstorm/",
         # D21 §16.4 (Gap-B, NEW slot - no pre-existing config-key fallback).
-        "workspace_root_leaf": "outputs/specs/",
-        "owning_skill": "brainstorming",
+        "workspace_root_leaf": "outputs/brainstorm/",
+        # illustrative -- not shipped in this repo
+        "owning_skill": "example-brainstorm-writer",
     },
     "compiled_guidelines": {
         "kind": "file",
@@ -147,24 +149,24 @@ SLOT_REGISTRY = {
         "kind": "directory",
         "default": "output_docs/security_docs/",
         "workspace_root_leaf": "outputs/security_docs/",
-        "owning_skill": "sec-threat-model",
+        "owning_skill": "example-threat-modeler",
     },
     "security_report": {
         "kind": "directory",
         "default": "output_docs/security_report/",
         "workspace_root_leaf": "outputs/security_report/",
-        "owning_skill": "security-test-report",
+        "owning_skill": "example-report-writer",
     },
     "project_plan_docs": {
         "kind": "directory",
         "default": "output_docs/project_plan_docs/",
         "workspace_root_leaf": "outputs/project_plan_docs/",
-        "owning_skill": "pm-project-plan",
+        "owning_skill": "example-project-planner",
     },
     "decision_ledger": {
         "kind": "file",
         "default": "starter_kit/decision_ledger/DECISION-LEDGER.json",
-        # trip-wire (CEP-1.0-ROADMAP.md §7) - a derived/regenerable artifact
+        # trip-wire - a derived/regenerable artifact
         # (entries only ever added via decision_ledger.py, never hand-edited),
         # same bucket-reassignment rationale as compiled_guidelines above.
         "workspace_root_leaf": "cache/decision-ledger/DECISION-LEDGER.json",

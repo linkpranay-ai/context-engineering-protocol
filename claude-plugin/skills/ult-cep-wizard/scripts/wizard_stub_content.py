@@ -11,17 +11,17 @@ Phase 0 one, and should not land here without the accompanying §18.2b write-pat
 security spec (see wizard_atomic_write.py's own docstring).
 
 §18.10 scopes this precisely: "`ult-scaffold-content` generates for the **empty**
-case only." §18.3/discover_layers.py's own `_has_content()` is the signal for
-"empty" - a directory that doesn't exist, or exists but contains no files (after the
-usual CEP-bucket/ignored-name exclusions) - genuinely different from "has no
-resolved path" (What-L2/How-L2 always resolve to *some* path, per
+case only." "Empty" means a directory that doesn't exist, or exists but contains no
+files (after the usual CEP-bucket/ignored-name exclusions) - genuinely different from
+"has no resolved path" (What-L2/How-L2 always resolve to *some* path, per
 wizard_layout_source.py's own docstring; a fresh repo still shows `docs/requirements/`
-as What's path even though that directory has nothing in it yet). This module
-duplicates a minimal version of that content-check locally rather than reaching into
-`discover_layers.py`'s underscore-prefixed internals through wizard_layout_source's
-already-imported module handle - same "each module owns its own copy, usable
-standalone" reasoning wizard_containment.py/wizard_tripwire.py's own docstrings give
-for their independent duplicated helpers.
+as What's path even though that directory has nothing in it yet). `_has_content()`
+below delegates to `wizard_box_files.list_files()` for that check rather than keeping
+its own walk - `wizard_boxes.py` needs the exact same "what real files are under this
+path" answer to populate each `BoxPath`'s file listing, so this is one real signal
+shared by two callers, not two small independent helpers that happen to look alike
+(contrast wizard_containment.py/wizard_tripwire.py's own docstrings, which duplicate
+genuinely standalone helpers on purpose).
 
 §18.6 designs two handoff modes for generative steps, but only one is meaningfully
 previewable in Phase 0: **agent-writes-in-place** (the coding agent, which already
@@ -46,19 +46,13 @@ docstring gives for treating it as read-only-derived).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-# Mirrors discover_layers.py's own SCAN_IGNORED_DIR_NAMES-class pruning closely enough
-# for a "does this look empty" preview signal - not required to be bit-for-bit
-# identical, since a false "not empty" here only means the wizard skips offering a
-# card that would have been slightly premature, never a correctness/safety issue
-# (contrast wizard_containment.py, where an under-inclusive check would be a real
-# security gap).
-_IGNORED_NAMES = frozenset(
-    {".git", "__pycache__", ".DS_Store", "Thumbs.db", ".gitkeep"}
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import wizard_box_files as wbf  # noqa: E402
 
 
 @dataclass
@@ -75,15 +69,9 @@ class StubCard:
 
 
 def _has_content(repo_root: Path, rel_path: str) -> bool:
-    """Local, minimal existence+non-empty check - see module docstring on why this
-    is duplicated rather than imported."""
-    target = repo_root / rel_path.rstrip("/")
-    if not target.is_dir():
-        return False
-    for entry in target.rglob("*"):
-        if entry.is_file() and entry.name not in _IGNORED_NAMES:
-            return True
-    return False
+    """Delegates to `wizard_box_files.list_files()` - see module docstring on why
+    this is no longer a locally-duplicated walk."""
+    return wbf.list_files(repo_root, rel_path).total_count > 0
 
 
 def _what_how_prompt(box_title: str, expected_path: str) -> str:
@@ -101,8 +89,10 @@ def _what_how_prompt(box_title: str, expected_path: str) -> str:
     )
     return (
         f"Run the `ult-autoscaffold-content` skill against this repo. It writes "
-        f"the {content_kind} to `{expected_path}` itself - no separate prompt to "
-        f"write."
+        f"the {content_kind} to `{expected_path}` itself - coding-standards, "
+        f"testing-guidelines, interface-boundary docs, tiered module depth, "
+        f"whatever the skill's own scan decides this repo needs - no separate "
+        f"prompt to write."
     )
 
 

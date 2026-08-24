@@ -1,23 +1,19 @@
-# Starter-kit drop-zones and `.pointer.md` (D21 §16.6, Phase 3d)
+# Starter-kit drop-zones and `.pointer.md` (D21 §16.6)
 
-Five `inputs/`-bucket drop-zones (§16.3/§16.4's starter-kit row) hold
-project-owned, human-curated material that one or more skills read but never
-regenerate:
+One `inputs/`-bucket drop-zone (§16.3/§16.4's starter-kit row) holds
+project-owned, human-curated material that a consuming skill reads but never
+regenerates:
 
 | Leaf | Library source | Read by |
 |---|---|---|
-| `threat_modeling` | `starter_kits/security/threat_modeling/` | `example-threat-modeler` *(illustrative — not shipped in this repo)* |
-| `secure_coding_guidelines` | `starter_kits/security/secure_coding_guidelines/` | *(none — reference material only)* |
-| `security_test_data` | `starter_kits/security/security_test_data/` | `example-report-writer` *(illustrative — not shipped in this repo)* |
-| `project_plan` | `starter_kits/manager/project_plan/` | `example-project-planner` *(illustrative — not shipped in this repo)* |
 | `project_guidelines` | `starter_kits/project_guidelines/` | `compiling-project-guidelines` |
 
-`context_engineering` (a former sixth entry) is **not** in this list — its
+`context_engineering` (a former second entry) is **not** in this list — its
 only role was a manual `context-config.yaml.template` copy-to-root, fully
 subsumed by "Generated `context-config.yaml`" in `SKILL.md`. It is no longer
 scaffolded into projects at all.
 
-Each drop-zone's directory contains a **regenerated** `.pointer.md` — never
+The drop-zone's directory contains a **regenerated** `.pointer.md` — never
 copied, never hand-edited — alongside whatever files the project drops there:
 
 ```markdown
@@ -32,22 +28,23 @@ and by `/ult-repo-layout init`/`reconcile` — do not edit it directly. Place
 your own files alongside it; they are never touched.
 ```
 
-**Location** (no marker, no `project_layout` entry — these are scaffold
-files, not path-slots):
+**Location** (no marker, no `project_layout` entry — this is a scaffold
+file, not a path-slot):
 
 - **`layout.workspace_root` unset (pre-D21 default, today's behavior)** —
-  `starter_kit/<leaf>/.pointer.md`, flat, matching the path every consuming
-  skill already reads (e.g. `starter_kit/threat_modeling/`).
+  `starter_kit/project_guidelines/.pointer.md`, flat, matching the path the
+  consuming skill already reads.
 - **`layout.workspace_root` set** —
-  `{workspace_root}/inputs/starter-kit/<leaf>/.pointer.md` (§16.3's `inputs/`
-  bucket). Re-rooting a drop-zone this way is a human-actioned content move
-  (§16.6) — `init`/`reconcile` only ever regenerate the pointer file at
-  whichever location currently holds the drop-zone's content, they never move
-  files themselves.
+  `{workspace_root}/inputs/starter-kit/project_guidelines/.pointer.md`
+  (§16.3's `inputs/` bucket). Re-rooting the drop-zone this way is a
+  human-actioned content move (§16.6) — `init`/`reconcile` only ever
+  regenerate the pointer file at whichever location currently holds the
+  drop-zone's content, they never move files themselves.
 
 **Regeneration is idempotent and additive-only**: `install.ps1`/`install.sh
--InitProject` creates `starter_kit/<leaf>/` (if absent) and writes/overwrites
-just `.pointer.md` inside it — any other files already there are left alone.
-`/ult-repo-layout init`/`reconcile` do the same at the drop-zone's current
-location. Consuming skills' content-discovery globs skip `.pointer.md` — see
-each skill's `SKILL.md` for the exact exclusion.
+-InitProject` creates `starter_kit/project_guidelines/` (if absent) and
+writes/overwrites just `.pointer.md` inside it — any other files already
+there are left alone. `/ult-repo-layout init`/`reconcile` do the same at the
+drop-zone's current location. `compiling-project-guidelines`'s
+content-discovery glob skips `.pointer.md` — see its `SKILL.md` for the exact
+exclusion.

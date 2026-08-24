@@ -1,14 +1,14 @@
 ---
 name: cep-wizard
-description: Launch a local, localhost-only browser wizard with two journeys — layout onboarding for a project with ult-repo-layout installed (initialized or not): guides an uninitialized or not-yet-discovered repo through Run Discover, then shows resolved layer/slot state through four labeled boxes and a directory picker, and lets you resolve pending layout decisions (confirm/skip/disable/pick-a-directory) and Apply them into context-config.yaml via ult-repo-layout's own confirm step; and retrofit — walks an existing skill library through ult-cep-retrofit's inventory/classify/draft/apply flow, with an editable per-file diff preview and batch Apply, never writing without that preview. Do NOT use for headless/CI-only layout validation — use ult-repo-layout's discover/confirm-layers/--validate directly.
+description: "Launch a local, localhost-only browser wizard with two journeys — layout onboarding for a project with ult-repo-layout installed, initialized or not — guides an uninitialized or not-yet-discovered repo through Run Discover, then shows resolved layer/slot state through four labeled boxes and a directory picker, and lets you resolve pending layout decisions (confirm/skip/disable/pick-a-directory) and Apply them into context-config.yaml via ult-repo-layout's own confirm step; and retrofit — walks an existing skill library through ult-cep-retrofit's inventory/classify/draft/apply flow, with an editable per-file diff preview and batch Apply, never writing without that preview. Do NOT use for headless/CI-only layout validation — use ult-repo-layout's discover/confirm-layers/--validate directly."
 namespace: ult
-version: 0.3.0
+version: 0.4.0
 origin: ground-up
 author: Pranay Mishra
 maintainer: Pranay Mishra
 adapted_from: ~
 upstream_version: ~
-released: 2026-08-15
+released: 2026-08-24
 tags: [utility, onboarding, browser, wizard, project-layout]
 bundle: utilities
 tier: read

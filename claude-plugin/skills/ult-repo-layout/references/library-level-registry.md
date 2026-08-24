@@ -18,15 +18,14 @@ structured YAML. Three top-level sections under `schema_version: 1`:
   `how_dimension_path`, `how_l2_cache_path`, `graphify_graph_path`,
   `index_paths`), each `project_layout_slot: false`, with `config_key`,
   `kind`, `pre_d21_default`, and `workspace_root_leaf`/`workspace_root_default`.
-- **`starter_kit_dropzones:`** — the five drop-zones from
-  `references/starter-kit-dropzones.md` (`threat_modeling`,
-  `secure_coding_guidelines`, `security_test_data`, `project_plan`,
-  `project_guidelines`), each `project_layout_slot: false`,
-  `default_bucket: inputs`, with `consumers` where applicable.
+- **`starter_kit_dropzones:`** — the one drop-zone from
+  `references/starter-kit-dropzones.md` (`project_guidelines`), each entry
+  `project_layout_slot: false`, `default_bucket: inputs`, with `consumers`
+  where applicable.
 
 Consumed by:
 
-1. `validate_layout.py`'s registry-consistency check (#10, `SKILL.md`) — keeps
+1. `validate_layout.py`'s registry-consistency check (#12, `SKILL.md`) — keeps
    `SLOT_REGISTRY` (code) and `layout-slots-registry.yaml` (registry) in sync;
    `FAIL` on drift.
 2. `validate_path_conformance.py` (below) — the 7th path-dependency-review
@@ -43,7 +42,7 @@ suite simply skips the corresponding check/finding.
 Deterministic, stdlib-only, sibling to `validate_layout.py` (whose
 `load_yaml_file()` it reuses to read `layout-slots-registry.yaml`). Backs a
 skill-contribution review's 7th dimension, "Path-dependency conformance" —
-**entirely non-blocking/informational** (resolves H3), never exits non-zero
+**entirely non-blocking/informational**, never exits non-zero
 on findings:
 
 ```

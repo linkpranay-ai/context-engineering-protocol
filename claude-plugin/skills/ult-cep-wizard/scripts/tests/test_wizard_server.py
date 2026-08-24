@@ -347,6 +347,13 @@ class TestApiStatusMinimalRepo(WizardServerTestCase):
         self.assertEqual(
             [p["path"] for p in payload["what"]["paths"]], ["docs/requirements/"]
         )
+        # docs/requirements/ resolves but has never been created on disk in this
+        # fixture (see the stub-card comment below) - the file-listing fields ride
+        # along on the same BoxPath and must reflect that: resolved, zero files.
+        what_l2 = payload["what"]["paths"][0]
+        self.assertEqual(what_l2["files"], [])
+        self.assertEqual(what_l2["total_file_count"], 0)
+        self.assertFalse(what_l2["truncated"])
 
         self.assertFalse(payload["guidelines"]["available"])
         self.assertFalse(payload["tripwire"]["available"])

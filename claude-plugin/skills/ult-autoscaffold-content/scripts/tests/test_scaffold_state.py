@@ -22,13 +22,12 @@ def _write(path, content=""):
 
 
 # A synthetic graph.json fixture in the real, empirically-verified graphify
-# 0.9.11 schema (see D24 Phase B session notes -- top-level keys
-# input_tokens/output_tokens/nodes/links; node id/label/file_type/
-# source_file/source_location/_origin; link source/target/relation/
-# context/confidence/source_file/source_location/weight). Mirrors a
-# 3-module repo: core/ depends heavily on utils/ (many distinct call/import
-# edges from several core symbols), legacy/ has exactly one caller (core/),
-# and orphan/ has none.
+# 0.9.11 schema -- top-level keys input_tokens/output_tokens/nodes/links;
+# node id/label/file_type/source_file/source_location/_origin; link
+# source/target/relation/context/confidence/source_file/source_location/
+# weight. Mirrors a 3-module repo: core/ depends heavily on utils/ (many
+# distinct call/import edges from several core symbols), legacy/ has
+# exactly one caller (core/), and orphan/ has none.
 def _fixture_graph():
     def node(id_, source_file):
         return {"id": id_, "label": id_, "file_type": "code",
@@ -124,6 +123,82 @@ class FilesystemScanHelperTests(unittest.TestCase):
             self.assertEqual(found, ["main.py"])
 
 
+def _make_dir_with_files(root, name, n):
+    for i in range(n):
+        _write(root / name / "f{}.py".format(i), "x")
+
+
+class ProbeSizeTests(unittest.TestCase):
+    # SKILL.md Step 4's small/large repo-size gate. Thresholds under test:
+    # MIN_FILES_FOR_SIZE_GATE=5, SMALL_REPO_MAX_MODULES=2,
+    # LARGE_REPO_MIN_MODULES=8.
+
+    def test_no_directories_classifies_small(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = ss.probe_size(Path(d))
+            self.assertEqual(result["count"], 0)
+            self.assertEqual(result["classification"], "small")
+            self.assertEqual(result["substantive_modules"], [])
+
+    def test_directory_below_min_files_does_not_count(self):
+        # A conventionally near-empty structural dir (docs/ with one file)
+        # must not inflate the count -- this is the whole point of
+        # MIN_FILES_FOR_SIZE_GATE.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _make_dir_with_files(root, "docs", ss.MIN_FILES_FOR_SIZE_GATE - 1)
+            result = ss.probe_size(root)
+            self.assertEqual(result["count"], 0)
+            self.assertEqual(result["classification"], "small")
+
+    def test_small_repo_at_upper_boundary(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for i in range(ss.SMALL_REPO_MAX_MODULES):
+                _make_dir_with_files(root, "mod{}".format(i), ss.MIN_FILES_FOR_SIZE_GATE)
+            result = ss.probe_size(root)
+            self.assertEqual(result["count"], ss.SMALL_REPO_MAX_MODULES)
+            self.assertEqual(result["classification"], "small")
+
+    def test_ambiguous_band_just_above_small(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for i in range(ss.SMALL_REPO_MAX_MODULES + 1):
+                _make_dir_with_files(root, "mod{}".format(i), ss.MIN_FILES_FOR_SIZE_GATE)
+            result = ss.probe_size(root)
+            self.assertEqual(result["classification"], "ambiguous")
+
+    def test_ambiguous_band_just_below_large(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for i in range(ss.LARGE_REPO_MIN_MODULES - 1):
+                _make_dir_with_files(root, "mod{}".format(i), ss.MIN_FILES_FOR_SIZE_GATE)
+            result = ss.probe_size(root)
+            self.assertEqual(result["classification"], "ambiguous")
+
+    def test_large_repo_at_lower_boundary(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for i in range(ss.LARGE_REPO_MIN_MODULES):
+                _make_dir_with_files(root, "mod{}".format(i), ss.MIN_FILES_FOR_SIZE_GATE)
+            result = ss.probe_size(root)
+            self.assertEqual(result["count"], ss.LARGE_REPO_MIN_MODULES)
+            self.assertEqual(result["classification"], "large")
+
+    def test_ignored_and_cep_bucket_dirs_never_count_regardless_of_size(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            # node_modules alone has enough files to swing "large" on its
+            # own if it weren't pruned -- same SCAN_IGNORED_DIR_NAMES/
+            # CEP_BUCKET_DIR_NAMES pruning _top_level_candidate_dirs() uses.
+            for i in range(ss.LARGE_REPO_MIN_MODULES):
+                _make_dir_with_files(root, "node_modules/pkg{}".format(i), ss.MIN_FILES_FOR_SIZE_GATE)
+            _make_dir_with_files(root, "cache", ss.MIN_FILES_FOR_SIZE_GATE)
+            result = ss.probe_size(root)
+            self.assertEqual(result["count"], 0)
+            self.assertEqual(result["classification"], "small")
+
+
 class GeneratedDetectionTests(unittest.TestCase):
     def test_generated_dir_name_matches(self):
         self.assertTrue(ss.GENERATED_DIR_NAME_RE.match("generated"))
@@ -175,6 +250,112 @@ class GraphInDegreeTests(unittest.TestCase):
         # "contains" (core_main -> core_main_run) is structural, same
         # module anyway -- must not appear as a self-referential in-degree.
         self.assertNotIn("core", degrees)
+
+
+class GraphCrossingEdgesTests(unittest.TestCase):
+    """_graph_crossing_edges() / _interface_id() -- the interface-boundary
+    counterpart to GraphInDegreeTests above, built from the same
+    _fixture_graph() so the two stay consistent with each other."""
+
+    def test_crossing_edges_deduplicated_and_weighted(self):
+        edges = ss._graph_crossing_edges(_fixture_graph())
+        by_pair = {(e["module_a"], e["module_b"]): e for e in edges}
+        # core/utils: 4 qualifying edges (imports_from, calls x2, imports).
+        self.assertIn(("core", "utils"), by_pair)
+        self.assertEqual(by_pair[("core", "utils")]["weight"], 4)
+        self.assertEqual(
+            by_pair[("core", "utils")]["relations"], ["calls", "imports", "imports_from"]
+        )
+        # core/legacy: 1 qualifying edge.
+        self.assertIn(("core", "legacy"), by_pair)
+        self.assertEqual(by_pair[("core", "legacy")]["weight"], 1)
+        # orphan/ has no crossing edges at all.
+        self.assertNotIn(("core", "orphan"), by_pair)
+        self.assertNotIn(("orphan", "core"), by_pair)
+
+    def test_crossing_edges_excludes_structural_and_same_module_edges(self):
+        edges = ss._graph_crossing_edges(_fixture_graph())
+        pairs = {(e["module_a"], e["module_b"]) for e in edges}
+        # "contains" (core_main -> core_main_run) and the same-module
+        # utils_helpers_add -> utils_helpers_mul "calls" edge must not
+        # produce any pair at all -- same exclusion as in-degree's.
+        for pair in pairs:
+            self.assertNotEqual(pair[0], pair[1])
+
+    def test_crossing_edges_pair_order_independent_of_edge_direction(self):
+        # A reversed graph (utils -> core instead of core -> utils) must
+        # still produce the exact same sorted (module_a, module_b) pair --
+        # an interface boundary is the pair, not the direction.
+        graph = {
+            "input_tokens": 0, "output_tokens": 0,
+            "nodes": [
+                {"id": "u", "label": "u", "file_type": "code", "source_file": "utils/u.py",
+                 "source_location": "L1", "_origin": "ast"},
+                {"id": "c", "label": "c", "file_type": "code", "source_file": "core/c.py",
+                 "source_location": "L1", "_origin": "ast"},
+            ],
+            "links": [
+                {"source": "u", "target": "c", "relation": "calls", "context": "calls",
+                 "confidence": "EXTRACTED", "source_file": "x", "source_location": "L1",
+                 "weight": 1.0},
+            ],
+        }
+        edges = ss._graph_crossing_edges(graph)
+        self.assertEqual(len(edges), 1)
+        self.assertEqual((edges[0]["module_a"], edges[0]["module_b"]), ("core", "utils"))
+
+    def test_interface_id_joins_sorted_pair(self):
+        self.assertEqual(ss._interface_id("core", "utils"), "core--utils")
+
+
+class MergeInterfacesTests(unittest.TestCase):
+    def test_new_pairs_added_as_pending(self):
+        merged = ss._merge_interfaces([], [
+            {"module_a": "core", "module_b": "utils", "relations": ["calls"], "weight": 2},
+        ])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["id"], "core--utils")
+        self.assertEqual(merged[0]["status"], "pending")
+        self.assertEqual(merged[0]["weight"], 2)
+
+    def test_settled_pair_never_overwritten(self):
+        existing = [{
+            "id": "core--utils", "module_a": "core", "module_b": "utils",
+            "relations": ["calls"], "weight": 2, "status": "generated",
+            "output_path": "docs/interfaces/core-to-utils.md",
+            "generated_at": "2026-08-12T00:00:00Z", "defer_reason": None,
+        }]
+        # Fresh scan reports a different weight -- must not touch the
+        # already-settled entry.
+        merged = ss._merge_interfaces(existing, [
+            {"module_a": "core", "module_b": "utils", "relations": ["calls", "imports"], "weight": 9},
+        ])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["status"], "generated")
+        self.assertEqual(merged[0]["weight"], 2)
+
+    def test_pending_pair_refreshed_with_latest_weight(self):
+        existing = [{
+            "id": "core--utils", "module_a": "core", "module_b": "utils",
+            "relations": ["calls"], "weight": 2, "status": "pending",
+            "output_path": None, "generated_at": None, "defer_reason": None,
+        }]
+        merged = ss._merge_interfaces(existing, [
+            {"module_a": "core", "module_b": "utils", "relations": ["calls", "imports"], "weight": 5},
+        ])
+        self.assertEqual(merged[0]["weight"], 5)
+        self.assertEqual(merged[0]["relations"], ["calls", "imports"])
+
+    def test_pair_no_longer_present_keeps_history(self):
+        existing = [{
+            "id": "legacy--orphan", "module_a": "legacy", "module_b": "orphan",
+            "relations": ["calls"], "weight": 1, "status": "deferred",
+            "output_path": None, "generated_at": None, "defer_reason": "endpoint not generated yet",
+        }]
+        merged = ss._merge_interfaces(existing, [])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["id"], "legacy--orphan")
+        self.assertEqual(merged[0]["status"], "deferred")
 
 
 class GraphRepoRootAlignmentTests(unittest.TestCase):
@@ -413,6 +594,31 @@ class ScanTests(unittest.TestCase):
             # Non-fatal: tiering still ran and state was still written.
             self.assertTrue(len(state["modules"]) > 0)
 
+    def test_scan_graphify_mode_populates_interfaces(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            graph_path = Path(d) / "graph.json"
+            import json
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)
+
+            by_id = {i["id"]: i for i in state["interfaces"]}
+            self.assertIn("core--utils", by_id)
+            self.assertIn("core--legacy", by_id)
+            self.assertEqual(by_id["core--utils"]["status"], "pending")
+
+    def test_scan_heuristic_mode_leaves_interfaces_untouched(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            state["interfaces"] = [{"id": "prior--entry", "status": "pending"}]
+            ss.scan(state, root, "heuristic")
+            self.assertEqual(state["interfaces"], [{"id": "prior--entry", "status": "pending"}])
+
 
 class MarkGeneratedSkippedTests(unittest.TestCase):
     def _state_with_pending_module(self):
@@ -447,6 +653,100 @@ class MarkGeneratedSkippedTests(unittest.TestCase):
         state = ss.empty_state()
         with self.assertRaises(ValueError):
             ss.mark_generated(state, "does-not-exist/", "x")
+
+
+class RepoDocStateTests(unittest.TestCase):
+    def test_empty_state_has_both_kinds_pending(self):
+        state = ss.empty_state()
+        self.assertEqual(state["repo_docs"]["coding_standards"]["status"], "pending")
+        self.assertEqual(state["repo_docs"]["testing_guidelines"]["status"], "pending")
+
+    def test_mark_repo_doc_generated_sets_fields(self):
+        state = ss.empty_state()
+        doc = ss.mark_repo_doc_generated(state, "coding_standards", "org/CODING-STANDARDS.md")
+        self.assertEqual(doc["status"], "generated")
+        self.assertEqual(doc["output_path"], "org/CODING-STANDARDS.md")
+        self.assertIsNotNone(doc["generated_at"])
+
+    def test_mark_repo_doc_generated_refuses_if_not_pending(self):
+        state = ss.empty_state()
+        ss.mark_repo_doc_generated(state, "coding_standards", "org/CODING-STANDARDS.md")
+        with self.assertRaises(ValueError):
+            ss.mark_repo_doc_generated(state, "coding_standards", "org/CODING-STANDARDS.md")
+
+    def test_mark_repo_doc_skipped_sets_reason(self):
+        state = ss.empty_state()
+        doc = ss.mark_repo_doc_skipped(state, "testing_guidelines", "already covered elsewhere")
+        self.assertEqual(doc["status"], "skipped")
+        self.assertEqual(doc["skip_reason"], "already covered elsewhere")
+
+    def test_unknown_repo_doc_kind_raises(self):
+        state = ss.empty_state()
+        with self.assertRaises(ValueError):
+            ss.mark_repo_doc_generated(state, "not-a-real-kind", "x")
+
+    def test_load_state_backfills_repo_docs_on_older_schema(self):
+        state = {"schema_version": 1, "repo_scan": {}, "modules": []}
+        filled = ss._ensure_repo_docs(state.get("repo_docs"))
+        self.assertIn("coding_standards", filled)
+        self.assertIn("testing_guidelines", filled)
+
+
+class InterfaceDocStateTests(unittest.TestCase):
+    def _state_with_interfaces(self):
+        state = ss.empty_state()
+        state["modules"] = [
+            {"id": "core/", "tier": 1, "in_degree": 12, "file_count": 4,
+             "basis": "graph:in-degree", "status": "generated",
+             "generated_at": "now", "output_path": "org/core/CONTEXT.md", "skip_reason": None},
+            {"id": "utils/", "tier": 2, "in_degree": 1, "file_count": 2,
+             "basis": "graph:in-degree", "status": "pending",
+             "generated_at": None, "output_path": None, "skip_reason": None},
+        ]
+        state["interfaces"] = [
+            {"id": "core--utils", "module_a": "core", "module_b": "utils",
+             "relations": ["calls"], "weight": 4, "status": "pending",
+             "output_path": None, "generated_at": None, "defer_reason": None},
+        ]
+        return state
+
+    def test_mark_interface_generated_sets_fields(self):
+        state = self._state_with_interfaces()
+        interface = ss.mark_interface_generated(state, "core--utils", "org/interfaces/core-to-utils.md")
+        self.assertEqual(interface["status"], "generated")
+        self.assertEqual(interface["output_path"], "org/interfaces/core-to-utils.md")
+        self.assertIsNotNone(interface["generated_at"])
+
+    def test_mark_interface_generated_refuses_if_not_pending(self):
+        state = self._state_with_interfaces()
+        ss.mark_interface_generated(state, "core--utils", "org/interfaces/core-to-utils.md")
+        with self.assertRaises(ValueError):
+            ss.mark_interface_generated(state, "core--utils", "org/interfaces/core-to-utils.md")
+
+    def test_mark_interface_deferred_sets_reason(self):
+        state = self._state_with_interfaces()
+        interface = ss.mark_interface_deferred(state, "core--utils", "utils/ not yet generated this run")
+        self.assertEqual(interface["status"], "deferred")
+        self.assertEqual(interface["defer_reason"], "utils/ not yet generated this run")
+
+    def test_mark_unknown_interface_raises(self):
+        state = ss.empty_state()
+        with self.assertRaises(ValueError):
+            ss.mark_interface_generated(state, "does-not-exist--either", "x")
+
+    def test_list_interfaces_eligible_only_requires_both_endpoints_generated(self):
+        state = self._state_with_interfaces()
+        # utils/ is still "pending" (not generated) -- core--utils must not
+        # be eligible yet.
+        self.assertEqual(ss.list_interfaces(state, eligible_only=True), [])
+
+        ss.mark_generated(state, "utils/", "org/utils/CONTEXT.md")
+        eligible = ss.list_interfaces(state, eligible_only=True)
+        self.assertEqual([i["id"] for i in eligible], ["core--utils"])
+
+    def test_list_interfaces_without_filter_returns_everything(self):
+        state = self._state_with_interfaces()
+        self.assertEqual(len(ss.list_interfaces(state)), 1)
 
 
 class RenderIndexTests(unittest.TestCase):
@@ -492,6 +792,38 @@ class RenderIndexTests(unittest.TestCase):
         self.assertIn("**WARNING:**", text)
         self.assertIn("only 20% of on-disk modules matched the graph", text)
 
+    def test_render_index_repo_docs_section_reports_each_kind(self):
+        state = ss.empty_state()
+        ss.mark_repo_doc_generated(state, "coding_standards", "org/CODING-STANDARDS.md")
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("## Repo-wide docs", text)
+        self.assertIn("Coding Standards", text)
+        self.assertIn("**generated** -> `org/CODING-STANDARDS.md`", text)
+        self.assertIn("Testing Guidelines", text)
+        self.assertIn("**pending**", text)
+
+    def test_render_index_interfaces_section_empty_placeholder(self):
+        state = ss.empty_state()
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("## Interface boundaries", text)
+        self.assertIn("_none", text)
+
+    def test_render_index_interfaces_section_lists_pairs_and_progress(self):
+        state = ss.empty_state()
+        state["interfaces"] = [
+            {"id": "core--utils", "module_a": "core", "module_b": "utils",
+             "relations": ["calls"], "weight": 4, "status": "generated",
+             "output_path": "org/interfaces/core-to-utils.md", "generated_at": "now",
+             "defer_reason": None},
+            {"id": "core--legacy", "module_a": "core", "module_b": "legacy",
+             "relations": ["imports_from"], "weight": 1, "status": "pending",
+             "output_path": None, "generated_at": None, "defer_reason": None},
+        ]
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("`core` <-> `utils`", text)
+        self.assertIn("org/interfaces/core-to-utils.md", text)
+        self.assertIn("1 generated, 1 pending, 0 deferred (2 interfaces total)", text)
+
 
 class SummarizeTests(unittest.TestCase):
     def test_summarize_counts_by_tier_and_status(self):
@@ -508,6 +840,19 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(summary["pending"], 2)
         self.assertEqual(summary["skipped"], 1)
         self.assertEqual(summary["by_tier"]["1"], {"pending": 1, "generated": 1, "skipped": 0})
+
+    def test_summarize_includes_repo_docs_and_interfaces(self):
+        state = ss.empty_state()
+        ss.mark_repo_doc_generated(state, "coding_standards", "org/CODING-STANDARDS.md")
+        state["interfaces"] = [
+            {"id": "core--utils", "module_a": "core", "module_b": "utils",
+             "relations": ["calls"], "weight": 4, "status": "pending",
+             "output_path": None, "generated_at": None, "defer_reason": None},
+        ]
+        summary = ss.summarize(state)
+        self.assertEqual(summary["repo_docs"]["coding_standards"], "generated")
+        self.assertEqual(summary["repo_docs"]["testing_guidelines"], "pending")
+        self.assertEqual(summary["interfaces"], {"total": 1, "generated": 0, "pending": 1, "deferred": 0})
 
 
 if __name__ == "__main__":

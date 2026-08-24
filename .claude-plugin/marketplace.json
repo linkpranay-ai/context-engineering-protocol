@@ -1,0 +1,15 @@
+{
+  "name": "context-engineering-protocol",
+  "metadata": {
+    "description": "Source-cited, human-approved context packages (code graph + requirements + conventions) for AI coding agents -- assembled before a generation task runs, not guessed at afterward."
+  },
+  "owner": {
+    "name": "Pranay Mishra"
+  },
+  "plugins": [
+    {
+      "name": "context-engineering-protocol",
+      "source": "./claude-plugin"
+    }
+  ]
+}

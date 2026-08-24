@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """cep_retrofit.py - deterministic helpers for the ult-cep-retrofit metaskill.
 
-CEP-retrofit metaskill (CEP-1.0-ROADMAP.md 13 entry 11; design reviewed via one
-fresh-context adversarial pass, 2026-08-05): points at an existing skill library,
+CEP-retrofit metaskill (design reviewed via one fresh-context adversarial
+pass, 2026-08-05): points at an existing skill library,
 inventories it generically, lets a human confirm which skills get retrofitted with
 which CONSUMING-*.md pointer(s), then drafts -- never silently writes -- the
 insertion. This script owns only the deterministic, mechanical pieces: inventory,

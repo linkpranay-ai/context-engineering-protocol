@@ -1,6 +1,6 @@
 ﻿---
-name: ult-institutional-memory-distill
-description: "Distill decisions, reasoning, and rejected alternatives from PRs, design docs, and postmortems into the project's decision_ledger, so ult-context-generate's trip-wire can surface institutional memory before new work quietly repeats settled ground."
+name: institutional-memory-distill
+description: "Distill decisions, reasoning, and rejected alternatives from PRs, design docs, and postmortems into the project's decision_ledger, so ult-context-generate's trip-wire can surface institutional memory before new work quietly repeats settled ground. Do NOT use to query the ledger against new work or decide revise/proceed/escalate -- that's ult-context-generate/SKILL.md Step 7.7's job."
 namespace: ult
 version: 0.1.0
 origin: ground-up

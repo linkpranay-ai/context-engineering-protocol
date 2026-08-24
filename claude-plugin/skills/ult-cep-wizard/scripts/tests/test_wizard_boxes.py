@@ -182,5 +182,65 @@ class TestToJsonDict(unittest.TestCase):
             self.assertIn("available", decoded["tripwire"])
 
 
+class TestBuildBoxesFileListings(unittest.TestCase):
+    """Coverage for BoxPath.files/total_file_count/truncated - the file-enumeration
+    surface added on top of the pre-existing path/source shape."""
+
+    def test_files_enumerated_under_resolved_l2_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_valid_target_repo(root)
+            _write(root / "docs" / "requirements" / "spec.md", "# spec\n")
+            _write(root / "docs" / "requirements" / "nested" / "detail.md", "# detail\n")
+            source = wls.LayoutSource(root)
+            view = wb.build_boxes(source)
+
+            what_l2 = next(p for p in view.what.paths if p.source == "L2")
+            self.assertEqual(what_l2.path, "docs/requirements/")
+            self.assertEqual(sorted(what_l2.files), sorted(["nested/detail.md", "spec.md"]))
+            self.assertEqual(what_l2.total_file_count, 2)
+            self.assertFalse(what_l2.truncated)
+
+    def test_resolved_path_with_no_files_is_empty_not_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_valid_target_repo(root)
+            (root / "docs" / "requirements").mkdir(parents=True)
+            source = wls.LayoutSource(root)
+            view = wb.build_boxes(source)
+
+            what_l2 = next(p for p in view.what.paths if p.source == "L2")
+            self.assertEqual(what_l2.files, [])
+            self.assertEqual(what_l2.total_file_count, 0)
+            self.assertFalse(what_l2.truncated)
+
+    def test_missing_directory_reports_empty_listing_not_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_valid_target_repo(root)
+            # docs/requirements/ is never created on disk in this fixture at all.
+            source = wls.LayoutSource(root)
+            view = wb.build_boxes(source)
+
+            what_l2 = next(p for p in view.what.paths if p.source == "L2")
+            self.assertEqual(what_l2.files, [])
+            self.assertEqual(what_l2.total_file_count, 0)
+            self.assertFalse(what_l2.truncated)
+
+    def test_truncation_reports_real_total_and_capped_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_valid_target_repo(root)
+            for i in range(45):
+                _write(root / "docs" / "requirements" / f"file-{i:02d}.md", "x")
+            source = wls.LayoutSource(root)
+            view = wb.build_boxes(source)
+
+            what_l2 = next(p for p in view.what.paths if p.source == "L2")
+            self.assertEqual(len(what_l2.files), 40)
+            self.assertEqual(what_l2.total_file_count, 45)
+            self.assertTrue(what_l2.truncated)
+
+
 if __name__ == "__main__":
     unittest.main()
