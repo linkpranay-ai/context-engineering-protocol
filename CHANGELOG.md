@@ -26,9 +26,66 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   `CONCEPT.md`, `PROTOCOL.md`, `GLOSSARY.md`, and the case studies. Available in `ult-cep-wizard`'s
   in-app docs viewer as a new "FAQ" nav entry (last in the nav order), filling a placeholder that
   was already reserved for it in the UI.
+- **`ult-onboarding-index`** (new skill). Discovers which CEP-managed content already exists in a
+  target repo (compiled guidelines, context packages, decision ledger, What/How layer docs) via
+  existence checks against `layout-slots-registry.yaml`-resolved paths, then writes one canonical
+  root `AGENTS.md` onboarding index plus thin per-tool pointer stubs
+  (`.github/copilot-instructions.md`, `CLAUDE.md`, `.cursor/rules/onboarding.mdc`) that link into
+  it. Every write is a marked-block merge or an existence-gated whole-file write, never a blind
+  overwrite — `install.sh`'s own `AGENTS.md` skill-catalog block is left untouched. Codex needs no
+  separate stub, since its own root `AGENTS.md` is already its native onboarding format.
+- **`ult-cep-wizard`**: the What/How boxes now list the actual files resolved into each box,
+  grouped by L2/L1, instead of only the resolved directory path — the new `wizard_box_files.py`
+  module (`list_files`, capped at `MAX_FILES_PER_PATH`) walks each resolved path and each
+  `BoxPath` in `/api/status` now carries `files`/`total_file_count`/`truncated` alongside
+  `path`/`source`. `wizard_stub_content.py`'s `_has_content()` now delegates to the same module
+  instead of keeping its own duplicate walk, and its "run `ult-autoscaffold-content`" prompt copy
+  now names that skill's newer artifact kinds (coding-standards, testing-guidelines,
+  interface-boundary docs, tiered module depth).
+- **`ult-autoscaffold-content`**: repo-wide `CODING-STANDARDS.md`/`TESTING-GUIDELINES.md`
+  generation (existence-gated, Step 5c) and per-pair `interfaces/<module-a>-to-<module-b>.md`
+  docs for graph-mode large-repo runs (Step 5d), grounded only in graph-observed
+  relations/weight for that pair. Large-repo tiering also gains an explicit `probe-size`
+  classification step, always stated to the user rather than picked silently, and per-module
+  `CONTEXT.md` depth now varies by tier (`references/module-context-depth-by-tier.md`). New
+  reference files (`generate-coding-standards.md`, `generate-interface-docs.md`,
+  `generate-testing-guidelines.md`) and templates (`coding-standards-template.md`,
+  `testing-guidelines-template.md`, `interface-boundary-template.md`, plus the existing
+  overview/context templates split out from inline `SKILL.md` prose) back the three new
+  artifact kinds. `compiling-project-guidelines` now auto-discovers this skill's How-L2 output
+  and its `context-config.yaml`-resolved directory as additional guideline sources, and notes
+  scaffold-generated drafts distinctly in its `Sources:` footer.
 
 ### Fixed
 
+- **Private skill-library references scrubbed from public-facing content.** Several files
+  named or linked skills that only exist in this maintainer's private, unpublished skill
+  library — never shipped in this repo — as if they were real, installed producers/consumers:
+  `layout-slots-registry.yaml`'s six illustrative `project_layout` slots (`plans_output`,
+  `brainstorm_output`, `security_docs`, `security_report`, `project_plan_docs`, and their
+  consumers) now use generic `example-*` names instead; four starter-kit drop-zone entries
+  tied to those same private skills (`threat_modeling`, `secure_coding_guidelines`,
+  `security_test_data`, `project_plan`) are removed outright, leaving only the one drop-zone
+  (`project_guidelines`) actually read by a skill shipped here — `ult-repo-layout/SKILL.md`,
+  `install.ps1`, and `install.sh` are updated to match (5 documented drop-zones → 1).
+  `ROADMAP.md`'s PDF-ingestion item no longer describes `ult-read-pdf` as "this repo's existing
+  PDF reader" (it isn't one — that's a private-repo tool); both candidate paths now correctly
+  start from "no existing PDF reader here." `ult-cep-retrofit` and
+  `ult-institutional-memory-distill`'s `SKILL.md`/script docstrings also drop private
+  `CEP-1.0-ROADMAP.md` §-number citations that only resolve inside the maintainer's private
+  design-doc set, in favor of self-contained prose. The mechanical `check_radisys_scrub.py`
+  gate does not catch this class of leak (it greps for "Radisys"/telecom terms, not private
+  skill names) — caught instead by a manual read-through of every touched file's diff.
+- **`ult-institutional-memory-distill`'s frontmatter `name:` corrected** from the full
+  `ult-institutional-memory-distill` to the bare `institutional-memory-distill` — `ult` is
+  already this skill's `namespace:`, composed into the folder name and every invocation
+  elsewhere in this repo (same split every other `ult-*` skill uses, e.g. `ult-repo-layout`'s
+  `name:` is `repo-layout`); the old value duplicated the namespace inside the name itself.
+- **`ult-repo-layout/SKILL.md`'s stale "Status: implemented — all 8 phases complete" sediment
+  line removed**, along with several `§<N>`/`D21 §16.6, Phase 3d`-style citations into the
+  private design-doc set scattered through its prose — replaced with self-contained
+  explanations of the same behavior, or a pointer to `references/phase-history.md` for
+  maintainers who want the historical build sequence.
 - **`cep-retrofit-mattpocock-skills` case study restored.** `README.md` and `PROTOCOL.md` §8 have
   cited this write-up as live evidence since it was first published (`e6295a9`), but the
   `CASE-STUDY.md` file itself was later removed locally (`90a5cf46`) to make room for an unrelated
