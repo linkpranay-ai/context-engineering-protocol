@@ -33,10 +33,26 @@ _ENTRY_START_RE = re.compile(r"^[ \t]*-[ \t]*actor:[ \t]*(\S*)[ \t]*$")
 _AT_RE = re.compile(r"^[ \t]*at:[ \t]*(\S+)[ \t]*$")
 
 
+def _is_dotfile_marker(name):
+    """True for any dot-prefixed YAML filename (e.g. `.layout-slots.yaml`).
+
+    A leading dot is a broadly used, cross-tool convention for "this is a
+    tool's own bookkeeping marker, not user-facing content" -- the same
+    convention `.git`, `.addenda.yaml`-style sibling files (checked
+    separately below), and every dotfile config format already rely on.
+    ult-repo-layout's `.layout-slots.yaml` marker (SKILL.md §15.3) is one
+    instance of this, not a special case: any present or future
+    dot-prefixed marker file is excluded by this same shape rule, so a new
+    marker introduced later doesn't need a new literal name added here.
+    """
+    return name.startswith(".")
+
+
 def gather_package_files(target):
     """Return a sorted list of package `.yaml` files under `target` (or just
     `target` itself if it's a single file), excluding `.addenda.yaml`
-    siblings, which never carry `approved_by`.
+    siblings and dot-prefixed marker files (e.g. `.layout-slots.yaml`),
+    neither of which ever carries `approved_by`.
     """
     target = Path(target)
     if target.is_file():
@@ -48,6 +64,7 @@ def gather_package_files(target):
     return sorted(
         p for p in target.rglob("*.yaml")
         if not p.name.endswith(".addenda.yaml")
+        and not _is_dotfile_marker(p.name)
     )
 
 
