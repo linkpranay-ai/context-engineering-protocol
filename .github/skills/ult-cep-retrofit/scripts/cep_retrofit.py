@@ -91,6 +91,15 @@ DEFAULT_EXCLUDES = {
     ".git", ".hg", ".svn", "node_modules", "dist", "build", ".venv", "venv",
     "__pycache__", ".tox", ".mypy_cache", ".pytest_cache", "site-packages",
     ".idea", ".vscode",
+    # Well-known repository-governance directory shapes, not any specific
+    # library's own convention (same "generic enough to encode here" bar as
+    # the entries above): "adr" for Architecture Decision Records (a broadly
+    # used term across many orgs, regardless of what parent directory holds
+    # it - e.g. docs/adr/, .agents/adr/); ".changeset" for the changesets
+    # release-notes tool; ".out-of-scope" for content a repo has already
+    # marked as explicitly not part of its operational surface. None of
+    # these hold skill units even when they happen to contain *.md files.
+    "adr", ".changeset", ".out-of-scope",
 }
 
 _SKILL_FILENAMES = ("SKILL.md", "skill.md")
@@ -104,6 +113,13 @@ _FLAT_FILE_DOUBLE_SUFFIX = ".prompt.md"
 _NON_SKILL_FLAT_NAMES = {
     "readme.md", "license.md", "changelog.md", "contributing.md",
     "code_of_conduct.md",
+    # Root-level AI-coding-agent instruction files, same class as the OSS
+    # governance filenames above: a broadly used, cross-project naming
+    # convention (not any specific library's own name), so excluding them
+    # here doesn't encode knowledge of any one private library. A repo's own
+    # AGENTS.md/CLAUDE.md/CONTEXT.md describes how to work in that repo as a
+    # whole - it is not itself a retrofittable skill unit.
+    "agents.md", "claude.md", "context.md",
 }
 
 _CODE_TRIGGER_TERMS = {

@@ -96,6 +96,16 @@ class InventoryHeuristicCTest(unittest.TestCase):
             result = cep_retrofit.inventory(tmp)
             self.assertEqual(result["units"], [])
 
+    def test_root_control_files_excluded_from_flat_units(self):
+        # AGENTS.md/CLAUDE.md/CONTEXT.md describe how to work in a repo as a
+        # whole - not retrofittable skill units, same class as README/LICENSE.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "AGENTS.md", "agents")
+            _write(Path(tmp) / "CLAUDE.md", "claude")
+            _write(Path(tmp) / "CONTEXT.md", "context")
+            result = cep_retrofit.inventory(tmp)
+            self.assertEqual(result["units"], [])
+
 
 class InventoryUnionNotWinnerTakeAllTest(unittest.TestCase):
     """The blocking review finding: mixed conventions must not swallow each other."""
@@ -123,6 +133,21 @@ class InventoryExclusionsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _write(Path(tmp) / "node_modules" / "some-pkg" / "SKILL.md", "# Not real\n")
             _write(Path(tmp) / ".git" / "hooks" / "SKILL.md", "# Not real\n")
+            result = cep_retrofit.inventory(tmp)
+            self.assertEqual(result["units"], [])
+
+    def test_governance_directories_excluded(self):
+        # ADRs, changesets, and content a repo has already marked
+        # out-of-scope are repository-governance shapes, not skill units -
+        # even when they hold *.md files that would otherwise match
+        # heuristic (c), and even nested under another directory (e.g. an
+        # "adr" folder under some other parent), same as node_modules/.git
+        # above.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "adr" / "0001-decision.md", "# ADR 1\n")
+            _write(Path(tmp) / "nested" / "adr" / "0002-decision.md", "# ADR 2\n")
+            _write(Path(tmp) / ".changeset" / "some-change.md", "# Change\n")
+            _write(Path(tmp) / ".out-of-scope" / "draft.md", "# Draft\n")
             result = cep_retrofit.inventory(tmp)
             self.assertEqual(result["units"], [])
 
