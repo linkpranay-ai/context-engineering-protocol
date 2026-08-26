@@ -24,7 +24,7 @@ pattern elsewhere in this repo, e.g. `sec-threat-model`'s `name:` is
 This skill implements the project layout and path-dependency configuration
 model (§15) and workspace-root consolidation (§16 —
 `layout.workspace_root`, scaffold-not-copy, and the
-`layout-slots-registry.yaml` superset registry), covering **eight**
+`layout-slots-registry.yaml` superset registry), covering **eleven**
 path-slots:
 
 - `context_packages` — read/written by `ult-context-generate` and every
@@ -32,8 +32,15 @@ path-slots:
   in this repo both produces and consumes.
 - `compiled_guidelines` — written by `compiling-project-guidelines`, read by
   its own `CONSUMING-COMPILED-GUIDELINES.md` consumers. The registry's only
-  `kind: file` slot, and the only slot whose D21 default re-roots to a
-  different bucket (`inputs` → `cache`).
+  `kind: file` slot until D21 §16.8/D24 Phase B added three more (below), and
+  the first slot whose D21 default re-roots to a different bucket
+  (`inputs` → `cache`).
+- `decision_ledger` — written by `ult-institutional-memory-distill`'s
+  `decision_ledger.py`, read by `ult-context-generate`. A `kind: file` slot,
+  same bucket re-root as `compiled_guidelines`.
+- `autoscaffold_content_state`, `autoscaffold_content_index` — written by
+  `ult-autoscaffold-content`'s `scaffold_state.py`. Two more `kind: file`
+  slots, same bucket re-root.
 - `plans_output`, `brainstorm_output`, `user_stories_output`, `security_docs`,
   `security_report`, `project_plan_docs` — six further slots, all
   **illustrative — not shipped in this repo** (see the slot registry table
@@ -61,13 +68,15 @@ view on top of this skill's own state, not an alternative way to run `init`/
 ## Dependencies
 
 None — this skill is foundational. `ult-context-generate` (`utilities`
-bundle, `context_packages`) and `compiling-project-guidelines` (`utilities`
-bundle, `compiled_guidelines`) are real, shipped-in-this-repo **consumers** of
-the markers/index this skill maintains (via the §15.5 resolution algorithm,
-documented in each owning skill's own path-resolution note) — not
-dependencies of this skill. The other six registered slots (see the slot
-registry table above) are owned by illustrative skills only — same "not a
-dependency" status either way.
+bundle, `context_packages`), `compiling-project-guidelines` (`utilities`
+bundle, `compiled_guidelines`), `ult-institutional-memory-distill`
+(`decision_ledger`), and `ult-autoscaffold-content`
+(`autoscaffold_content_state`/`autoscaffold_content_index`) are real,
+shipped-in-this-repo **consumers** of the markers/index this skill maintains
+(via the §15.5 resolution algorithm, documented in each owning skill's own
+path-resolution note) — not dependencies of this skill. The other six
+registered slots (see the slot registry table above) are owned by
+illustrative skills only — same "not a dependency" status either way.
 
 ## Overview
 
@@ -94,7 +103,7 @@ hardcode a slot's path.
 `project_layout.slots` registers only slots whose path isn't already a key
 under `layers.*` / `how_dimension.*` / `graphify.*` / `cache.*` in
 `context-config.yaml` (§15.2) — relocating those is "edit the existing key,"
-already supported. Eight slots are registered:
+already supported. Eleven slots are registered:
 
 | Slot key | Kind | Pre-D21 default | D21 default (`layout.workspace_root` set) | Falls back to (if unset) | Owning skill |
 |---|---|---|---|---|---|
@@ -102,6 +111,9 @@ already supported. Eight slots are registered:
 | `plans_output` | `directory` | `output_docs/plans/` | `{workspace_root}/outputs/plans/` | — | `example-plan-writer` *(illustrative)* |
 | `brainstorm_output` | `directory` | `output_docs/brainstorm/` | `{workspace_root}/outputs/brainstorm/` | — | `example-brainstorm-writer` *(illustrative)* |
 | `compiled_guidelines` | `file` | `starter_kit/project_guidelines/COMPILED-GUIDELINES.md` | `{workspace_root}/cache/project-guidelines/COMPILED-GUIDELINES.md` | — | `compiling-project-guidelines` |
+| `decision_ledger` | `file` | `starter_kit/decision_ledger/DECISION-LEDGER.json` | `{workspace_root}/cache/decision-ledger/DECISION-LEDGER.json` | — | `ult-institutional-memory-distill` |
+| `autoscaffold_content_state` | `file` | `starter_kit/autoscaffold-content/TRIAGE-STATE.json` | `{workspace_root}/cache/autoscaffold-content/TRIAGE-STATE.json` | — | `ult-autoscaffold-content` |
+| `autoscaffold_content_index` | `file` | `starter_kit/autoscaffold-content/CEP-INDEX.md` | `{workspace_root}/cache/autoscaffold-content/CEP-INDEX.md` | — | `ult-autoscaffold-content` |
 | `user_stories_output` | `directory` | `output_docs/user-stories/` | `{workspace_root}/outputs/user-stories/` | — | `example-consumer` *(illustrative)* |
 | `security_docs` | `directory` | `output_docs/security_docs/` | `{workspace_root}/outputs/security_docs/` | — | `example-threat-modeler` *(illustrative)* |
 | `security_report` | `directory` | `output_docs/security_report/` | `{workspace_root}/outputs/security_report/` | — | `example-report-writer` *(illustrative)* |
@@ -118,16 +130,16 @@ a gap left open by the first registered slot: a plan-writing or brainstorming
 skill that hardcodes its own output directory, with no slot at all to
 relocate it via (see `references/phase-history.md`'s Phase 3b for the real
 external skillset this gap was diagnosed and proof-tested against — that
-detail is provenance, not this table's operational default). Like the five
+detail is provenance, not this table's operational default). Like the eight
 slots below, neither has a pre-existing config-key fallback — "Falls back to"
 is "—", so an unmarked slot's step-1 fallback is simply its literal pre-D21
 default.
 
-The five remaining slots:
+The eight remaining slots:
 
-- `compiled_guidelines` is the only `kind: file` slot in the registry — its
+- `compiled_guidelines` is the registry's first `kind: file` slot — its
   resolved path is a single file, not a directory (see "Marker file format"
-  below for the `file:` marker field this requires). It's also the only slot
+  below for the `file:` marker field this requires). It's also the first slot
   whose D21 default **changes bucket** (§16.3/§16.4): the pre-D21 default
   `starter_kit/project_guidelines/COMPILED-GUIDELINES.md` sits in the
   `inputs`-bucket starter-kit drop-zone (alongside the raw sources
@@ -135,6 +147,17 @@ The five remaining slots:
   is a *derived, regenerable* artifact — so its D21 default re-roots to the
   `cache` bucket, `{workspace_root}/cache/project-guidelines/COMPILED-GUIDELINES.md`,
   not `{workspace_root}/inputs/...`.
+- `decision_ledger`, `autoscaffold_content_state`, and
+  `autoscaffold_content_index` are three more `kind: file` slots, each a
+  derived/regenerable artifact for the same reason `compiled_guidelines` is,
+  so each re-roots the same `inputs` → `cache` way (these four are the only
+  `kind: file` slots in the registry). `decision_ledger` (owned by
+  `ult-institutional-memory-distill`, D21 §16.8's trip-wire addition) is
+  the decision ledger, entries only ever added via `decision_ledger.py`,
+  never hand-edited. `autoscaffold_content_state`/`autoscaffold_content_index`
+  (both owned by `ult-autoscaffold-content`, D24 Phase B) are the per-module
+  triage checkpoint and its rendered index, written only via
+  `scaffold_state.py`.
 - `user_stories_output`, `security_docs`, `security_report`, and
   `project_plan_docs` are four sibling `directory` slots, each one project's
   `output_docs/<family>/` subtree. All four belong to the `outputs` bucket,
@@ -177,7 +200,9 @@ slots:
     schema_version: 1
 ```
 
-`compiled_guidelines` is the registry's only `kind: file` slot — its marker
+`compiled_guidelines` is the registry's first `kind: file` slot (see
+"Slot registry" above for the other three: `decision_ledger`,
+`autoscaffold_content_state`, `autoscaffold_content_index`) — its marker
 adds a `file:` field naming the file *within* the marker's directory:
 
 ```yaml
@@ -194,10 +219,16 @@ slots:
 - `kind: file` → the slot's resolved path is `<marker's directory>/<file>`
   (`resolved_path_for_marker` in `scripts/validate_layout.py` handles this
   generically — `compiled_guidelines` is simply the first slot to use it).
+  `decision_ledger`/`autoscaffold_content_state`/`autoscaffold_content_index`
+  use the same `kind: file` marker shape as `compiled_guidelines` above, just
+  naming their own file (`DECISION-LEDGER.json`, `TRIAGE-STATE.json`,
+  `CEP-INDEX.md` respectively).
 - `schema_version` — the `project_layout` schema version that introduced this
   slot (§15.8); `1` for `context_packages`/`plans_output`/`brainstorm_output`,
   `2` for `compiled_guidelines`/`user_stories_output`/`security_docs`/
-  `security_report`/`project_plan_docs`.
+  `security_report`/`project_plan_docs`, `3` for `decision_ledger` (D21
+  §16.8), `4` for `autoscaffold_content_state`/`autoscaffold_content_index`
+  (D24 Phase B).
 - If two slots happen to share a directory, list both entries under that one
   `slots:` array — one marker file can declare multiple slots.
 
@@ -292,23 +323,30 @@ use if the human opted in above):
    or offer a diff view instead. Re-running `init` must never silently
    reset a customized layout back to defaults.
 2. Otherwise, for each registered slot (see the slot registry table above —
-   all eight) whose owning skill is installed (partial-install gate, §15.8):
+   all eleven) whose owning skill is installed (partial-install gate, §15.8):
    - Resolve its **resolved default** (§16.2): `{workspace_root}/<leaf>`
      if `layout.workspace_root` is set in `context-config.yaml` (and
      well-formed), else the slot's "Falls back to" config key if set
      (only `context_packages` has one — `cache.product_context_path`), else
      its pre-D21 default (§15.2/§16.4 — see the slot registry table above).
-   - Scaffold that directory if it doesn't exist yet — for the one `kind:
-     file` slot (`compiled_guidelines`), scaffold the *containing* directory
-     (`starter_kit/project_guidelines/` or
-     `{workspace_root}/cache/project-guidelines/`); the file itself is
-     `compiling-project-guidelines`'s output, not created by `init`.
+   - Scaffold that directory if it doesn't exist yet — for `kind: file`
+     slots (`compiled_guidelines`, `decision_ledger`,
+     `autoscaffold_content_state`, `autoscaffold_content_index`), scaffold
+     the *containing* directory only; the file itself is each owning
+     skill's own output, never created by `init`.
    - Write `<path>/.layout-slots.yaml` with the marker shown above (one
      `slot:` entry per slot; slots that resolve to the same directory share
-     one marker file's `slots:` list). For `compiled_guidelines`, the marker
+     one marker file's `slots:` list). For a `kind: file` slot, the marker
      is written in the containing directory with `kind: file, file:
-     COMPILED-GUIDELINES.md` (see "Marker file format" above).
-3. Write/update `context-config.yaml`'s `project_layout`:
+     <filename>` (see "Marker file format" above).
+3. Write/update `context-config.yaml`'s `project_layout` — one `slots:` entry
+   per slot actually scaffolded in step 2, i.e. only the slots whose owning
+   skill is installed (same partial-install gate as step 2 — a project that
+   installed only the `developer` bundle writes only that bundle's slots
+   here, never all eleven). The example below shows every registered slot at
+   once purely for illustration of the shape each entry takes; a real
+   partial install's `project_layout.slots` simply omits the rows whose
+   owning skill isn't present:
    ```yaml
    project_layout:
      version: 1
@@ -330,6 +368,18 @@ use if the human opted in above):
          path: starter_kit/project_guidelines/COMPILED-GUIDELINES.md  # or wherever step 2 resolved it
          kind: file
          owning_skill: compiling-project-guidelines
+       decision_ledger:
+         path: starter_kit/decision_ledger/DECISION-LEDGER.json  # or wherever step 2 resolved it
+         kind: file
+         owning_skill: ult-institutional-memory-distill
+       autoscaffold_content_state:
+         path: starter_kit/autoscaffold-content/TRIAGE-STATE.json  # or wherever step 2 resolved it
+         kind: file
+         owning_skill: ult-autoscaffold-content
+       autoscaffold_content_index:
+         path: starter_kit/autoscaffold-content/CEP-INDEX.md  # or wherever step 2 resolved it
+         kind: file
+         owning_skill: ult-autoscaffold-content
        user_stories_output:
          path: output_docs/user-stories/        # or wherever step 2 resolved it
          kind: directory
@@ -339,7 +389,7 @@ use if the human opted in above):
        # above.
    ```
 4. **Optionally interactive up front** — before scaffolding, ask: "Here's the
-   default layout for all eight registered slots — `<slot>` → `<resolved
+   default layout for all eleven registered slots — `<slot>` → `<resolved
    default>` for each row of the slot registry table above (or its
    `{workspace_root}/...` equivalent if `layout.workspace_root` is set) —
    rename or relocate any of these before we start?" A team that wants a
@@ -415,7 +465,7 @@ and skip straight to asking (§15.7):
 
 ### Layer-path discovery and confirmation — `discover_layers.py` / `confirm_layers.py`
 
-A separate D23 mechanism from the 8-slot `discover` mode above: proposes and
+A separate D23 mechanism from the 11-slot `discover` mode above: proposes and
 commits the four layer paths (`layers.what_l2`, `layers.what_l1`,
 `how_dimension.how_l2`, `how_dimension.how_l1`) that `project_layout.slots`
 deliberately excludes (§17.1). Read `references/layer-path-discovery.md` now
@@ -429,7 +479,10 @@ drift tracking.
 Each owning/consuming skill resolves its slot this way instead of a hardcoded
 path. `ult-context-generate`/`CONSUMING-CONTEXT-PACKAGE.md` (`context_packages`)
 and `compiling-project-guidelines`/`CONSUMING-COMPILED-GUIDELINES.md`
-(`compiled_guidelines`) are the two real, shipped-in-this-repo consumers. The
+(`compiled_guidelines`) are two real, shipped-in-this-repo consumers;
+`ult-institutional-memory-distill`/`decision_ledger.py` (`decision_ledger`)
+and `ult-autoscaffold-content`/`scaffold_state.py`
+(`autoscaffold_content_state`/`autoscaffold_content_index`) are two more. The
 same algorithm applies identically to the six illustrative slots (see the
 slot registry table above for which owning skill maps to which):
 
@@ -472,19 +525,21 @@ For an unmarked slot, see the slot registry table above for every slot's
   `cache.product_context_path`, §15.2), else its "Pre-D21 default"
   column, literally.
 
-Two slots have a wrinkle worth calling out by name:
+A few slots have a wrinkle worth calling out by name:
 
 - **`context_packages`** is the only slot with a config-key fallback
   (`cache.product_context_path`) — a project that set this key before this
   skill ever existed continues to work unchanged, even with
   `layout.workspace_root` unset.
-- **`compiled_guidelines`** is the only slot whose D21 default changes
-  *bucket*, not just root: its pre-D21 default
-  (`starter_kit/project_guidelines/COMPILED-GUIDELINES.md`) sits in the
-  `inputs` bucket, but its D21 default
-  (`{workspace_root}/cache/project-guidelines/COMPILED-GUIDELINES.md`) sits in
-  the `cache` bucket — `{workspace_root}/inputs/...` is never a candidate for
-  this slot (see "Slot registry" above for why).
+- **`compiled_guidelines`, `decision_ledger`, `autoscaffold_content_state`,
+  and `autoscaffold_content_index`** are the four slots whose D21 default
+  changes *bucket*, not just root: each pre-D21 default sits in the
+  `inputs`/`starter_kit` bucket (raw, project-authored territory), but each
+  resolved file is a *derived, regenerable* artifact — so each D21 default
+  re-roots to the `cache` bucket instead (e.g.
+  `{workspace_root}/cache/project-guidelines/COMPILED-GUIDELINES.md` for
+  `compiled_guidelines`) — `{workspace_root}/inputs/...` is never a candidate
+  for any of the four (see "Slot registry" above for why).
 
 `workspace_root` therefore changes **defaults only** — it can never override a
 marker (steps 2-3) or an explicit `project_layout.slots.<slot>.path` (step 2).
@@ -534,11 +589,11 @@ This skill reads and writes:
   If unset: `prompt` interactively, `skip` otherwise — never `create` by
   default ("ask the human" degrades to "do nothing and say so," never to
   "guess"). Applies the same way to every registered slot (see the slot
-  registry table above — all eight). For the one `kind: file` slot
-  (`compiled_guidelines`), "doesn't exist" means the file itself; `create`
-  creates its containing directory only — the file is
-  `compiling-project-guidelines`'s own output, never fabricated empty by this
-  mechanism.
+  registry table above — all eleven). For a `kind: file` slot
+  (`compiled_guidelines`, `decision_ledger`, `autoscaffold_content_state`,
+  `autoscaffold_content_index`), "doesn't exist" means the file itself;
+  `create` creates its containing directory only — the file is each owning
+  skill's own output, never fabricated empty by this mechanism.
 
 A ready-to-copy template with these keys (annotated) is at
 `starter_kits/context_engineering/context-config.yaml.template`.
@@ -567,9 +622,9 @@ Deterministic, stdlib-only (no pip install), vendorable alongside
 python .github/skills/ult-repo-layout/scripts/validate_layout.py --validate [<repo-root>]
 ```
 
-Checks (§15.9; all eight slots from the slot registry table above are
+Checks (§15.9; all eleven slots from the slot registry table above are
 registered, but every check is written generically over `SLOT_REGISTRY` — the
-mechanism was proven going from 1 to 3 to 8 registered slots with zero
+mechanism was proven going from 1 to 3 to 8 to 11 registered slots with zero
 logic changes, including a `kind: file` slot and the partial-install gate
 below). Numbered in the order `validate()` actually runs them:
 

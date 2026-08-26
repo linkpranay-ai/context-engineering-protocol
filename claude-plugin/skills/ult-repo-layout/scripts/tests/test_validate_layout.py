@@ -6,6 +6,7 @@ with validate_layout.py itself. Run with:
     python -m unittest discover -s scripts/tests -v
 """
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -1210,6 +1211,65 @@ class TestRegistryConsistency(unittest.TestCase):
         registry_path = repo_root / "layout-slots-registry.yaml"
         self.assertTrue(registry_path.exists(), "layout-slots-registry.yaml is missing from the repo root")
         self.assertEqual(vl.check_registry_consistency(repo_root), [])
+
+
+class TestSkillMdSlotRegistryTableConsistency(unittest.TestCase):
+    """Regression guard for the documented `init` walkthrough silently
+    covering fewer slots than SLOT_REGISTRY: a slot added to SLOT_REGISTRY
+    without a matching row in SKILL.md's own "## Slot registry" markdown
+    table means `init`'s own instructions never mention it, so a
+    fully-compliant documented `init` run leaves it unregistered even though
+    it's a real, shipped slot. Parses the table directly out of SKILL.md
+    rather than trusting prose elsewhere in the file (e.g. the "Eleven slots
+    are registered" sentence), since prose can drift out of sync with the
+    table just as easily as the table can drift from the code."""
+
+    def _table_slot_keys(self):
+        skill_md = Path(__file__).resolve().parents[2] / "SKILL.md"
+        text = skill_md.read_text(encoding="utf-8")
+        section_start = text.index("## Slot registry")
+        section_end = text.index("\n## ", section_start + 1)
+        section = text.splitlines()[
+            text[:section_start].count("\n"):text[:section_end].count("\n")
+        ]
+        keys = []
+        for line in section:
+            m = re.match(r"\|\s*`([a-z_]+)`\s*\|", line)
+            if m:
+                keys.append(m.group(1))
+        return keys
+
+    def test_skill_md_exists(self):
+        skill_md = Path(__file__).resolve().parents[2] / "SKILL.md"
+        self.assertTrue(skill_md.exists(), "SKILL.md is missing from the ult-repo-layout skill directory")
+
+    def test_table_has_no_duplicate_or_unknown_looking_rows(self):
+        keys = self._table_slot_keys()
+        self.assertTrue(keys, "found no slot rows in SKILL.md's Slot registry table - table format may have changed")
+        self.assertEqual(len(keys), len(set(keys)), "SKILL.md's Slot registry table lists the same slot key twice")
+
+    def test_table_matches_slot_registry_exactly(self):
+        # The direct regression check: every SLOT_REGISTRY key must have a
+        # row in SKILL.md's table, and vice versa. This is what would have
+        # caught decision_ledger/autoscaffold_content_state/
+        # autoscaffold_content_index being added to SLOT_REGISTRY without a
+        # corresponding table row (and without updating init's "all N slots"
+        # walkthrough text alongside it).
+        table_keys = set(self._table_slot_keys())
+        code_keys = set(vl.SLOT_REGISTRY.keys())
+        missing_from_docs = code_keys - table_keys
+        extra_in_docs = table_keys - code_keys
+        self.assertEqual(
+            missing_from_docs, set(),
+            f"SLOT_REGISTRY has slot(s) {sorted(missing_from_docs)} with no row in "
+            f"SKILL.md's Slot registry table - init's documented walkthrough will "
+            f"never mention them (doc/code drift).",
+        )
+        self.assertEqual(
+            extra_in_docs, set(),
+            f"SKILL.md's Slot registry table lists slot(s) {sorted(extra_in_docs)} "
+            f"that SLOT_REGISTRY doesn't have (doc/code drift).",
+        )
 
 
 class TestGitHistoryCheck(unittest.TestCase):
