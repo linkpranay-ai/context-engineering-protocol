@@ -123,6 +123,45 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   across all six files resolves against the wizard's own `_slugify`, all six render cleanly through
   `wizard_markdown.render()`, the full wizard test suite (371 tests) and all four catalog gates
   stayed green.
+- **`ult-repo-layout/SKILL.md`'s slot-registry prose was out of sync with `SLOT_REGISTRY`
+  itself** — it said "eight" path-slots while the registry actually defines eleven;
+  `decision_ledger`, `autoscaffold_content_state`, and `autoscaffold_content_index` (added
+  alongside their owning skills) were never folded into the documented `init` walkthrough, so a
+  user following that walkthrough exactly would never register them. Corrected the count and
+  added the three slots' own descriptions. Added a regression test
+  (`TestSkillMdSlotRegistryTableConsistency`) that parses SKILL.md's "Slot registry" table
+  directly and diffs its keys against `SLOT_REGISTRY`, so this class of doc/code drift fails a
+  test run instead of sitting undetected.
+- **`ult-cep-wizard`'s Trip-wire box had no "run this yourself" guidance card**, unlike What/How/
+  Guidelines, which all point the user at the skill that populates them — a Trip-wire ledger
+  that's missing or still empty (initialized but zero entries) left the user with no onboarding
+  path at all for that box. Added `tripwire_card()` (`wizard_stub_content.py`), wired into
+  `/api/status` and the existing stub-card rendering in `wizard.js`/`index.html`. Its guidance is
+  deliberately different in kind from the other three cards: `ult-institutional-memory-distill`
+  needs a human to choose and confirm real source streams before writing anything, so the card
+  points at starting that human-in-the-loop process rather than promising the skill will write
+  the file unattended.
+- **`ult-cep-wizard`'s in-app docs viewer served the target repo's own README under CEP
+  branding once installed into a consumer repo.** `wizard_docs.py`'s `install_root()` resolves to
+  "whatever repo this skill's directory sits under" — correct while self-testing the wizard
+  against its own repo, but once the skill directory is copied into an unrelated consumer repo
+  (the normal way it reaches anyone else's project), it silently resolves to *that* repo's root
+  instead, and the docs viewer would list and render whatever `README.md`/case-study-shaped
+  content happened to exist there as though it were CEP's own documentation. Added
+  `_bundle_verified()`: `list_docs()` now returns nothing at all unless both `CONCEPT.md` and
+  `PROTOCOL.md` are present together at the resolved root — two files distinctly named after CEP
+  itself, unlike `README.md` alone, which nearly every repo has. No frontend changes were needed:
+  `wizard.js`'s nav already disables any doc button missing from `/api/docs`'s response.
+- **`ult-cep-retrofit`'s inventory over-classified ordinary repository files as retrofit-skill
+  candidates.** Root control files (`AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`) and well-known
+  repository-governance directories (`adr/` — Architecture Decision Records, `.changeset/`,
+  `.out-of-scope/`) were being swept in by the existing flat-file/shape-based heuristics purely
+  because they happen to hold `.md` files, presenting a human reviewer with a large, noisy
+  mixed list of genuine skill candidates alongside governance/release content that was never
+  meant to be retrofitted. Extended `cep_retrofit.py`'s existing `_NON_SKILL_FLAT_NAMES` and
+  `DEFAULT_EXCLUDES` sets — the same class of broadly-known, non-library-specific naming
+  convention already used there for `README.md`/`LICENSE.md`/`node_modules`/`.git` — to cover
+  these too.
 
 ## [0.5.0]
 
