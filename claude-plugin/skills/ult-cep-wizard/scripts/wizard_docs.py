@@ -22,6 +22,28 @@ unrelated consumer repo may not bundle PROTOCOL.md/case-studies/ at all - this
 module omits what isn't found rather than failing, matching the project's
 fail-closed-but-not-fatal posture elsewhere (a broken layout doesn't crash the
 server; a missing doc shouldn't either).
+
+`install_root()` resolves to "whatever repo this skill's own directory sits
+four levels under" - correctly CEP's own repo while self-testing the wizard,
+but once this skill directory is installed into an unrelated consumer repo
+(the normal way it reaches anyone else's project), it resolves to *that*
+repo's root instead, silently and without any signal that anything changed.
+Every consumer repo has its own README.md; without a guard, `list_docs()`
+would serve that repo's own README as though it were CEP's - a CEP-branded
+overlay presenting someone else's project content as CEP's own docs.
+`_bundle_verified()` below is the guard: it requires CONCEPT.md *and*
+PROTOCOL.md to both exist at `root` before trusting anything found there.
+Those two together are distinctly CEP-named and not something an arbitrary
+consumer repo happens to also have (unlike README.md alone, which nearly
+every repo has) - so their joint presence is treated as proof `root` really
+is CEP's own repo, not a coincidence. When the bundle isn't verified,
+`list_docs()` returns no docs at all - not "every doc except README.md" -
+because a partial docs viewer is still a CEP-branded surface showing
+someone else's content; wizard.js's own `setDocsNavAvailability()` already
+disables each nav button whose id isn't in the returned list (was already
+built for the "this install doesn't bundle case-studies/" case), so an empty
+list degrades to every doc-nav button reading "Not available in this
+install." with no code changes needed on that side.
 """
 
 from __future__ import annotations
@@ -78,6 +100,13 @@ def _first_h1_title(path: Path, fallback: str) -> str:
     return match.group(1) if match else fallback
 
 
+def _bundle_verified(root: Path) -> bool:
+    """True only when `root` demonstrably is CEP's own repo - see module
+    docstring for why CONCEPT.md+PROTOCOL.md together, not README.md alone,
+    is the signal this checks."""
+    return (root / "CONCEPT.md").is_file() and (root / "PROTOCOL.md").is_file()
+
+
 def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
     """Ordered list of every doc currently available to serve: Concept,
     Protocol, README, case-studies/README.md (the Case Studies section's
@@ -87,8 +116,16 @@ def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
     one entry per case-studies/*/CASE-STUDY.md sorted by directory slug,
     then FAQ.md last - matching the top bar's left-to-right nav order
     (Concept / Protocol / README / Case Studies / FAQ). `root` defaults to
-    install_root() - overridable for tests only, never by a request."""
+    install_root() - overridable for tests only, never by a request.
+
+    Returns an empty list outright when `_bundle_verified(root)` is False -
+    see module docstring. This is a whole-bundle gate, not a per-doc one:
+    every branch below still has its own `is_file()` check for the ordinary
+    case (a verified CEP repo that simply hasn't written FAQ.md yet, say),
+    but none of them run at all until the bundle itself is verified."""
     root = root or install_root()
+    if not _bundle_verified(root):
+        return []
     docs: List[DocEntry] = []
 
     concept = root / "CONCEPT.md"
