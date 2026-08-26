@@ -274,11 +274,55 @@ class TestBundleVerification(unittest.TestCase):
         self.assertEqual(wd.list_docs(self.root), [])
 
 
-class TestInstallRoot(unittest.TestCase):
-    def test_install_root_is_repo_root(self):
-        # scripts -> ult-cep-wizard -> skills -> .github -> repo root
-        root = wd.install_root()
+class TestDocsRoot(unittest.TestCase):
+    """Regression tests for docs_root()'s two-location resolution (see
+    wizard_docs.py's module docstring): a bundled docs/ sibling of this
+    script's own installed directory, preferred outright when present, else
+    a guarded fallback to the CEP-repo-root guess `install_root()` used to
+    always make unconditionally."""
+
+    def test_docs_root_falls_back_to_repo_root_when_no_bundled_docs_dir(self):
+        # This repo's own source tree has no .github/skills/ult-cep-wizard/
+        # docs/ sibling - that's materialized only at install time by
+        # install.ps1/install.sh into a *target* repo (see module
+        # docstring) - so self-testing here must fall back to the
+        # repo-root heuristic exactly as install_root() used to always do.
+        root = wd.docs_root()
+        self.assertIsNotNone(root)
         self.assertTrue((root / ".github").is_dir())
+        self.assertTrue((root / "CONCEPT.md").is_file())
+
+    def test_docs_root_prefers_bundled_docs_dir_when_present(self):
+        # Simulates a real consumer install: install.ps1/install.sh bundled
+        # docs/ as a sibling of this skill's own scripts/ directory. A
+        # bundled docs/ existing at all is trusted outright - no
+        # CONCEPT.md/PROTOCOL.md check needed there, unlike the fallback.
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = Path(tmp) / "docs"
+            bundled.mkdir()
+            original = wd._docs_dir
+            wd._docs_dir = lambda: bundled
+            try:
+                self.assertEqual(wd.docs_root(), bundled)
+            finally:
+                wd._docs_dir = original
+
+    def test_docs_root_none_when_neither_location_verifies(self):
+        original_docs_dir = wd._docs_dir
+        original_self_test = wd._self_test_root
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_bundle = Path(tmp) / "docs"  # never created
+            unrelated = Path(tmp) / "unrelated"
+            unrelated.mkdir()
+            (unrelated / "README.md").write_text("# Some repo", encoding="utf-8")
+            wd._docs_dir = lambda: missing_bundle
+            wd._self_test_root = lambda: unrelated
+            try:
+                self.assertIsNone(wd.docs_root())
+                self.assertEqual(wd.list_docs(), [])
+            finally:
+                wd._docs_dir = original_docs_dir
+                wd._self_test_root = original_self_test
 
 
 if __name__ == "__main__":

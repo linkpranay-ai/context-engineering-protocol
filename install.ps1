@@ -311,24 +311,107 @@ your own files alongside it; they are never touched.
     else { Write-InstallAction "created: starter_kit/project_guidelines/.pointer.md" }
 }
 
+# CepWizardSkillName: the one skill whose install also bundles CEP's own
+# project docs alongside it (see Copy-CepWizardDocs below) - named once here
+# rather than repeated as a literal at each call site.
+$CepWizardSkillName = "ult-cep-wizard"
+
+# Copy-CepWizardDocs: bundles CEP's own project docs (CONCEPT.md, PROTOCOL.md,
+# README.md, FAQ.md, case-studies/) into the installed ult-cep-wizard skill's
+# own docs/ subdirectory, so its in-app docs viewer (wizard_docs.py) has real
+# CEP content to serve in every install that includes this skill. Previously
+# this script only ever copied .github/skills/, .github/prompts/, and
+# .cursor/rules/, so wizard_docs.py's docs viewer had nothing to find in any
+# real install regardless of its own root-detection logic — see
+# wizard_docs.py's module docstring for the reader side of this fix. Callers
+# below only invoke this when the wizard skill itself is actually being
+# installed.
+function Copy-CepWizardDocs {
+    Copy-LibraryTree "CONCEPT.md" ".github/skills/$CepWizardSkillName/docs/CONCEPT.md"
+    Copy-LibraryTree "PROTOCOL.md" ".github/skills/$CepWizardSkillName/docs/PROTOCOL.md"
+    Copy-LibraryTree "README.md" ".github/skills/$CepWizardSkillName/docs/README.md"
+    Copy-LibraryTree "FAQ.md" ".github/skills/$CepWizardSkillName/docs/FAQ.md"
+    Copy-LibraryTree "case-studies" ".github/skills/$CepWizardSkillName/docs/case-studies"
+}
+
+# New-CepInstallManifest: writes .cep-install.json at the target root — the
+# one place any CEP-shipped script can ask "which paths did the installer
+# itself put here", instead of each guessing independently via its own
+# hardcoded exclusion list. $OwnedPaths is exactly the set of top-level
+# relative paths this run actually wrote, built up by the caller alongside
+# each Copy-LibraryTree/New-ProjectGuidelinesPointer call above rather than
+# hardcoded here, so the manifest can never drift out of sync with what the
+# run actually did. Always overwrites — same "library-owned files always
+# mirror the source" rule Copy-LibraryTree follows — so re-running the
+# installer keeps the manifest in sync with whatever the run just did.
+function New-CepInstallManifest {
+    param(
+        [string[]]$OwnedPaths,
+        [string]$Mode,
+        [string[]]$OnlySkills
+    )
+
+    if ($DryRun) {
+        Write-InstallAction "would write: .cep-install.json"
+        return
+    }
+
+    $dst = Join-Path $TargetPath ".cep-install.json"
+    # ConvertTo-Json gotcha: an `if (...) { $arr } else { $null }` expression
+    # captured as a hashtable value silently collapses a *single-element*
+    # array to a bare scalar (verified: a 2+-element array is unaffected,
+    # and a direct `key = $arr` assignment like owned_paths below is also
+    # unaffected — only this if/else-expression shape triggers it). The
+    # unary comma operator (,$OnlySkills) forces array-ness through the
+    # if-branch regardless of element count, so `--only <one-skill>` still
+    # round-trips as a JSON array instead of a bare string.
+    $manifest = [ordered]@{
+        schema_version = 1
+        runtime        = @("claude", "copilot")
+        mode           = $Mode
+        only_skills    = if ($OnlySkills.Count -gt 0) { ,$OnlySkills } else { $null }
+        owned_paths    = $OwnedPaths
+        installed_at   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    }
+    $json = $manifest | ConvertTo-Json -Depth 5
+    Set-Content -LiteralPath $dst -Value $json -NoNewline
+    Write-InstallAction "wrote: .cep-install.json"
+}
+
+$OwnedPaths = @()
 if ($OnlyNames.Count -gt 0) {
     foreach ($name in $OnlyNames) {
         Copy-LibraryTree ".github/skills/$name" ".github/skills/$name"
         Copy-LibraryTree ".github/prompts/$name.prompt.md" ".github/prompts/$name.prompt.md"
         Copy-LibraryTree ".cursor/rules/$name.mdc" ".cursor/rules/$name.mdc"
+        $OwnedPaths += ".github/skills/$name"
+        $OwnedPaths += ".github/prompts/$name.prompt.md"
+        $OwnedPaths += ".cursor/rules/$name.mdc"
+        if ($name -eq $CepWizardSkillName) {
+            Copy-CepWizardDocs
+            $OwnedPaths += ".github/skills/$CepWizardSkillName/docs"
+        }
     }
 }
 else {
     Copy-LibraryTree ".github/skills" ".github/skills"
     Copy-LibraryTree ".github/prompts" ".github/prompts"
     Copy-LibraryTree ".cursor/rules" ".cursor/rules"
+    Copy-CepWizardDocs
+    $OwnedPaths += ".github/skills"
+    $OwnedPaths += ".github/prompts"
+    $OwnedPaths += ".cursor/rules"
 }
 Merge-AgentsMd
 
 if ($InitProject) {
     New-ContextConfig
     New-ProjectGuidelinesPointer
+    $OwnedPaths += "starter_kit/project_guidelines"
 }
+
+$CepInstallMode = if ($OnlyNames.Count -gt 0) { "only" } else { "full" }
+New-CepInstallManifest -OwnedPaths $OwnedPaths -Mode $CepInstallMode -OnlySkills $OnlyNames
 
 Write-Host ""
 if ($DryRun) {

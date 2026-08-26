@@ -251,7 +251,7 @@ different trust model from the other two:
   posture `STATIC_ASSETS` already uses for `wizard.css`/`wizard.js` (§5 is about paths
   resolved from client input; these routes have none). `<id>` is never a path — it's a
   dict-lookup key against a list `wizard_docs.list_docs()` builds itself by scanning
-  `wizard_docs.install_root()`. Any `<id>` not already in that scan is a plain 404, not
+  `wizard_docs.docs_root()`. Any `<id>` not already in that scan is a plain 404, not
   a filesystem lookup gone wrong. No `wizard_containment` call is needed or made here,
   same reasoning `wizard_docs.py`'s own module docstring gives for why it's unlike
   `wizard_picker.py`.
@@ -260,14 +260,19 @@ different trust model from the other two:
   `wizard_markdown.render(..., asset_prefix=...)` into a URL under this route — see that
   module's docstring), and the browser then requests whatever `src` the renderer
   emitted — so `<rel_path>` genuinely is client-supplied, shaped exactly like
-  `wizard_picker.py`'s `rel_path`. It gets the same treatment: `unquote()`'d, then
-  `wizard_containment.check_containment(wizard_docs.install_root(), decoded)` — full
+  `wizard_picker.py`'s `rel_path`. It gets the same treatment, but first checks
+  `wizard_docs.docs_root()` is non-`None` (the same trust `/api/docs` itself requires
+  to enumerate anything) and 404s immediately if not — closes a gap where this route
+  used to resolve `wizard_docs.install_root()` unconditionally, trusting a root
+  `/api/docs` itself wouldn't have trusted. Only then: `unquote()`'d, then
+  `wizard_containment.check_containment(docs_root, decoded)` — full
   symlink/junction/reparse-tag walking, not string-prefix matching, identical machinery
-  to §5. **The affirmed root is `wizard_docs.install_root()` (where this skill is
-  installed), not `<repo_root>`** (the project being onboarded) — a different root than
-  every other containment check in this file, because these are CEP's own docs, not the
-  target repo's. A `ContainmentError` and a missing file both 404 identically, matching
-  this file's running theme of non-distinguishing failure (§3.2, §5).
+  to §5. **The affirmed root is `wizard_docs.docs_root()` (where this skill's docs are
+  bundled or self-tested from), not `<repo_root>`** (the project being onboarded) — a
+  different root than every other containment check in this file, because these are
+  CEP's own docs, not the target repo's. A `ContainmentError` and a missing file both
+  404 identically, matching this file's running theme of non-distinguishing failure
+  (§3.2, §5).
 
 Trust model note: the Markdown/HTML *content* itself is never sanitized against
 injection (see `wizard_markdown.py`'s module docstring) — it's rendered on the
@@ -282,7 +287,7 @@ one of the docs served by `GET /api/docs/<id>` (id `case-studies-readme`), along
 its two supporting docs (`case-studies-synthesis`, `case-studies-template`) — same
 closed-set scan, same trust level, nothing new there. What's new is that
 `_handle_api_doc_detail` also builds a `link_resolver` dict — every other doc's own
-`install_root()`-relative path mapped to its `doc_id` — and passes it into
+`docs_root()`-relative path mapped to its `doc_id` — and passes it into
 `wizard_markdown.render()` so a relative Markdown link inside the doc being rendered
 (e.g. `case-studies/README.md`'s link to `textual/CASE-STUDY.md`) can become an in-app
 navigation (`data-doc-id`, handled client-side by `wizard.js`) instead of a dead href.

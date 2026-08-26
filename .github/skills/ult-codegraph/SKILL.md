@@ -81,6 +81,18 @@ or bindings for other languages?
   `graph.json` carried no `directed`/`multigraph` keys at all; 0.9.11's does).
   Upgrade first (`uv tool install --force graphifyy`) if you hit that error.
 
+**If this repo has itself consumed CEP** (i.e. it was set up with
+`install.ps1`/`install.sh` from this library), a `.cep-install.json` file
+sits at the repo root recording exactly which paths CEP installed
+(`owned_paths`) — that's CEP's own tooling content, not the codebase you're
+trying to graph, and indexing it just adds noise to `query`/`explain`
+results. Before your first `graphify update`, check for that file and, if
+present, feed its `owned_paths` into graphify's own ignore mechanism (a
+`.graphifyignore` file at the repo root, one path per line — confirm the
+exact syntax your installed `graphifyy` version expects via
+`graphify --help`, since ignore-file handling has evolved across releases)
+rather than hand-maintaining a separate exclude list here.
+
 ```bash
 # Install (idempotent — safe to run multiple times)
 uv tool install graphifyy

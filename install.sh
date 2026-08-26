@@ -335,22 +335,103 @@ POINTER_EOF
   fi
 }
 
+# CEP_WIZARD_SKILL_NAME: the one skill whose install also bundles CEP's own
+# project docs alongside it (see copy_cep_wizard_docs below) - named once
+# here rather than repeated as a literal at each call site.
+CEP_WIZARD_SKILL_NAME="ult-cep-wizard"
+
+# copy_cep_wizard_docs: bundles CEP's own project docs (CONCEPT.md,
+# PROTOCOL.md, README.md, FAQ.md, case-studies/) into the installed
+# ult-cep-wizard skill's own docs/ subdirectory, so its in-app docs viewer
+# (wizard_docs.py) has real CEP content to serve in every install that
+# includes this skill. Previously this script only ever copied
+# .github/skills/, .github/prompts/, and .cursor/rules/, so wizard_docs.py's
+# docs viewer had nothing to find in any real install regardless of its own
+# root-detection logic - see wizard_docs.py's module docstring for the
+# reader side of this fix. Callers below only invoke this when the wizard
+# skill itself is actually being installed.
+copy_cep_wizard_docs() {
+  copy_tree "CONCEPT.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/CONCEPT.md"
+  copy_tree "PROTOCOL.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/PROTOCOL.md"
+  copy_tree "README.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/README.md"
+  copy_tree "FAQ.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/FAQ.md"
+  copy_tree "case-studies" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/case-studies"
+}
+
+OWNED_PATHS=()
+
+# write_cep_install_manifest <mode>: writes .cep-install.json at the target
+# root - the one place any CEP-shipped script can ask "which paths did the
+# installer itself put here", instead of each guessing independently via its
+# own hardcoded exclusion list. OWNED_PATHS is exactly the set of top-level
+# relative paths this run actually wrote, built up alongside each
+# copy_tree/scaffold_pointer call below rather than hardcoded here, so the
+# manifest can never drift out of sync with what the run actually did.
+# Always overwrites - same "library-owned files always mirror the source"
+# rule copy_tree follows - so re-running the installer keeps the manifest in
+# sync with whatever the run just did.
+write_cep_install_manifest() {
+  local mode="$1"
+  local dst="$TARGET/.cep-install.json"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log_action "would write: .cep-install.json"
+    return
+  fi
+
+  local owned_json only_json
+  owned_json="$(printf '"%s",' "${OWNED_PATHS[@]}")"
+  owned_json="[${owned_json%,}]"
+  if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
+    only_json="$(printf '"%s",' "${ONLY_NAMES[@]}")"
+    only_json="[${only_json%,}]"
+  else
+    only_json="null"
+  fi
+
+  cat > "$dst" <<EOF
+{
+  "schema_version": 1,
+  "runtime": ["claude", "copilot"],
+  "mode": "$mode",
+  "only_skills": $only_json,
+  "owned_paths": $owned_json,
+  "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+  log_action "wrote: .cep-install.json"
+}
+
 if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
   for _name in "${ONLY_NAMES[@]}"; do
     copy_tree ".github/skills/$_name" ".github/skills/$_name"
     copy_tree ".github/prompts/${_name}.prompt.md" ".github/prompts/${_name}.prompt.md"
     copy_tree ".cursor/rules/${_name}.mdc" ".cursor/rules/${_name}.mdc"
+    OWNED_PATHS+=(".github/skills/$_name" ".github/prompts/${_name}.prompt.md" ".cursor/rules/${_name}.mdc")
+    if [ "$_name" = "$CEP_WIZARD_SKILL_NAME" ]; then
+      copy_cep_wizard_docs
+      OWNED_PATHS+=(".github/skills/$CEP_WIZARD_SKILL_NAME/docs")
+    fi
   done
 else
   copy_tree ".github/skills" ".github/skills"
   copy_tree ".github/prompts" ".github/prompts"
   copy_tree ".cursor/rules" ".cursor/rules"
+  copy_cep_wizard_docs
+  OWNED_PATHS+=(".github/skills" ".github/prompts" ".cursor/rules")
 fi
 merge_agents_md
 
 if [ "$INIT_PROJECT" -eq 1 ]; then
   scaffold_context_config
   scaffold_pointer
+  OWNED_PATHS+=("starter_kit/project_guidelines")
+fi
+
+if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
+  write_cep_install_manifest "only"
+else
+  write_cep_install_manifest "full"
 fi
 
 echo ""

@@ -156,6 +156,77 @@ class InventoryExclusionsTest(unittest.TestCase):
             cep_retrofit.inventory("/definitely/does/not/exist/anywhere")
 
 
+class InventoryManifestExclusionTest(unittest.TestCase):
+    def _write_manifest(self, tmp, owned_paths, mode="full", only_skills=None):
+        _write(
+            Path(tmp) / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude", "copilot"],
+                "mode": mode,
+                "only_skills": only_skills,
+                "owned_paths": owned_paths,
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+
+    def test_manifest_owned_container_excluded_from_units_and_unclaimed(self):
+        # Common full-install shape: manifest owns ".github/skills" itself
+        # (a container), which holds a real SKILL.md-bearing subdirectory.
+        # The whole subtree is CEP's own installed content and must not be
+        # surfaced as a retrofit candidate, or leak into unclaimed_dirs.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / ".github" / "skills" / "installed-skill" / "SKILL.md", "# Installed\n")
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            self._write_manifest(tmp, [".github/skills", ".github/prompts"])
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertEqual(unit_ids, {"widget-reviewer"})
+            self.assertNotIn(".github/skills/installed-skill", result.get("unclaimed_dirs", []))
+
+    def test_manifest_absent_leaves_behavior_unchanged(self):
+        # No .cep-install.json in this fixture -- _read_cep_manifest must
+        # return None (not raise), and inventory() must fall back to
+        # today's DEFAULT_EXCLUDES-only behavior: an un-manifested ".github/
+        # skills" subtree is a real candidate like any other directory.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(cep_retrofit._read_cep_manifest(tmp))
+            _write(Path(tmp) / ".github" / "skills" / "installed-skill" / "SKILL.md", "# Installed\n")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertIn(".github/skills/installed-skill", unit_ids)
+
+    def test_only_mode_manifest_naming_a_skill_dir_directly_is_still_inventoried(self):
+        # Shape-aware precedence: an -Only install's manifest can name a
+        # skill-dir *directly* as owned_paths (rather than a container). The
+        # shape check (heuristic a) must still win -- this is a legitimate,
+        # CEP-installed unit, correctly inventoried, never silently dropped
+        # just because it matches owned_paths.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / ".github" / "skills" / "example-skill" / "SKILL.md", "# Example\n")
+            self._write_manifest(
+                tmp,
+                [".github/skills/example-skill"],
+                mode="only",
+                only_skills=["example-skill"],
+            )
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertIn(".github/skills/example-skill", unit_ids)
+
+    def test_manifest_owned_param_overrides_autodetection(self):
+        # Passing manifest_owned explicitly (e.g. manifest_owned=set())
+        # disables manifest-based exclusion entirely, even when a real
+        # .cep-install.json is present on disk -- documented override,
+        # mainly for tests.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / ".github" / "skills" / "installed-skill" / "SKILL.md", "# Installed\n")
+            self._write_manifest(tmp, [".github/skills"])
+            result = cep_retrofit.inventory(tmp, manifest_owned=set())
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertIn(".github/skills/installed-skill", unit_ids)
+
+
 @unittest.skipUnless(hasattr(os, "symlink"), "symlinks not supported on this platform/permission level")
 class InventorySymlinkTest(unittest.TestCase):
     def test_symlinked_skill_dir_is_inventoried_with_real_path(self):

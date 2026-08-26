@@ -6,10 +6,10 @@ These docs (PROTOCOL.md, README.md, case-studies/*/CASE-STUDY.md) describe
 the CEP protocol itself, not the target repo being onboarded - they always
 live next to this skill's own install location, not under `ctx.repo_root`
 (the repo the wizard is *running against*, which may be any repo at all).
-See `install_root()` below.
+See `docs_root()` below.
 
 Doc IDs are never user-supplied paths: `list_docs()` builds the full closed
-set itself by scanning the install root once per call; `wizard_server.py`'s
+set itself by scanning the docs root once per call; `wizard_server.py`'s
 `/api/docs/{id}` route can only ever return a doc whose ID is already in that
 scan (a plain 404 dict-lookup miss otherwise) - the same closed-set posture
 `STATIC_ASSETS` already uses for wizard.css/wizard.js. There is no
@@ -17,26 +17,43 @@ path-traversal surface here for `wizard_containment.check_containment` to
 guard, unlike `wizard_picker.py` (which does take an arbitrary user-supplied
 `rel_path` and needs it).
 
-Missing docs are not an error: a future install of this skill copied into an
-unrelated consumer repo may not bundle PROTOCOL.md/case-studies/ at all - this
-module omits what isn't found rather than failing, matching the project's
-fail-closed-but-not-fatal posture elsewhere (a broken layout doesn't crash the
-server; a missing doc shouldn't either).
+Missing docs are not an error: an install of this skill copied into a
+consumer repo that didn't select ult-cep-wizard (see `--only`/`-Only`) won't
+bundle these docs at all - this module omits what isn't found rather than
+failing, matching the project's fail-closed-but-not-fatal posture elsewhere
+(a broken layout doesn't crash the server; a missing doc shouldn't either).
 
-`install_root()` resolves to "whatever repo this skill's own directory sits
-four levels under" - correctly CEP's own repo while self-testing the wizard,
-but once this skill directory is installed into an unrelated consumer repo
-(the normal way it reaches anyone else's project), it resolves to *that*
-repo's root instead, silently and without any signal that anything changed.
-Every consumer repo has its own README.md; without a guard, `list_docs()`
-would serve that repo's own README as though it were CEP's - a CEP-branded
-overlay presenting someone else's project content as CEP's own docs.
-`_bundle_verified()` below is the guard: it requires CONCEPT.md *and*
-PROTOCOL.md to both exist at `root` before trusting anything found there.
-Those two together are distinctly CEP-named and not something an arbitrary
-consumer repo happens to also have (unlike README.md alone, which nearly
-every repo has) - so their joint presence is treated as proof `root` really
-is CEP's own repo, not a coincidence. When the bundle isn't verified,
+Two locations are trusted, in order - see `docs_root()`:
+
+1. `_docs_dir()` - a `docs/` directory bundled as a sibling of this script's
+   own installed location (scripts -> ult-cep-wizard -> docs). `install.ps1`/
+   `install.sh` materialize this by copying CONCEPT.md, PROTOCOL.md,
+   README.md, FAQ.md, and case-studies/ from the library source into every
+   real target install that includes the ult-cep-wizard skill - so a real
+   consumer install actually gets CEP's docs bundled with it (this used to
+   not happen at all: only `.github/skills`, `.github/prompts`, and
+   `.cursor/rules` were ever copied, so `list_docs()` had nothing to find in
+   any real install regardless of the guard below). A directory existing
+   here at all is trusted outright, no further check needed - nothing except
+   this repo's own installer can ever place a `docs/` directory inside this
+   skill's own installed footprint, so there's no coincidental-repo-content
+   risk to guard against the way the fallback below has to.
+2. `_self_test_root()` - four levels up from this file (scripts ->
+   ult-cep-wizard -> skills -> .github -> repo root). Correct only while this
+   skill runs inside CEP's own source repo, self-testing the wizard against
+   its own docs (`install.ps1`/`install.sh` are never run against this repo
+   itself, so it never gets a bundled `docs/` sibling of its own) - reached
+   only when `_docs_dir()` doesn't exist. Because this fallback's root guess
+   is a plain directory-nesting assumption rather than something the
+   installer wrote, it needs its own guard: `_bundle_verified()` requires
+   CONCEPT.md *and* PROTOCOL.md to both exist at the guessed root before
+   trusting anything found there. Those two together are distinctly
+   CEP-named and not something an arbitrary repo happens to also have
+   (unlike README.md alone, which nearly every repo has) - so their joint
+   presence is treated as proof the guess really landed on CEP's own repo,
+   not a coincidence.
+
+When neither location verifies, `docs_root()` returns `None` and
 `list_docs()` returns no docs at all - not "every doc except README.md" -
 because a partial docs viewer is still a CEP-branded surface showing
 someone else's content; wizard.js's own `setDocsNavAvailability()` already
@@ -76,10 +93,34 @@ class DocEntry:
     path: Path
 
 
-def install_root() -> Path:
-    """Repo root this skill is installed under: four levels up from this file
-    (scripts -> ult-cep-wizard -> skills -> .github -> repo root)."""
+def _docs_dir() -> Path:
+    """Preferred docs location - see module docstring point 1. A fixed
+    relative offset from this script's own directory, so it's stable under
+    any install layout (plain installer run, claude-plugin-managed install,
+    an `--only`/`-Only` run that includes this skill) rather than a guess at
+    "the repo root" the old `install_root()` made."""
+    return Path(__file__).resolve().parents[1] / "docs"
+
+
+def _self_test_root() -> Path:
+    """Fallback docs location - see module docstring point 2. Four levels up
+    from this file (scripts -> ult-cep-wizard -> skills -> .github -> repo
+    root); only reached when `_docs_dir()` doesn't exist, and only trusted
+    once `_bundle_verified()` passes against it."""
     return Path(__file__).resolve().parents[4]
+
+
+def docs_root() -> Optional[Path]:
+    """The one place both `list_docs()` and `wizard_server.py`'s doc-asset
+    route trust - see module docstring for the two locations tried, in
+    order. Returns `None` when neither verifies."""
+    bundled = _docs_dir()
+    if bundled.is_dir():
+        return bundled
+    fallback = _self_test_root()
+    if _bundle_verified(fallback):
+        return fallback
+    return None
 
 
 def _case_study_title(path: Path, fallback_slug: str) -> str:
@@ -116,16 +157,25 @@ def list_docs(root: Optional[Path] = None) -> List[DocEntry]:
     one entry per case-studies/*/CASE-STUDY.md sorted by directory slug,
     then FAQ.md last - matching the top bar's left-to-right nav order
     (Concept / Protocol / README / Case Studies / FAQ). `root` defaults to
-    install_root() - overridable for tests only, never by a request.
+    `docs_root()` - overridable for tests only, never by a request. An
+    explicit `root` override still goes through `_bundle_verified()` (the
+    fallback location's guard, see module docstring point 2) rather than
+    `docs_root()`'s two-location resolution, so existing test fixtures that
+    write CONCEPT.md/PROTOCOL.md straight into a bare tempdir keep working
+    unchanged.
 
-    Returns an empty list outright when `_bundle_verified(root)` is False -
-    see module docstring. This is a whole-bundle gate, not a per-doc one:
-    every branch below still has its own `is_file()` check for the ordinary
-    case (a verified CEP repo that simply hasn't written FAQ.md yet, say),
-    but none of them run at all until the bundle itself is verified."""
-    root = root or install_root()
-    if not _bundle_verified(root):
-        return []
+    Returns an empty list outright when the root can't be trusted - see
+    module docstring. This is a whole-bundle gate, not a per-doc one: every
+    branch below still has its own `is_file()` check for the ordinary case
+    (a verified CEP repo that simply hasn't written FAQ.md yet, say), but
+    none of them run at all until the bundle itself is verified."""
+    if root is not None:
+        if not _bundle_verified(root):
+            return []
+    else:
+        root = docs_root()
+        if root is None:
+            return []
     docs: List[DocEntry] = []
 
     concept = root / "CONCEPT.md"

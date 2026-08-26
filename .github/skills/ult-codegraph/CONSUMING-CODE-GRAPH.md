@@ -14,6 +14,14 @@ should follow this before doing that work:
    - **Not present:** proceed exactly as you normally would. Don't ask the
      user to generate one — this is an optional aid, not a requirement.
    - **Present:** continue to step 2.
+   - **Present but results are noisy with CEP's own installed content**
+     (skill/prompt files under `.github/`, `.cursor/`, etc. showing up in
+     `query`/`explain` results for a question about the project's own
+     code): the graph was likely built before CEP's `.cep-install.json`
+     `owned_paths` were excluded at generation time. Mention it in one line
+     and point back to `ult-codegraph/SKILL.md` Step 0 rather than trying
+     to filter results here — scoping belongs at generation time, not at
+     every query.
 
 2. **Prefer scoped runtime queries over reading the full graph.** Run
    `graphify query "<question>" --budget N` (a budget-capped traversal that

@@ -264,14 +264,64 @@ def _iter_files(dirpath):
             yield Path(root) / fn
 
 
+def _read_cep_manifest(repo_root):
+    """Reads `.cep-install.json` at `repo_root` (written by install.ps1/
+    install.sh) and returns its `owned_paths` as a set of resolved absolute
+    Paths, or None if no manifest exists or it can't be parsed. Deliberately
+    duplicated per-consumer rather than factored into a shared module (house
+    convention: see this module's own docstring). Callers must treat None as
+    "no signal available" and fall back to pre-manifest behavior -- never an
+    error for an unmanifested repo."""
+    manifest_path = Path(repo_root) / ".cep-install.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    owned = data.get("owned_paths")
+    if not isinstance(owned, list):
+        return None
+    result = set()
+    for item in owned:
+        if isinstance(item, str) and item:
+            result.add((Path(repo_root) / item).resolve())
+    return result
+
+
+def _manifest_owned_top_level_names(repo_root, manifest_owned):
+    """Top-level (direct child of repo_root) names that are themselves a
+    manifest `owned_paths` entry, or contain one as a descendant -- e.g.
+    "starter_kit" when `starter_kit/project_guidelines` is CEP-owned. Most
+    of CEP's own trees (.github/, .cursor/) are already dropped by the
+    dot-prefix rule in _prune_ignored, but starter_kit/ has no dot prefix,
+    so without this it would otherwise be walked and tiered like a real
+    application module -- the exact false-positive this closes."""
+    if not manifest_owned:
+        return set()
+    repo_root = Path(repo_root).resolve()
+    names = set()
+    for owned in manifest_owned:
+        try:
+            rel = owned.relative_to(repo_root)
+        except ValueError:
+            continue
+        if rel.parts:
+            names.add(rel.parts[0])
+    return names
+
+
 def _top_level_candidate_dirs(repo_root):
     """Immediate subdirectories of repo_root, pruned of
-    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES/dot-dirs. Each becomes one
-    candidate module. Returns sorted names (not full paths)."""
+    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES/dot-dirs, plus any manifest
+    `owned_paths` top-level name (see _manifest_owned_top_level_names).
+    Each surviving name becomes one candidate module. Returns sorted names
+    (not full paths)."""
     repo_root = Path(repo_root)
     if not repo_root.is_dir():
         return []
+    manifest_owned = _read_cep_manifest(repo_root)
+    manifest_names = _manifest_owned_top_level_names(repo_root, manifest_owned)
     names = _prune_ignored([p.name for p in repo_root.iterdir() if p.is_dir()])
+    names = [n for n in names if n not in manifest_names]
     return sorted(names)
 
 

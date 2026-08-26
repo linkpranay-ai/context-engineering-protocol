@@ -6,6 +6,7 @@ with scaffold_state.py itself. Run with:
     python -m unittest discover -s scripts/tests -v
 """
 
+import json
 import sys
 import tempfile
 import unittest
@@ -113,6 +114,45 @@ class FilesystemScanHelperTests(unittest.TestCase):
 
     def test_top_level_candidate_dirs_missing_root_returns_empty(self):
         self.assertEqual(ss._top_level_candidate_dirs("/does/not/exist/anywhere"), [])
+
+    def test_top_level_candidate_dirs_excludes_manifest_owned_top_level_name(self):
+        # starter_kit/ has no dot prefix and isn't in SCAN_IGNORED_DIR_NAMES,
+        # so without manifest awareness it would be walked and tiered like a
+        # real application module -- the exact false-positive
+        # _manifest_owned_top_level_names exists to close.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "core").mkdir()
+            _write(root / "starter_kit" / "project_guidelines" / "GUIDE.md", "# guide")
+            _write(
+                root / ".cep-install.json",
+                json.dumps({
+                    "schema_version": 1,
+                    "runtime": ["claude", "copilot"],
+                    "mode": "full",
+                    "only_skills": None,
+                    "owned_paths": [
+                        ".github/skills",
+                        ".github/prompts",
+                        "starter_kit/project_guidelines",
+                    ],
+                    "installed_at": "2026-01-01T00:00:00Z",
+                }),
+            )
+            self.assertEqual(ss._top_level_candidate_dirs(root), ["core"])
+
+    def test_top_level_candidate_dirs_keeps_same_name_without_manifest(self):
+        # Same starter_kit/ fixture as above, but with no .cep-install.json
+        # present -- _read_cep_manifest must return None (not raise), and
+        # scaffold_state falls back to pre-manifest behavior: starter_kit/
+        # still surfaces as a real candidate module, exactly as it always
+        # has for a manually-installed or unmanifested repo.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "core").mkdir()
+            _write(root / "starter_kit" / "project_guidelines" / "GUIDE.md", "# guide")
+            self.assertIsNone(ss._read_cep_manifest(root))
+            self.assertEqual(ss._top_level_candidate_dirs(root), ["core", "starter_kit"])
 
     def test_iter_files_prunes_nested_ignored_dirs(self):
         with tempfile.TemporaryDirectory() as d:

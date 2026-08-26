@@ -5,7 +5,14 @@ subprocess, exercising the same on-disk contract their own --help/synopsis
 promises: copy the skill set (.github/skills/, .github/prompts/,
 .cursor/rules/, AGENTS.md as a marked block) into --target/-TargetPath, and
 under --init-project/-InitProject additionally scaffold context-config.yaml
-and starter_kit/project_guidelines/.pointer.md.
+and starter_kit/project_guidelines/.pointer.md. Also covers two later
+additions with the same on-disk-contract framing: bundling CEP's own docs
+(CONCEPT.md/PROTOCOL.md/README.md/FAQ.md/case-studies/) into
+.github/skills/ult-cep-wizard/docs/ so wizard_docs.py has something to serve
+in a real install, and writing .cep-install.json recording what the
+installer itself just put on disk (see cep_retrofit.py/discover_layers.py/
+scaffold_state.py's own manifest-consumer docstrings for why that fact
+matters downstream).
 
 Reuses generated_config_text() from test_generated_context_config.py rather
 than re-deriving the substitution table a third time (install.sh and
@@ -19,6 +26,7 @@ CI (ubuntu-latest) has both.
     python -m unittest discover -s scripts/tests -v
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -41,6 +49,18 @@ LIBRARY_DIRS = [
     ".github/prompts",
     ".cursor/rules",
 ]
+
+# See Copy-CepWizardDocs (install.ps1) / copy_cep_wizard_docs (install.sh):
+# both installers bundle CEP's own repo-root docs into this path, sibling to
+# the ult-cep-wizard skill itself, so wizard_docs.py has something to serve
+# in a real install. It is NOT part of the .github/skills source tree (its
+# content comes from repo-root files, composed at install time), so
+# test_plain_install_copies_library excludes it from the strict
+# .github/skills tree-match and _assert_cep_wizard_docs_bundle checks it
+# separately instead.
+DOCS_BUNDLE_REL = "ult-cep-wizard/docs"
+DOCS_BUNDLE_SOURCE_FILES = ["CONCEPT.md", "PROTOCOL.md", "README.md", "FAQ.md"]
+DOCS_BUNDLE_SOURCE_DIRNAME = "case-studies"
 
 BEGIN_MARKER = "<!-- BEGIN context-engineering-protocol SKILLS (auto-generated, do not edit) -->"
 END_MARKER = "<!-- END context-engineering-protocol SKILLS -->"
@@ -66,7 +86,7 @@ your own files alongside it; they are never touched.
 _IGNORED_DIR_NAMES = {"__pycache__", ".pytest_cache"}
 
 
-def _tree_files(root: Path):
+def _tree_files(root: Path, ignore_prefixes=()):
     files = set()
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _IGNORED_DIR_NAMES]
@@ -74,14 +94,17 @@ def _tree_files(root: Path):
             if name.endswith(".pyc"):
                 continue
             rel = Path(dirpath, name).relative_to(root)
-            files.add(str(rel).replace("\\", "/"))
+            rel_str = str(rel).replace("\\", "/")
+            if any(rel_str == p or rel_str.startswith(p + "/") for p in ignore_prefixes):
+                continue
+            files.add(rel_str)
     return files
 
 
-def _assert_tree_matches(test, src: Path, dst: Path):
+def _assert_tree_matches(test, src: Path, dst: Path, ignore_prefixes=()):
     test.assertTrue(dst.is_dir(), f"missing directory: {dst}")
-    src_files = _tree_files(src)
-    dst_files = _tree_files(dst)
+    src_files = _tree_files(src, ignore_prefixes)
+    dst_files = _tree_files(dst, ignore_prefixes)
     test.assertEqual(src_files, dst_files, f"file set mismatch between {src} and {dst}")
     for rel in src_files:
         test.assertEqual(
@@ -89,6 +112,45 @@ def _assert_tree_matches(test, src: Path, dst: Path):
             (dst / rel).read_bytes(),
             f"content mismatch: {rel}",
         )
+
+
+def _assert_cep_wizard_docs_bundle(test, target: Path):
+    """Asserts the bundled docs/ subtree (see DOCS_BUNDLE_REL) is present
+    under the installed ult-cep-wizard skill and byte-identical to its
+    repo-root source files."""
+    bundle = target / ".github/skills" / DOCS_BUNDLE_REL
+    test.assertTrue(bundle.is_dir(), f"missing bundled docs dir: {bundle}")
+    for name in DOCS_BUNDLE_SOURCE_FILES:
+        test.assertEqual(
+            (REPO_ROOT / name).read_bytes(),
+            (bundle / name).read_bytes(),
+            f"content mismatch: {name}",
+        )
+    _assert_tree_matches(
+        test,
+        REPO_ROOT / DOCS_BUNDLE_SOURCE_DIRNAME,
+        bundle / DOCS_BUNDLE_SOURCE_DIRNAME,
+    )
+
+
+def _assert_cep_install_manifest(test, target: Path, mode: str, only_skills=None):
+    """Asserts .cep-install.json's shape (see New-CepInstallManifest in
+    install.ps1 / write_cep_install_manifest in install.sh)."""
+    manifest_path = target / ".cep-install.json"
+    test.assertTrue(manifest_path.is_file(), f"missing manifest: {manifest_path}")
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    test.assertEqual(data.get("schema_version"), 1)
+    test.assertEqual(sorted(data.get("runtime") or []), ["claude", "copilot"])
+    test.assertEqual(data.get("mode"), mode)
+    if only_skills:
+        test.assertEqual(sorted(data.get("only_skills") or []), sorted(only_skills))
+    else:
+        test.assertIsNone(data.get("only_skills"))
+    owned = data.get("owned_paths")
+    test.assertIsInstance(owned, list)
+    test.assertTrue(owned, "owned_paths must not be empty")
+    test.assertIn("installed_at", data)
+    return data
 
 
 class _InstallScriptTestBase:
@@ -103,7 +165,12 @@ class _InstallScriptTestBase:
             result = self._run(target, [])
             self.assertEqual(result.returncode, 0, result.stderr)
             for rel in LIBRARY_DIRS:
-                _assert_tree_matches(self, REPO_ROOT / rel, target / rel)
+                # .github/skills also gains the bundled ult-cep-wizard/docs/
+                # subtree (see DOCS_BUNDLE_REL) - not part of this source
+                # tree, so excluded here and checked separately below.
+                ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
+                _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            _assert_cep_wizard_docs_bundle(self, target)
             agents = (target / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn(BEGIN_MARKER, agents)
             self.assertIn(END_MARKER, agents)
@@ -111,6 +178,7 @@ class _InstallScriptTestBase:
             self.assertIn(source_agents, agents)
             self.assertFalse((target / "context-config.yaml").exists())
             self.assertFalse((target / "starter_kit").exists())
+            _assert_cep_install_manifest(self, target, mode="full")
 
     def test_init_project_scaffolds_config_and_pointer(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -194,9 +262,36 @@ class _InstallScriptTestBase:
             for rel in self._skill_paths("ult-codegraph"):
                 self.assertFalse((target / rel).exists(), f"unselected skill leaked in: {rel}")
 
+            # ult-cep-wizard wasn't selected: no docs bundle at all, not even
+            # an empty one - Copy-CepWizardDocs/copy_cep_wizard_docs only run
+            # when that name is in the selected set.
+            self.assertFalse((target / ".github/skills/ult-cep-wizard").exists())
+
             agents = (target / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn("demo-consume-context", agents)
             self.assertNotIn("ult-codegraph", agents)
+
+            _assert_cep_install_manifest(
+                self, target, mode="only", only_skills=["demo-consume-context"]
+            )
+
+    def test_only_flag_with_cep_wizard_bundles_docs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.only_flag, "ult-cep-wizard"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            for rel in self._skill_paths("ult-cep-wizard"):
+                self.assertTrue((target / rel).exists(), f"missing selected skill path: {rel}")
+            _assert_cep_wizard_docs_bundle(self, target)
+
+            data = _assert_cep_install_manifest(
+                self, target, mode="only", only_skills=["ult-cep-wizard"]
+            )
+            self.assertIn(
+                f".github/skills/{DOCS_BUNDLE_REL}",
+                data["owned_paths"],
+            )
 
     def test_only_flag_supports_multiple_skills(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -217,6 +312,13 @@ class _InstallScriptTestBase:
             self.assertIn("demo-consume-context", agents)
             self.assertIn("ult-codegraph", agents)
             self.assertNotIn("compiling-project-guidelines", agents)
+
+            _assert_cep_install_manifest(
+                self,
+                target,
+                mode="only",
+                only_skills=["demo-consume-context", "ult-codegraph"],
+            )
 
     def test_only_flag_rejects_unknown_skill_name(self):
         with tempfile.TemporaryDirectory() as tmp:

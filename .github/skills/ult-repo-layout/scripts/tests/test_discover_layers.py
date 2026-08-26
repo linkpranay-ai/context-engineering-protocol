@@ -11,6 +11,7 @@ frames the stress scenarios (S23-S27, S29-S40; S28 is out of scope for this
 module, untouched).
 """
 
+import json
 import shutil
 import sys
 import tempfile
@@ -260,6 +261,96 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         config = self.config()
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_cep_own_installed_skills_and_prompts_do_not_inflate_github_candidacy(self):
+        # Regression test: a repo with CEP itself installed has
+        # .github/skills/<name>/SKILL.md per installed skill and
+        # .github/prompts/*.prompt.md - CEP's own shipped content, not this
+        # project's own authored conventions. Previously these alone made
+        # .github/ outscore (or even exist as) a genuine How-L2 candidate,
+        # proposing CEP's own install directory as the project's conventions
+        # dir. Neither subtree should count towards .github/'s candidacy at
+        # all here - no real project content exists under .github/ in this
+        # fixture, so it must not appear as a candidate.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "prompts" / "do-thing.prompt.md", "# Do Thing")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_genuine_github_content_still_wins_alongside_cep_install(self):
+        # Same install footprint as above, but this project also keeps real
+        # conventions docs directly under .github/ - .github/ must still
+        # surface as a candidate on the strength of that real content, with
+        # the CEP-install noise simply not counted.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "prompts" / "do-thing.prompt.md", "# Do Thing")
+        write(self.repo_root / ".github" / "CONTRIBUTING.md", "# Contributing")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_manifest_present_still_excludes_the_common_skills_and_prompts_pair(self):
+        # Same fixture as test_cep_own_installed_skills_and_prompts_do_not_
+        # inflate_github_candidacy above, but with a .cep-install.json
+        # manifest present too - the manifest-driven path
+        # (_manifest_extra_ignored) must reach the same answer as the
+        # hardcoded HOW_L2_GITHUB_CANDIDATE_EXCLUDE fallback for the common
+        # full-install shape.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "prompts" / "do-thing.prompt.md", "# Do Thing")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude", "copilot"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": [".github/skills", ".github/prompts", ".cursor/rules"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_manifest_generalizes_beyond_the_hardcoded_skills_and_prompts_pair(self):
+        # The hardcoded HOW_L2_GITHUB_CANDIDATE_EXCLUDE fallback only ever
+        # knows about {"skills", "prompts"} - a manifest-owned .github/
+        # subtree under any other name would NOT be excluded by the
+        # fallback, and .github/ would wrongly surface as a candidate on
+        # the strength of CEP's own content. With a manifest naming that
+        # subtree explicitly, it's excluded correctly instead.
+        write(self.repo_root / ".github" / "agents" / "a.md", "# a")
+        write(self.repo_root / ".github" / "agents" / "b.md", "# b")
+        write(self.repo_root / ".github" / "agents" / "c.md", "# c")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude", "copilot"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": [".github/agents"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_manifest_absent_falls_back_to_hardcoded_pair_unchanged(self):
+        # No .cep-install.json in this fixture (this repo's own tempdir
+        # fixtures never write one unless a test does so explicitly) -
+        # _read_cep_manifest returns None and discover_how_l2 must fall
+        # back to exactly today's HOW_L2_GITHUB_CANDIDATE_EXCLUDE behavior,
+        # not treat "no manifest" as "nothing excluded".
+        self.assertIsNone(dl._read_cep_manifest(self.repo_root))
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "prompts" / "do-thing.prompt.md", "# Do Thing")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
 
     def test_root_signals_only_is_not_silent_default_to_dot(self):
         write(self.repo_root / "CONTRIBUTING.md", "# contributing")

@@ -155,7 +155,31 @@ def _rel(path, root):
     return os.path.relpath(str(path), str(root)).replace(os.sep, "/")
 
 
-def inventory(root, excludes=None):
+def _read_cep_manifest(root):
+    """Reads `.cep-install.json` at `root` (written by install.ps1/
+    install.sh) and returns its `owned_paths` as a set of resolved absolute
+    Paths, or None if no manifest exists or it can't be parsed. Deliberately
+    duplicated per-consumer rather than factored into a shared module (see
+    this file's own module docstring on why no-shared-library is the house
+    convention here). Callers must treat None as "no signal available" and
+    fall back to pre-manifest behavior -- never an error for an
+    unmanifested library."""
+    manifest_path = Path(root) / ".cep-install.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    owned = data.get("owned_paths")
+    if not isinstance(owned, list):
+        return None
+    result = set()
+    for item in owned:
+        if isinstance(item, str) and item:
+            result.add((Path(root) / item).resolve())
+    return result
+
+
+def inventory(root, excludes=None, manifest_owned=None):
     """Union of three shape-based heuristics -- never a single winner.
 
     Per directory, in order:
@@ -175,11 +199,25 @@ def inventory(root, excludes=None):
     Anything left over that isn't claimed by (a)/(b)/(c) but directly holds
     markdown/YAML/JSON content is reported in "unclaimed_dirs" for the calling
     skill to ask the human about -- never silently included or excluded.
+
+    If `root` has a `.cep-install.json` manifest (written by install.ps1/
+    install.sh -- see _read_cep_manifest), its `owned_paths` are excluded on
+    top of DEFAULT_EXCLUDES, checked *after* the (a)/(b) shape checks above
+    -- so CEP's own installed skills are never surfaced as candidate units
+    for retrofitting (the common case: `owned_paths` names a container like
+    `.github/skills`), but an `-Only`-install manifest that names a
+    skill-dir directly is still a legitimate unit, correctly inventoried,
+    never silently dropped just because it matches `owned_paths`. Pass
+    `manifest_owned` explicitly to override auto-detection (mainly for
+    tests); pass `manifest_owned=set()` to disable manifest-based exclusion
+    entirely.
     """
     excludes = DEFAULT_EXCLUDES if excludes is None else excludes
     root = Path(root)
     if not root.is_dir():
         raise NotADirectoryError(f"not a readable directory: {root}")
+    if manifest_owned is None:
+        manifest_owned = _read_cep_manifest(root) or set()
 
     units = []
     unclaimed_dirs = []
@@ -220,6 +258,14 @@ def inventory(root, excludes=None):
                 "via_symlink": via_symlink,
                 "real_path": os.path.realpath(dir_path),
             })
+            return
+
+        if not is_root and Path(dir_path).resolve() in manifest_owned:
+            # A manifest owned_paths entry that isn't itself a skill-dir/
+            # manifest-dir (the shape checks above already returned for
+            # those) -- CEP's own supporting content, e.g. the .github/skills
+            # container in a full install. Pruned like DEFAULT_EXCLUDES:
+            # not descended into, not reported as unclaimed either.
             return
 
         for f in filenames:
