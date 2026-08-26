@@ -361,9 +361,12 @@ class TestApiStatusMinimalRepo(WizardServerTestCase):
         # Phase 2 (§18.14 Section C): docs/requirements/ resolves but is empty in
         # this fixture, and Guidelines isn't installed at all here (available=False,
         # so guidelines_card's own initialized=False path never even applies) - the
-        # What box's stub card is the one that should surface.
+        # What box's stub card is the one that should surface. Trip-wire is also
+        # unavailable here (owning skill not installed), so tripwire_card's own
+        # available=False branch must suppress its card the same way.
         stub_titles = [c["box_title"] for c in payload["stub_cards"]]
         self.assertIn("What", stub_titles)
+        self.assertNotIn("Trip-wire", stub_titles)
 
 
 class TestApiStatusWithOptionalSkillsInstalled(WizardServerTestCase):
@@ -392,6 +395,17 @@ class TestApiStatusWithOptionalSkillsInstalled(WizardServerTestCase):
         self.assertTrue(payload["tripwire"]["available"])
         self.assertFalse(payload["tripwire"]["initialized"])
         self.assertEqual(payload["tripwire"]["entries"], 0)
+
+        # Regression test for the report finding this fixes (Trip-wire onboarding
+        # dead end): available + uninitialized + 0 entries must surface a stub
+        # card naming ult-institutional-memory-distill, same as Guidelines'
+        # uninitialized case does for compiling-project-guidelines.
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertIn("Trip-wire", stub_titles)
+        tripwire_stub = next(
+            c for c in payload["stub_cards"] if c["box_title"] == "Trip-wire"
+        )
+        self.assertIn("ult-institutional-memory-distill", tripwire_stub["prompt_text"])
 
 
 class TestApiPicker(WizardServerTestCase):
@@ -465,6 +479,50 @@ def _write_discovery_artifact(root: Path, content: str = SINGLE_DECISION_ARTIFAC
     path = root / "context-layout-discovery.md"
     path.write_text(content, encoding="utf-8")
     return path
+
+
+class TestApiStatusWithPendingDecisions(WizardServerTestCase):
+    """Regression test: a What/How stub card must not tell the user to
+    scaffold content at a resolved path that a not-yet-Applied decision
+    might be about to move out from under them. Same base fixture as
+    TestApiStatusMinimalRepo
+    (docs/requirements/ resolves but is empty on disk, so absent the gate
+    the What card would surface exactly as it does there) - the only
+    difference is a discovery artifact with a still-PENDING What-L2 field."""
+
+    def test_what_card_suppressed_while_its_decision_is_pending(self):
+        _write_discovery_artifact(self.repo_root, content=SINGLE_DECISION_ARTIFACT)
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertNotIn("What", stub_titles)
+
+    def test_gate_is_per_box_not_whole_artifact(self):
+        # What-L2 confirmed, How-L2 still PENDING - proves the gate is
+        # per-box, not an all-or-nothing artifact-exists check: What's card
+        # may return once its own decision lands even while How's stays
+        # suppressed.
+        _write_discovery_artifact(
+            self.repo_root,
+            content=(
+                f"# Context Layout Discovery - test-repo\n\n"
+                f"## {WHAT_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: CONFIRM: docs/reqs/   # CONFIRMED 2026-01-01\n\n"
+                f"## {HOW_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: PENDING   # CONFIRM: org/ | CUSTOM: <path> | SKIP\n"
+            ),
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertIn("What", stub_titles)
+        self.assertNotIn("How", stub_titles)
 
 
 class TestApiDecisions(WizardServerTestCase):

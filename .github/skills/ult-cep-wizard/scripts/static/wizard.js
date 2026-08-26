@@ -245,15 +245,17 @@
   }
 
   // Guide-only "copy this prompt for your coding agent" cards
-  // (wizard_stub_content.what_how_card/guidelines_card, D24 §18.14 section C) -
-  // /api/status now appends a "stub_cards" list alongside the four boxes; this is
-  // the only place that ever reads it. Each box article that can host one carries
-  // an empty `.stub-card` slot in index.html - hidden whenever there's no card for
-  // that box_title this time (e.g. once the box is actually populated).
+  // (wizard_stub_content.what_how_card/guidelines_card/tripwire_card, D24 §18.14
+  // section C) - /api/status now appends a "stub_cards" list alongside the four
+  // boxes; this is the only place that ever reads it. Each of the four box
+  // articles carries an empty `.stub-card` slot in index.html - hidden whenever
+  // there's no card for that box_title this time (e.g. once the box is actually
+  // populated, or - Trip-wire only - once it has real ledger entries).
   var STUB_CARD_BOX_IDS = {
     What: "box-what",
     How: "box-how",
     Guidelines: "box-guidelines",
+    "Trip-wire": "box-tripwire",
   };
 
   function renderStubCards(stubCards) {

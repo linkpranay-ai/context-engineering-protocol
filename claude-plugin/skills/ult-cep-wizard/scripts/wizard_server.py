@@ -383,18 +383,49 @@ def _make_handler(ctx: _ServerContext):
             # wizard_stub_content preview cards in alongside the existing box view
             # model, rather than a new route - its inputs are exactly what
             # build_boxes already computed above.
+            #
+            # A card must not point a user at scaffolding content while its own
+            # What/How decision is still awaiting Apply - see
+            # wizard_stub_content.what_how_card's layer_decisions_pending
+            # docstring. Reading decisions here (rather than only from
+            # /api/decisions) costs one extra read_decisions() call on this
+            # route, same source object, no extra containment/validate work.
+            # read_decisions() itself already returns [] when no discovery
+            # artifact exists yet, so no explicit no-artifact branch is needed
+            # here (matches _handle_api_decisions's own un-wrapped call below).
+            what_pending = how_pending = False
+            for f in source.read_decisions():
+                if f.state == "confirmed":
+                    continue
+                if f.section_title.startswith("What"):
+                    what_pending = True
+                elif f.section_title.startswith("How"):
+                    how_pending = True
             what_card = wizard_stub_content.what_how_card(
-                "What", ctx.repo_root, [p.path for p in view.what.paths]
+                "What",
+                ctx.repo_root,
+                [p.path for p in view.what.paths],
+                layer_decisions_pending=what_pending,
             )
             how_card = wizard_stub_content.what_how_card(
-                "How", ctx.repo_root, [p.path for p in view.how.paths]
+                "How",
+                ctx.repo_root,
+                [p.path for p in view.how.paths],
+                layer_decisions_pending=how_pending,
             )
             guidelines_card = wizard_stub_content.guidelines_card(
                 ctx.repo_root, view.guidelines.initialized, view.guidelines.default_path
             )
+            tripwire_card = wizard_stub_content.tripwire_card(
+                ctx.repo_root,
+                available=view.tripwire.available,
+                initialized=view.tripwire.initialized,
+                entries=view.tripwire.entries,
+                ledger_path=view.tripwire.ledger_path,
+            )
             payload["stub_cards"] = [
                 asdict(card)
-                for card in (what_card, how_card, guidelines_card)
+                for card in (what_card, how_card, guidelines_card, tripwire_card)
                 if card is not None
             ]
             self._send_json(HTTPStatus.OK, payload)
