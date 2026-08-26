@@ -213,6 +213,106 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         for unit in result.units:
             self.assertTrue((self.root / unit.primary_file).is_file())
 
+    def test_skill_directory_is_preferred_over_duplicate_flat_documentation(self):
+        # Regression test: cep_retrofit.inventory()'s union-of-heuristics
+        # design (correct and intentional at that layer - see its docstring)
+        # means a flat *.md file named after an existing, *nearby* skill
+        # directory (e.g. a stray skills/implement.md sibling of
+        # skills/implement/SKILL.md) previously surfaced as a second,
+        # independent unit. Real library run returned 82 units instead of
+        # the true 37, with duplicate "implement" entries. The dedupe
+        # belongs in this wizard view, not cep_retrofit.py itself - see
+        # _dedupe_flat_file_units's own docstring. Sibling placement here
+        # (both directly under "skills") is what makes the two "the same
+        # directory" under _dirs_proximate() - see
+        # test_distant_same_stem_flat_file_is_not_treated_as_duplicate below
+        # for the case this must *not* fire on.
+        _write(self.root / "library" / "skills" / "implement" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "skills" / "implement.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+
+        self.assertEqual(
+            [(unit.type, unit.primary_file) for unit in result.units],
+            [("skill-dir", "library/skills/implement/SKILL.md")],
+        )
+
+    def test_root_adjacent_same_stem_flat_file_is_treated_as_duplicate(self):
+        # One level apart (target-root vs. one directory down) also counts
+        # as proximate - a flat file sitting right outside the directory
+        # tree holding the skill-dir it duplicates.
+        _write(self.root / "library" / "skills" / "implement" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "implement.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+
+        self.assertEqual(
+            [(unit.type, unit.primary_file) for unit in result.units],
+            [("skill-dir", "library/skills/implement/SKILL.md")],
+        )
+
+    def test_distant_same_stem_flat_file_is_not_treated_as_duplicate(self):
+        # Guards against the false-collision defect: two same-stem files in
+        # unrelated parts of a larger tree (parents "rules" and "tools" here
+        # satisfy none of _dirs_proximate()'s three relations) must both
+        # survive as independent units, not get silently deduped just
+        # because they share a filename.
+        _write(self.root / "library" / "tools" / "build" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "rules" / "build.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"tools/build", "rules/build.md"})
+
+    def test_double_suffix_companion_is_treated_as_duplicate(self):
+        # A .prompt.md companion of a skill-dir must dedupe correctly - the
+        # double suffix has to be stripped before stem comparison, or
+        # "widget.prompt" (the un-stripped stem) never matches "widget".
+        _write(self.root / "library" / "skills" / "widget" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "skills" / "widget.prompt.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+
+        self.assertEqual(
+            [(unit.type, unit.primary_file) for unit in result.units],
+            [("skill-dir", "library/skills/widget/SKILL.md")],
+        )
+
+
+class TestTierPropagation(RetrofitInventoryTestCase):
+    def setUp(self):
+        super().setUp()
+        _install_ult_cep_retrofit(self.root)
+
+    def test_tier_and_note_propagate_onto_each_unit(self):
+        _write(self.root / "widget-reviewer" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "docs" / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+        by_id = {u.unit_id: u for u in result.units}
+
+        skill_dir = by_id["widget-reviewer"]
+        self.assertEqual(skill_dir.tier, "canonical")
+        self.assertEqual(skill_dir.note, "")
+
+        docs_flat_file = by_id["docs/second-widget.md"]
+        self.assertEqual(docs_flat_file.tier, "supplementary")
+        self.assertNotEqual(docs_flat_file.note, "")
+
+    def test_result_reports_tier_counts_reflecting_dedupe(self):
+        # tier_counts must reflect what's actually left in result.units after
+        # _dedupe_flat_file_units() runs, not cep_retrofit's raw pre-dedupe
+        # counts - the duplicate here is dropped, so it must not be counted.
+        _write(self.root / "skills" / "widget" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "skills" / "widget.md", SECOND_WIDGET_MD)
+        _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+
+        self.assertEqual(len(result.units), 2)  # the duplicate was dropped
+        self.assertEqual(result.tier_counts, {"canonical": 1, "supplementary": 1})
+
 
 class TestDescribeErrorIsolation(RetrofitInventoryTestCase):
     def test_one_unit_failing_describe_does_not_drop_the_others(self):

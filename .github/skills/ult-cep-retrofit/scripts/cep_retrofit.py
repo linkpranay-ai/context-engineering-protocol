@@ -15,9 +15,13 @@ Step 7.7 (human tiering).
 
 Format-agnostic by construction (see the design draft's binding constraint, 3):
 every heuristic here is shape-based (does this directory contain a file matching a
-known pattern) never name-based (is this file literally named X) -- so it runs the
-same way against any target library, seen or unseen, and never encodes knowledge of
-any specific private library.
+known pattern), with one narrow, documented exception -- a small set of root-level
+filenames (AGENTS.md, README.md, etc. -- see _NON_SKILL_FLAT_NAMES) are excluded by
+literal name, but only at the target root itself (depth 0), never at any nested
+depth, so a nested file that happens to share one of those names (e.g.
+`rules/agents.md`) is unaffected. Everywhere else this runs the same way against
+any target library, seen or unseen, and never encodes knowledge of any specific
+private library.
 
 Symlink handling: a symlinked directory is inventoried at one level (its own direct
 files are checked against the same heuristics, with the real path recorded) but
@@ -91,15 +95,18 @@ DEFAULT_EXCLUDES = {
     ".git", ".hg", ".svn", "node_modules", "dist", "build", ".venv", "venv",
     "__pycache__", ".tox", ".mypy_cache", ".pytest_cache", "site-packages",
     ".idea", ".vscode",
-    # Well-known repository-governance directory shapes, not any specific
-    # library's own convention (same "generic enough to encode here" bar as
-    # the entries above): "adr" for Architecture Decision Records (a broadly
-    # used term across many orgs, regardless of what parent directory holds
-    # it - e.g. docs/adr/, .agents/adr/); ".changeset" for the changesets
-    # release-notes tool; ".out-of-scope" for content a repo has already
-    # marked as explicitly not part of its operational surface. None of
-    # these hold skill units even when they happen to contain *.md files.
-    "adr", ".changeset", ".out-of-scope",
+    # Deliberately tooling/VCS-only. A previous round also excluded "adr",
+    # ".changeset", and ".out-of-scope" by name, on the theory that those
+    # are repository-governance shapes that never hold real skill units --
+    # but that reasoning doesn't hold once the shape check (below, in
+    # walk()) is fixed to run and win *before* any name-based exclusion:
+    # a directory happening to be named "adr" that holds ordinary markdown
+    # notes (not a SKILL.md) is no different from one named "notes" or
+    # "docs" holding the same -- see inventory()'s docstring on tiering for
+    # how that content is surfaced (as a lower-confidence "supplementary"
+    # unit) instead of silently dropped by a denylist entry that would need
+    # a new name added every time some other org's governance convention
+    # showed up.
 }
 
 _SKILL_FILENAMES = ("SKILL.md", "skill.md")
@@ -119,6 +126,13 @@ _NON_SKILL_FLAT_NAMES = {
     # here doesn't encode knowledge of any one private library. A repo's own
     # AGENTS.md/CLAUDE.md/CONTEXT.md describes how to work in that repo as a
     # whole - it is not itself a retrofittable skill unit.
+    #
+    # Checked at depth 0 (the inventory target's own root) only -- see
+    # _is_flat_skill_file's `is_root` parameter. A nested file that happens
+    # to share one of these names (e.g. `rules/agents.md`, a real per-rule
+    # doc in some other convention) is a different thing entirely and must
+    # not be swept up by a root-level-instruction-file rule that doesn't
+    # apply to it.
     "agents.md", "claude.md", "context.md",
 }
 
@@ -142,9 +156,9 @@ _FRONTMATTER_BLOCK_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---", re.DOTALL)
 _FRONTMATTER_FIELD_RE = re.compile(r"^(name|description|summary):\s*(.+)$", re.MULTILINE)
 
 
-def _is_flat_skill_file(name):
+def _is_flat_skill_file(name, is_root=False):
     lower = name.lower()
-    if lower in _NON_SKILL_FLAT_NAMES:
+    if is_root and lower in _NON_SKILL_FLAT_NAMES:
         return False
     if lower.endswith(_FLAT_FILE_DOUBLE_SUFFIX):
         return True
@@ -200,6 +214,19 @@ def inventory(root, excludes=None, manifest_owned=None):
     markdown/YAML/JSON content is reported in "unclaimed_dirs" for the calling
     skill to ask the human about -- never silently included or excluded.
 
+    Every unit carries a "tier": "canonical" for (a)/(b) units (a real,
+    dedicated marker file -- high confidence this is a genuine skill unit)
+    or "supplementary" for (c) units (a bare markdown file -- a weaker
+    guess; it could just as easily be ordinary documentation). A
+    "supplementary" unit whose containing directory is literally named
+    "docs" (at any depth) additionally carries a non-empty "note" flagging
+    that weaker signal explicitly, rather than being dropped by a
+    docs-specific denylist entry. Nothing is ever removed from the walk
+    output on tier grounds alone -- tiering is a confidence label for the
+    calling skill to group/filter by, not a fourth exclusion heuristic. The
+    returned dict's "tier_counts" gives a quick `{"canonical": N,
+    "supplementary": M}` summary across all units.
+
     If `root` has a `.cep-install.json` manifest (written by install.ps1/
     install.sh -- see _read_cep_manifest), its `owned_paths` are excluded on
     top of DEFAULT_EXCLUDES, checked *after* the (a)/(b) shape checks above
@@ -240,6 +267,8 @@ def inventory(root, excludes=None, manifest_owned=None):
                 "primary_file": _rel(os.path.join(dir_path, skill_file), root),
                 "via_symlink": via_symlink,
                 "real_path": os.path.realpath(dir_path),
+                "tier": "canonical",
+                "note": "",
             })
             return
 
@@ -254,6 +283,8 @@ def inventory(root, excludes=None, manifest_owned=None):
                 "primary_file": _rel(os.path.join(dir_path, manifest_matches[0]), root),
                 "via_symlink": via_symlink,
                 "real_path": os.path.realpath(dir_path),
+                "tier": "canonical",
+                "note": "",
             })
             return
 
@@ -269,19 +300,27 @@ def inventory(root, excludes=None, manifest_owned=None):
             # Name-based exclusion is strictly weaker than the shape checks
             # above: this directory didn't match SKILL.md/manifest-file
             # shape, so its name now takes over purely as a descent-bounding
-            # signal for known tooling/VCS/governance directories (node_
-            # modules, .git, etc.) -- never a reason to drop a directory
-            # that *does* have skill/manifest shape. A directory named
-            # "adr" holding real SKILL.md content is caught by the checks
-            # above and never reaches this line; one holding ordinary
-            # architecture-decision-record markdown is pruned here exactly
-            # as before, not scanned for flat-file units or reported as
-            # unclaimed.
+            # signal for known tooling/VCS directories (node_modules, .git,
+            # etc., DEFAULT_EXCLUDES's fixed, generic set) -- never a reason
+            # to drop a directory that *does* have skill/manifest shape. A
+            # directory named "node_modules" holding real SKILL.md content
+            # is caught by the checks above and never reaches this line; one
+            # holding only its usual dependency-tree contents is pruned here
+            # exactly as before, not scanned for flat-file units or reported
+            # as unclaimed.
             return
 
         for f in filenames:
-            if _is_flat_skill_file(f):
+            if _is_flat_skill_file(f, is_root):
                 fpath = os.path.join(dir_path, f)
+                note = ""
+                if Path(dir_path).name.lower() == "docs":
+                    note = (
+                        'flat-file unit found directly under a directory named '
+                        '"docs" -- a weaker signal than a dedicated skill-dir/'
+                        'manifest-dir (heuristic (c) vs. (a)/(b)); treat as '
+                        'supplementary, not canonical'
+                    )
                 units.append({
                     "unit_id": _rel(fpath, root),
                     "type": "flat-file",
@@ -289,11 +328,13 @@ def inventory(root, excludes=None, manifest_owned=None):
                     "primary_file": _rel(fpath, root),
                     "via_symlink": via_symlink,
                     "real_path": os.path.realpath(fpath),
+                    "tier": "supplementary",
+                    "note": note,
                 })
 
         if not is_root:
             has_candidate_content = any(
-                _is_flat_skill_file(f) or f.lower().endswith((".yaml", ".yml", ".json"))
+                _is_flat_skill_file(f, is_root) or f.lower().endswith((".yaml", ".yml", ".json"))
                 for f in filenames
             )
             if has_candidate_content and skill_file is None and len(manifest_matches) != 1:
@@ -306,7 +347,14 @@ def inventory(root, excludes=None, manifest_owned=None):
             walk(e.path, False, e.is_symlink(), e.name)
 
     walk(str(root), True, False)
-    return {"units": units, "unclaimed_dirs": sorted(unclaimed_dirs)}
+    tier_counts = {"canonical": 0, "supplementary": 0}
+    for u in units:
+        tier_counts[u["tier"]] += 1
+    return {
+        "units": units,
+        "unclaimed_dirs": sorted(unclaimed_dirs),
+        "tier_counts": tier_counts,
+    }
 
 
 def describe(path):

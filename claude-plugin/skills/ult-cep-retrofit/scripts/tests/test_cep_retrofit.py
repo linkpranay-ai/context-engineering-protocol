@@ -106,6 +106,19 @@ class InventoryHeuristicCTest(unittest.TestCase):
             result = cep_retrofit.inventory(tmp)
             self.assertEqual(result["units"], [])
 
+    def test_non_skill_flat_names_checked_at_root_depth_only(self):
+        # _NON_SKILL_FLAT_NAMES's exclusion is a depth-0 (target-root-only)
+        # rule -- a nested file sharing one of those names is a different
+        # thing (some other convention's real per-directory doc) and must
+        # surface, unlike the true root-level case above.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "AGENTS.md", "agents")
+            _write(Path(tmp) / "rules" / "agents.md", "nested agents rule")
+            _write(Path(tmp) / "rules" / "context.md", "nested context rule")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertEqual(unit_ids, {"rules/agents.md", "rules/context.md"})
+
 
 class InventoryUnionNotWinnerTakeAllTest(unittest.TestCase):
     """The blocking review finding: mixed conventions must not swallow each other."""
@@ -136,38 +149,51 @@ class InventoryExclusionsTest(unittest.TestCase):
             result = cep_retrofit.inventory(tmp)
             self.assertEqual(result["units"], [])
 
-    def test_governance_directories_excluded(self):
-        # ADRs, changesets, and content a repo has already marked
-        # out-of-scope are repository-governance shapes, not skill units -
-        # even when they hold *.md files that would otherwise match
-        # heuristic (c), and even nested under another directory (e.g. an
-        # "adr" folder under some other parent), same as node_modules/.git
-        # above.
+    def test_former_governance_denylist_names_now_surface_as_supplementary(self):
+        # A previous round excluded "adr"/".changeset"/".out-of-scope" by
+        # name. That's gone now: shape/tiering replaced the rationale -- a
+        # directory with one of those names but no SKILL.md is no different
+        # from any other directory holding ordinary markdown, so its *.md
+        # files surface via heuristic (c), tagged "supplementary" (a weaker
+        # guess than a dedicated skill-dir/manifest-dir), not silently
+        # dropped by a denylist that would need a new name added every time
+        # some other org's governance convention showed up.
         with tempfile.TemporaryDirectory() as tmp:
             _write(Path(tmp) / "adr" / "0001-decision.md", "# ADR 1\n")
             _write(Path(tmp) / "nested" / "adr" / "0002-decision.md", "# ADR 2\n")
             _write(Path(tmp) / ".changeset" / "some-change.md", "# Change\n")
             _write(Path(tmp) / ".out-of-scope" / "draft.md", "# Draft\n")
             result = cep_retrofit.inventory(tmp)
-            self.assertEqual(result["units"], [])
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertEqual(
+                unit_ids,
+                {
+                    "adr/0001-decision.md",
+                    "nested/adr/0002-decision.md",
+                    ".changeset/some-change.md",
+                    ".out-of-scope/draft.md",
+                },
+            )
+            self.assertTrue(all(u["tier"] == "supplementary" for u in result["units"]))
 
     def test_missing_root_raises(self):
         with self.assertRaises(NotADirectoryError):
             cep_retrofit.inventory("/definitely/does/not/exist/anywhere")
 
-    def test_governance_shaped_name_holding_a_real_skill_is_still_inventoried(self):
-        # Negative control for test_governance_directories_excluded above:
+    def test_default_excluded_name_holding_a_real_skill_is_still_inventoried(self):
+        # Negative control for test_generated_dirs_excluded above:
         # name-based exclusion must be strictly weaker than the shape
-        # check. A directory that happens to be named "adr" (or any other
-        # DEFAULT_EXCLUDES entry) but actually holds a SKILL.md is a real,
-        # legitimate skill-dir -- it must never be silently dropped just
-        # because its name matches a governance-directory convention.
+        # check. A directory that happens to be named "node_modules" (or
+        # any other DEFAULT_EXCLUDES entry) but actually holds a SKILL.md
+        # is a real, legitimate skill-dir -- it must never be silently
+        # dropped just because its name matches a tooling/VCS-directory
+        # convention.
         with tempfile.TemporaryDirectory() as tmp:
-            _write(Path(tmp) / "adr" / "SKILL.md", "# ADR skill\n")
+            _write(Path(tmp) / "node_modules" / "SKILL.md", "# Odd but real skill\n")
             _write(Path(tmp) / "review" / "SKILL.md", "# Review skill\n")
             result = cep_retrofit.inventory(tmp)
             unit_ids = {u["unit_id"] for u in result["units"]}
-            self.assertEqual(unit_ids, {"adr", "review"})
+            self.assertEqual(unit_ids, {"node_modules", "review"})
 
 
 class InventoryManifestExclusionTest(unittest.TestCase):
@@ -239,6 +265,44 @@ class InventoryManifestExclusionTest(unittest.TestCase):
             result = cep_retrofit.inventory(tmp, manifest_owned=set())
             unit_ids = {u["unit_id"] for u in result["units"]}
             self.assertIn(".github/skills/installed-skill", unit_ids)
+
+
+class InventoryTieringTest(unittest.TestCase):
+    def test_skill_dir_and_manifest_dir_are_canonical_with_no_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            _write(Path(tmp) / "second-widget" / "skill.yaml", "name: second-widget\n")
+            result = cep_retrofit.inventory(tmp)
+            for unit in result["units"]:
+                self.assertEqual(unit["tier"], "canonical")
+                self.assertEqual(unit["note"], "")
+
+    def test_flat_file_outside_docs_is_supplementary_with_no_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "rules" / "widget.mdc", "widget rule")
+            result = cep_retrofit.inventory(tmp)
+            unit = result["units"][0]
+            self.assertEqual(unit["tier"], "supplementary")
+            self.assertEqual(unit["note"], "")
+
+    def test_flat_file_under_docs_is_supplementary_with_a_note(self):
+        # "docs" at any depth, not just directly under the target root.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "docs" / "implement.md", "# Implement\n")
+            _write(Path(tmp) / "nested" / "docs" / "deploy.md", "# Deploy\n")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"]: u for u in result["units"]}
+            for unit_id in ("docs/implement.md", "nested/docs/deploy.md"):
+                self.assertEqual(unit_ids[unit_id]["tier"], "supplementary")
+                self.assertNotEqual(unit_ids[unit_id]["note"], "")
+
+    def test_tier_counts_summarizes_across_all_units(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            _write(Path(tmp) / "docs" / "implement.md", "# Implement\n")
+            _write(Path(tmp) / "flat-rule.prompt.md", "flat rule")
+            result = cep_retrofit.inventory(tmp)
+            self.assertEqual(result["tier_counts"], {"canonical": 1, "supplementary": 2})
 
 
 @unittest.skipUnless(hasattr(os, "symlink"), "symlinks not supported on this platform/permission level")
