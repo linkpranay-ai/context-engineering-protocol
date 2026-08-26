@@ -222,17 +222,14 @@ def inventory(root, excludes=None, manifest_owned=None):
     units = []
     unclaimed_dirs = []
 
-    def walk(dir_path, is_root, via_symlink):
+    def walk(dir_path, is_root, via_symlink, name=None):
         try:
             entries = sorted(os.scandir(dir_path), key=lambda e: e.name)
         except OSError:
             return  # permission-denied/race-condition subdir: skip, don't abort the whole scan
 
         filenames = [e.name for e in entries if e.is_file(follow_symlinks=True)]
-        subdirs = [
-            e for e in entries
-            if e.is_dir(follow_symlinks=True) and e.name not in excludes
-        ]
+        subdirs = [e for e in entries if e.is_dir(follow_symlinks=True)]
 
         skill_file = next((f for f in filenames if f in _SKILL_FILENAMES), None)
         if skill_file is not None and not is_root:
@@ -268,6 +265,20 @@ def inventory(root, excludes=None, manifest_owned=None):
             # not descended into, not reported as unclaimed either.
             return
 
+        if not is_root and name in excludes:
+            # Name-based exclusion is strictly weaker than the shape checks
+            # above: this directory didn't match SKILL.md/manifest-file
+            # shape, so its name now takes over purely as a descent-bounding
+            # signal for known tooling/VCS/governance directories (node_
+            # modules, .git, etc.) -- never a reason to drop a directory
+            # that *does* have skill/manifest shape. A directory named
+            # "adr" holding real SKILL.md content is caught by the checks
+            # above and never reaches this line; one holding ordinary
+            # architecture-decision-record markdown is pruned here exactly
+            # as before, not scanned for flat-file units or reported as
+            # unclaimed.
+            return
+
         for f in filenames:
             if _is_flat_skill_file(f):
                 fpath = os.path.join(dir_path, f)
@@ -292,7 +303,7 @@ def inventory(root, excludes=None, manifest_owned=None):
             return  # bounded: one level of symlink dereference, never recursed further
 
         for e in subdirs:
-            walk(e.path, False, e.is_symlink())
+            walk(e.path, False, e.is_symlink(), e.name)
 
     walk(str(root), True, False)
     return {"units": units, "unclaimed_dirs": sorted(unclaimed_dirs)}

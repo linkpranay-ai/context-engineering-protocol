@@ -155,6 +155,20 @@ class InventoryExclusionsTest(unittest.TestCase):
         with self.assertRaises(NotADirectoryError):
             cep_retrofit.inventory("/definitely/does/not/exist/anywhere")
 
+    def test_governance_shaped_name_holding_a_real_skill_is_still_inventoried(self):
+        # Negative control for test_governance_directories_excluded above:
+        # name-based exclusion must be strictly weaker than the shape
+        # check. A directory that happens to be named "adr" (or any other
+        # DEFAULT_EXCLUDES entry) but actually holds a SKILL.md is a real,
+        # legitimate skill-dir -- it must never be silently dropped just
+        # because its name matches a governance-directory convention.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "adr" / "SKILL.md", "# ADR skill\n")
+            _write(Path(tmp) / "review" / "SKILL.md", "# Review skill\n")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertEqual(unit_ids, {"adr", "review"})
+
 
 class InventoryManifestExclusionTest(unittest.TestCase):
     def _write_manifest(self, tmp, owned_paths, mode="full", only_skills=None):
