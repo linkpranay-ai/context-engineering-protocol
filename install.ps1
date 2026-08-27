@@ -22,6 +22,15 @@
     .github/prompts/<name>.prompt.md, and .cursor/rules/<name>.mdc, and trims
     AGENTS.md's merged block down to only those skills' rows.
 
+.PARAMETER Runtime
+    Which tool(s) the install targets: "claude" copies .github/skills/ only
+    (Claude Code reads skill files natively). "copilot" additionally copies
+    .github/prompts/ and .cursor/rules/ — each prompt/rule file is itself a
+    thin pointer back into .github/skills/, so that tree comes along
+    regardless of which value is chosen. "both" (default) is today's
+    unconditional copy of all three — unchanged behavior when this
+    parameter is omitted.
+
 .PARAMETER DryRun
     Print what would be done without writing anything.
 #>
@@ -30,6 +39,8 @@ param(
     [string]$TargetPath = "",
     [switch]$InitProject,
     [string]$Only = "",
+    [ValidateSet("claude", "copilot", "both")]
+    [string]$Runtime = "both",
     [switch]$DryRun
 )
 
@@ -357,6 +368,14 @@ function New-CepInstallManifest {
     }
 
     $dst = Join-Path $TargetPath ".cep-install.json"
+    # RuntimeList: the -Runtime selection expressed as the manifest's own
+    # `runtime` array — "both" means literally both tools got their trees
+    # copied, so it expands to both names; "claude"/"copilot" alone record
+    # just the one value this run actually scoped itself to. This is itself
+    # an if/else-expression assignment, so the same single-element-array
+    # collapse described below applies here too — the else branch needs its
+    # own unary-comma guard, not just the one on $manifest.only_skills.
+    $RuntimeList = if ($Runtime -eq "both") { @("claude", "copilot") } else { ,@($Runtime) }
     # ConvertTo-Json gotcha: an `if (...) { $arr } else { $null }` expression
     # captured as a hashtable value silently collapses a *single-element*
     # array to a bare scalar (verified: a 2+-element array is unaffected,
@@ -364,10 +383,14 @@ function New-CepInstallManifest {
     # unaffected — only this if/else-expression shape triggers it). The
     # unary comma operator (,$OnlySkills) forces array-ness through the
     # if-branch regardless of element count, so `--only <one-skill>` still
-    # round-trips as a JSON array instead of a bare string.
+    # round-trips as a JSON array instead of a bare string. runtime below
+    # uses the same direct `key = $arr` assignment shape as owned_paths
+    # (not the if/else-expression shape), so it isn't subject to the
+    # collapse and needs no comma guard even when -Runtime is "claude" or
+    # "copilot" alone (a single-element $RuntimeList).
     $manifest = [ordered]@{
         schema_version = 1
-        runtime        = @("claude", "copilot")
+        runtime        = $RuntimeList
         mode           = $Mode
         only_skills    = if ($OnlySkills.Count -gt 0) { ,$OnlySkills } else { $null }
         owned_paths    = $OwnedPaths
@@ -378,15 +401,23 @@ function New-CepInstallManifest {
     Write-InstallAction "wrote: .cep-install.json"
 }
 
+# IncludePromptsAndRules: -Runtime claude installs only .github/skills/ (the
+# tree Claude Code itself reads); copilot/both also install .github/prompts/
+# and .cursor/rules/ — each prompt/rule file is a thin pointer back into
+# .github/skills/, so that tree is always copied regardless of -Runtime.
+$IncludePromptsAndRules = ($Runtime -ne "claude")
+
 $OwnedPaths = @()
 if ($OnlyNames.Count -gt 0) {
     foreach ($name in $OnlyNames) {
         Copy-LibraryTree ".github/skills/$name" ".github/skills/$name"
-        Copy-LibraryTree ".github/prompts/$name.prompt.md" ".github/prompts/$name.prompt.md"
-        Copy-LibraryTree ".cursor/rules/$name.mdc" ".cursor/rules/$name.mdc"
         $OwnedPaths += ".github/skills/$name"
-        $OwnedPaths += ".github/prompts/$name.prompt.md"
-        $OwnedPaths += ".cursor/rules/$name.mdc"
+        if ($IncludePromptsAndRules) {
+            Copy-LibraryTree ".github/prompts/$name.prompt.md" ".github/prompts/$name.prompt.md"
+            Copy-LibraryTree ".cursor/rules/$name.mdc" ".cursor/rules/$name.mdc"
+            $OwnedPaths += ".github/prompts/$name.prompt.md"
+            $OwnedPaths += ".cursor/rules/$name.mdc"
+        }
         if ($name -eq $CepWizardSkillName) {
             Copy-CepWizardDocs
             $OwnedPaths += ".github/skills/$CepWizardSkillName/docs"
@@ -395,12 +426,14 @@ if ($OnlyNames.Count -gt 0) {
 }
 else {
     Copy-LibraryTree ".github/skills" ".github/skills"
-    Copy-LibraryTree ".github/prompts" ".github/prompts"
-    Copy-LibraryTree ".cursor/rules" ".cursor/rules"
-    Copy-CepWizardDocs
     $OwnedPaths += ".github/skills"
-    $OwnedPaths += ".github/prompts"
-    $OwnedPaths += ".cursor/rules"
+    if ($IncludePromptsAndRules) {
+        Copy-LibraryTree ".github/prompts" ".github/prompts"
+        Copy-LibraryTree ".cursor/rules" ".cursor/rules"
+        $OwnedPaths += ".github/prompts"
+        $OwnedPaths += ".cursor/rules"
+    }
+    Copy-CepWizardDocs
 }
 Merge-AgentsMd
 

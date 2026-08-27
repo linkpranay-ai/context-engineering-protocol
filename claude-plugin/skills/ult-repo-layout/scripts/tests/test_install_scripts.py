@@ -12,7 +12,9 @@ additions with the same on-disk-contract framing: bundling CEP's own docs
 in a real install, and writing .cep-install.json recording what the
 installer itself just put on disk (see cep_retrofit.py/discover_layers.py/
 scaffold_state.py's own manifest-consumer docstrings for why that fact
-matters downstream).
+matters downstream). Also covers --runtime/-Runtime claude|copilot|both,
+which scopes whether .github/prompts/ and .cursor/rules/ are installed
+alongside .github/skills/ (always copied) or skipped entirely.
 
 Reuses generated_config_text() from test_generated_context_config.py rather
 than re-deriving the substitution table a third time (install.sh and
@@ -133,14 +135,18 @@ def _assert_cep_wizard_docs_bundle(test, target: Path):
     )
 
 
-def _assert_cep_install_manifest(test, target: Path, mode: str, only_skills=None):
+def _assert_cep_install_manifest(test, target: Path, mode: str, only_skills=None, runtime=None):
     """Asserts .cep-install.json's shape (see New-CepInstallManifest in
-    install.ps1 / write_cep_install_manifest in install.sh)."""
+    install.ps1 / write_cep_install_manifest in install.sh). `runtime`
+    defaults to the "both" value's expansion (["claude", "copilot"]) — pass
+    the expected list explicitly for a --runtime/-Runtime claude-only or
+    copilot-only run."""
     manifest_path = target / ".cep-install.json"
     test.assertTrue(manifest_path.is_file(), f"missing manifest: {manifest_path}")
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     test.assertEqual(data.get("schema_version"), 1)
-    test.assertEqual(sorted(data.get("runtime") or []), ["claude", "copilot"])
+    expected_runtime = ["claude", "copilot"] if runtime is None else runtime
+    test.assertEqual(sorted(data.get("runtime") or []), sorted(expected_runtime))
     test.assertEqual(data.get("mode"), mode)
     if only_skills:
         test.assertEqual(sorted(data.get("only_skills") or []), sorted(only_skills))
@@ -327,12 +333,71 @@ class _InstallScriptTestBase:
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("bogus-skill-name", result.stderr + result.stdout)
 
+    def test_runtime_claude_installs_skills_tree_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "claude"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((target / ".github/skills").is_dir())
+            self.assertFalse((target / ".github/prompts").exists())
+            self.assertFalse((target / ".cursor/rules").exists())
+            # The bundled ult-cep-wizard docs live under .github/skills/, so
+            # they're still copied even though prompts/rules are skipped.
+            _assert_cep_wizard_docs_bundle(self, target)
+            _assert_cep_install_manifest(self, target, mode="full", runtime=["claude"])
+
+    def test_runtime_copilot_installs_all_three_trees(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "copilot"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for rel in LIBRARY_DIRS:
+                ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
+                _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            _assert_cep_install_manifest(self, target, mode="full", runtime=["copilot"])
+
+    def test_runtime_both_matches_default_behavior(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "both"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for rel in LIBRARY_DIRS:
+                ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
+                _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            _assert_cep_install_manifest(self, target, mode="full", runtime=["claude", "copilot"])
+
+    def test_runtime_claude_with_only_flag_skips_prompts_and_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(
+                target, [self.only_flag, "demo-consume-context", self.runtime_flag, "claude"]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((target / ".github/skills/demo-consume-context").is_dir())
+            self.assertFalse((target / ".github/prompts/demo-consume-context.prompt.md").exists())
+            self.assertFalse((target / ".cursor/rules/demo-consume-context.mdc").exists())
+            _assert_cep_install_manifest(
+                self,
+                target,
+                mode="only",
+                only_skills=["demo-consume-context"],
+                runtime=["claude"],
+            )
+
+    def test_runtime_rejects_unknown_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "bogus-runtime"])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime", (result.stderr + result.stdout).lower())
+
 
 @unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
 class TestInstallSh(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "--init-project"
     dry_run_flag = "--dry-run"
     only_flag = "--only"
+    runtime_flag = "--runtime"
 
     def _run(self, target, args):
         return subprocess.run(
@@ -352,6 +417,7 @@ class TestInstallPs1(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "-InitProject"
     dry_run_flag = "-DryRun"
     only_flag = "-Only"
+    runtime_flag = "-Runtime"
 
     def _run(self, target, args):
         exe = _powershell_executable()

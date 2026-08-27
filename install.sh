@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,skill2>]
+Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,skill2>] [--runtime claude|copilot|both]
 
   --target <dir>    Required. Path to an existing target project directory.
   --init-project    Also scaffold context-config.yaml (if absent) and
@@ -21,6 +21,15 @@ Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,sk
                      .github/prompts/<name>.prompt.md, and
                      .cursor/rules/<name>.mdc, and trims AGENTS.md's merged
                      block down to only those skills' rows.
+  --runtime <v>     Which tool(s) the install targets: "claude" copies
+                     .github/skills/ only (Claude Code reads skill files
+                     natively). "copilot" additionally copies
+                     .github/prompts/ and .cursor/rules/ - each prompt/rule
+                     file is itself a thin pointer back into
+                     .github/skills/, so that tree comes along regardless of
+                     which value is chosen. "both" (default) is today's
+                     unconditional copy of all three - unchanged behavior
+                     when this flag is omitted.
   --dry-run         Print what would be done without writing anything.
   -h, --help        Show this help.
 EOF
@@ -30,6 +39,7 @@ TARGET=""
 INIT_PROJECT=0
 DRY_RUN=0
 ONLY=""
+RUNTIME="both"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,6 +53,10 @@ while [ $# -gt 0 ]; do
       ;;
     --only)
       ONLY="${2:-}"
+      shift 2
+      ;;
+    --runtime)
+      RUNTIME="${2:-}"
       shift 2
       ;;
     --dry-run)
@@ -66,6 +80,14 @@ if [ -z "$TARGET" ]; then
   usage >&2
   exit 1
 fi
+
+case "$RUNTIME" in
+  claude|copilot|both) ;;
+  *)
+    echo "Error: --runtime must be one of: claude, copilot, both (got: $RUNTIME)" >&2
+    exit 1
+    ;;
+esac
 
 if [ ! -d "$TARGET" ]; then
   echo "Error: target directory does not exist: $TARGET" >&2
@@ -379,7 +401,7 @@ write_cep_install_manifest() {
     return
   fi
 
-  local owned_json only_json
+  local owned_json only_json runtime_json
   owned_json="$(printf '"%s",' "${OWNED_PATHS[@]}")"
   owned_json="[${owned_json%,}]"
   if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
@@ -388,11 +410,19 @@ write_cep_install_manifest() {
   else
     only_json="null"
   fi
+  # runtime_json: "both" means literally both tools got their trees copied,
+  # so it expands to both names; "claude"/"copilot" alone record just the
+  # one value this run actually scoped itself to.
+  if [ "$RUNTIME" = "both" ]; then
+    runtime_json='["claude", "copilot"]'
+  else
+    runtime_json="[\"$RUNTIME\"]"
+  fi
 
   cat > "$dst" <<EOF
 {
   "schema_version": 1,
-  "runtime": ["claude", "copilot"],
+  "runtime": $runtime_json,
   "mode": "$mode",
   "only_skills": $only_json,
   "owned_paths": $owned_json,
@@ -402,12 +432,23 @@ EOF
   log_action "wrote: .cep-install.json"
 }
 
+# include_prompts_and_rules: --runtime claude installs only .github/skills/
+# (the tree Claude Code itself reads); copilot/both also install
+# .github/prompts/ and .cursor/rules/ - each prompt/rule file is a thin
+# pointer back into .github/skills/, so that tree is always copied
+# regardless of --runtime.
+include_prompts_and_rules=1
+[ "$RUNTIME" = "claude" ] && include_prompts_and_rules=0
+
 if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
   for _name in "${ONLY_NAMES[@]}"; do
     copy_tree ".github/skills/$_name" ".github/skills/$_name"
-    copy_tree ".github/prompts/${_name}.prompt.md" ".github/prompts/${_name}.prompt.md"
-    copy_tree ".cursor/rules/${_name}.mdc" ".cursor/rules/${_name}.mdc"
-    OWNED_PATHS+=(".github/skills/$_name" ".github/prompts/${_name}.prompt.md" ".cursor/rules/${_name}.mdc")
+    OWNED_PATHS+=(".github/skills/$_name")
+    if [ "$include_prompts_and_rules" -eq 1 ]; then
+      copy_tree ".github/prompts/${_name}.prompt.md" ".github/prompts/${_name}.prompt.md"
+      copy_tree ".cursor/rules/${_name}.mdc" ".cursor/rules/${_name}.mdc"
+      OWNED_PATHS+=(".github/prompts/${_name}.prompt.md" ".cursor/rules/${_name}.mdc")
+    fi
     if [ "$_name" = "$CEP_WIZARD_SKILL_NAME" ]; then
       copy_cep_wizard_docs
       OWNED_PATHS+=(".github/skills/$CEP_WIZARD_SKILL_NAME/docs")
@@ -415,10 +456,13 @@ if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
   done
 else
   copy_tree ".github/skills" ".github/skills"
-  copy_tree ".github/prompts" ".github/prompts"
-  copy_tree ".cursor/rules" ".cursor/rules"
+  OWNED_PATHS+=(".github/skills")
+  if [ "$include_prompts_and_rules" -eq 1 ]; then
+    copy_tree ".github/prompts" ".github/prompts"
+    copy_tree ".cursor/rules" ".cursor/rules"
+    OWNED_PATHS+=(".github/prompts" ".cursor/rules")
+  fi
   copy_cep_wizard_docs
-  OWNED_PATHS+=(".github/skills" ".github/prompts" ".cursor/rules")
 fi
 merge_agents_md
 
