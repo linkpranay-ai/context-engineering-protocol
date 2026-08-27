@@ -50,6 +50,15 @@ Subcommands:
     state, and echoed in render-index's output, so it surfaces wherever an
     operator looks, not just in a scrollback line.
 
+    A separate, thinner check runs alongside this one: even when the graph
+    points at the right repo, it may never have had CEP's own installed
+    footprint excluded from the scan (see
+    _check_graph_cep_contamination()). Same non-fatal, never-silent
+    posture -- stderr, repo_scan.graph_cep_contamination_warning, and
+    render-index -- just a different footgun and a much lower trigger
+    threshold, since CEP's own footprint should be a thin sliver of any
+    real target repo's graph.
+
     Assigns each module a tier:
       Tier 0 (skip)  -- generated/vendor directory name or file-suffix
                         majority match. Auto-marked "skipped" immediately --
@@ -209,6 +218,17 @@ TIER1_MIN_FILE_COUNT = 50
 # _check_graph_repo_root_alignment()). Flagged implementation default, same
 # posture as the tier thresholds above -- no cited design-doc number.
 GRAPH_MODULE_OVERLAP_WARN_THRESHOLD = 0.5
+
+# Above this fraction of graph.json's own nodes living under a path this
+# repo's .cep-install.json manifest marks as CEP-owned, --graph-mode
+# graphify emits a non-fatal WARNING (see _check_graph_cep_contamination()).
+# Deliberately much lower than GRAPH_MODULE_OVERLAP_WARN_THRESHOLD above --
+# CEP's own installed footprint should be a thin sliver of any real target
+# repo's graph, so even a small fraction is a meaningful signal that
+# graphify walked CEP's own installed skills/docs rather than being scoped
+# away from them. Flagged implementation default, same posture as the tier
+# thresholds above -- no cited design-doc number.
+GRAPH_CEP_CONTAMINATION_WARN_THRESHOLD = 0.05
 
 # SKILL.md Step 4's small/large repo-size gate -- flagged implementation
 # defaults, same posture as the tier thresholds above (no design-doc-cited
@@ -647,6 +667,70 @@ def _check_graph_repo_root_alignment(graph_modules, module_names, graph_path):
     return None
 
 
+def _check_graph_cep_contamination(repo_root, graph):
+    """Defend against a different graphify footgun than
+    _check_graph_repo_root_alignment() above: instead of pointing at the
+    wrong repo entirely, graphify walked the RIGHT repo but never had CEP's
+    own installed footprint (skills/, docs, wizard scripts -- everything
+    this repo's own .cep-install.json manifest lists under `owned_paths`)
+    excluded from the scan. The graph still looks plausible -- real module
+    names, real in-degrees -- but a meaningful slice of its nodes are CEP's
+    own internal wiring, not the target repo's code, which quietly inflates
+    in-degree/tier numbers for whatever modules happen to sit near CEP's
+    installed paths.
+
+    Returns None if there's nothing to check (no manifest, or the manifest
+    has no owned_paths -- _read_cep_manifest()'s own "no signal available"
+    convention) or if the graph is empty. Returns a warning string (never
+    raises -- this is a much thinner signal than the repo-root mismatch
+    above, so it stays advisory) once the contaminated fraction exceeds
+    GRAPH_CEP_CONTAMINATION_WARN_THRESHOLD.
+    """
+    manifest_owned = _read_cep_manifest(repo_root)
+    if not manifest_owned:
+        return None
+
+    repo_root = Path(repo_root)
+    total = 0
+    contaminated = 0
+    for node in graph.get("nodes", []):
+        source_file = node.get("source_file")
+        if not source_file:
+            continue
+        total += 1
+        node_path = (repo_root / source_file.replace("\\", "/")).resolve()
+        for owned in manifest_owned:
+            try:
+                node_path.relative_to(owned)
+            except ValueError:
+                continue
+            contaminated += 1
+            break
+
+    if total == 0:
+        return None
+
+    ratio = contaminated / total
+    if ratio <= GRAPH_CEP_CONTAMINATION_WARN_THRESHOLD:
+        return None
+
+    return (
+        "{pct:.0f}% of graph.json's nodes ({contaminated_n}/{total_n}) live "
+        "under paths this repo's own .cep-install.json manifest marks as "
+        "CEP-owned -- graphify most likely walked CEP's own installed "
+        "skills/docs rather than being scoped away from them, which "
+        "inflates in-degree/tier numbers with CEP's own internal wiring "
+        "instead of the target repo's real code. Fix: generate a "
+        ".graphifyignore from .cep-install.json's owned_paths (see "
+        "ult-codegraph/SKILL.md Step 0), then re-run `graphify update` and "
+        "this scan.".format(
+            pct=ratio * 100,
+            contaminated_n=contaminated,
+            total_n=total,
+        )
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Tier assignment                                                            #
 # --------------------------------------------------------------------------- #
@@ -795,6 +879,7 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
     in_degrees = {}
     node_counts = {}
     alignment_warning = None
+    contamination_warning = None
     if graph_mode == "graphify":
         graph = _load_graph(graph_path)
         # Cross-check BEFORE tiering, and before any state mutation below --
@@ -803,6 +888,10 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
         alignment_warning = _check_graph_repo_root_alignment(
             _graph_module_names(graph), module_names, graph_path
         )
+        # A different, thinner signal than the alignment check above -- this
+        # one stays advisory even at its own trigger threshold, so it's a
+        # plain warning lookup rather than something that can abort the scan.
+        contamination_warning = _check_graph_cep_contamination(repo_root, graph)
         in_degrees = _graph_in_degrees(graph)
         node_counts = _graph_module_node_counts(graph)
         # Same one-time graph load, same access pattern as in_degrees above
@@ -886,6 +975,11 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
         # (not just printed) so `show` and `render-index` still surface it
         # after the run that produced it has scrolled out of the terminal.
         "graph_module_overlap_warning": alignment_warning,
+        # Non-fatal CEP-own-footprint contamination warning, if any -- None
+        # when clean, when there's no manifest to check against, or when
+        # graph_mode == "heuristic". Same "persist it, don't just print it"
+        # reasoning as graph_module_overlap_warning above.
+        "graph_cep_contamination_warning": contamination_warning,
     }
     return state
 
@@ -1028,6 +1122,12 @@ def render_index(state, repo_name):
     if overlap_warning:
         lines.append("")
         lines.append("**WARNING:** {}".format(overlap_warning))
+    contamination_warning = (state.get("repo_scan") or {}).get(
+        "graph_cep_contamination_warning"
+    )
+    if contamination_warning:
+        lines.append("")
+        lines.append("**WARNING:** {}".format(contamination_warning))
     lines.append("")
 
     for tier in (1, 2, 3, 0, None):
@@ -1162,6 +1262,13 @@ def _cmd_scan(args):
         # Non-fatal partial-overlap degradation -- printed immediately so
         # it's seen at scan time, not only later via `show`/render-index.
         print("WARNING: {}".format(overlap_warning), file=sys.stderr)
+    contamination_warning = (state.get("repo_scan") or {}).get(
+        "graph_cep_contamination_warning"
+    )
+    if contamination_warning:
+        # Same "printed immediately, not just persisted" posture as the
+        # overlap warning above.
+        print("WARNING: {}".format(contamination_warning), file=sys.stderr)
     save_state(args.state, state)
     print(json.dumps(summarize(state), indent=2))
     return 0

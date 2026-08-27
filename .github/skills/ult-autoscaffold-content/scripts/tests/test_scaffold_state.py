@@ -492,6 +492,96 @@ class GraphRepoRootAlignmentTests(unittest.TestCase):
         self.assertIn("src", message)
 
 
+class GraphCepContaminationTests(unittest.TestCase):
+    """_check_graph_cep_contamination() -- a different, thinner footgun
+    than GraphRepoRootAlignmentTests above: the graph points at the right
+    repo, but graphify was never scoped away from CEP's own installed
+    footprint (skills/, docs, wizard scripts -- whatever this repo's own
+    .cep-install.json manifest lists under owned_paths), so a slice of the
+    graph's nodes are CEP's own internal wiring, not the target's code."""
+
+    @staticmethod
+    def _graph(*source_files):
+        return {
+            "nodes": [
+                {"id": "n{}".format(i), "source_file": sf}
+                for i, sf in enumerate(source_files)
+            ]
+        }
+
+    def test_returns_none_when_no_manifest_present(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            graph = self._graph("legacy/old.py", "core/main.py")
+            self.assertIsNone(ss._check_graph_cep_contamination(root, graph))
+
+    def test_returns_none_when_manifest_has_no_owned_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(root / ".cep-install.json", json.dumps({}))
+            graph = self._graph("legacy/old.py", "core/main.py")
+            self.assertIsNone(ss._check_graph_cep_contamination(root, graph))
+
+    def test_returns_none_when_graph_has_no_nodes(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(
+                root / ".cep-install.json", json.dumps({"owned_paths": ["legacy"]})
+            )
+            self.assertIsNone(ss._check_graph_cep_contamination(root, {"nodes": []}))
+
+    def test_returns_none_when_contamination_is_below_threshold(self):
+        # 1 of 20 nodes owned -- 5%, not strictly greater than the 5%
+        # threshold, so this must NOT warn (matches the rest of this
+        # module's own ">" -- not ">=" -- convention for a warn threshold).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(
+                root / ".cep-install.json", json.dumps({"owned_paths": ["legacy"]})
+            )
+            source_files = ["legacy/old.py"] + [
+                "core/f{}.py".format(i) for i in range(19)
+            ]
+            warning = ss._check_graph_cep_contamination(root, self._graph(*source_files))
+            self.assertIsNone(warning)
+
+    def test_warns_when_contamination_exceeds_threshold(self):
+        # 2 of 20 nodes owned -- 10% > 5% threshold.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(
+                root / ".cep-install.json", json.dumps({"owned_paths": ["legacy"]})
+            )
+            source_files = ["legacy/old.py", "legacy/older.py"] + [
+                "core/f{}.py".format(i) for i in range(18)
+            ]
+            warning = ss._check_graph_cep_contamination(root, self._graph(*source_files))
+            self.assertIsNotNone(warning)
+            self.assertIn("2/20", warning)
+            self.assertIn(".cep-install.json", warning)
+
+    def test_owned_file_path_counts_toward_contamination_too(self):
+        # owned_paths isn't only directories -- a manifest-owned single
+        # file (e.g. AGENTS.md, context-config.yaml) must count too if the
+        # graph somehow indexed it.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(
+                root / ".cep-install.json",
+                json.dumps({"owned_paths": ["AGENTS.md"]}),
+            )
+            source_files = ["AGENTS.md"] + ["core/f{}.py".format(i) for i in range(18)]
+            warning = ss._check_graph_cep_contamination(root, self._graph(*source_files))
+            self.assertIsNotNone(warning)
+            self.assertIn("1/19", warning)
+
+
 class TierAssignmentTests(unittest.TestCase):
     def test_tier_for_graph_thresholds(self):
         # node_count > 0 in every non-empty case below -- a real module with
@@ -721,6 +811,63 @@ class ScanTests(unittest.TestCase):
             # Non-fatal: tiering still ran and state was still written.
             self.assertTrue(len(state["modules"]) > 0)
 
+    def test_scan_reports_contamination_warning_when_manifest_owned_path_dominates_graph(self):
+        # legacy/'s single node is 1 of the fixture graph's 8 total nodes
+        # (12.5%) -- above the 5% contamination warn threshold once
+        # legacy/ is marked CEP-owned in the manifest.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(
+                root / ".cep-install.json",
+                json.dumps({"owned_paths": ["legacy"]}),
+            )
+            graph_path = Path(d) / "graph.json"
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)  # must not raise
+
+            warning = state["repo_scan"]["graph_cep_contamination_warning"]
+            self.assertIsNotNone(warning)
+            self.assertIn("1/8", warning)
+            # Non-fatal: tiering still ran and state was still written.
+            self.assertTrue(len(state["modules"]) > 0)
+
+    def test_scan_stays_silent_on_contamination_below_threshold(self):
+        # A manifest whose owned_paths never intersect the graph at all
+        # contaminates 0 of 8 nodes -- well under the 5% threshold, so no
+        # warning at all (None, not an empty string).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(
+                root / ".cep-install.json",
+                json.dumps({"owned_paths": ["nonexistent-dir"]}),
+            )
+            graph_path = Path(d) / "graph.json"
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)
+
+            self.assertIsNone(state["repo_scan"]["graph_cep_contamination_warning"])
+
+    def test_scan_stays_silent_on_contamination_with_no_manifest(self):
+        # No .cep-install.json at all -- nothing to check against, so this
+        # must stay silent rather than guess (same "None means no signal"
+        # convention _read_cep_manifest() itself documents).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            graph_path = Path(d) / "graph.json"
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)
+
+            self.assertIsNone(state["repo_scan"]["graph_cep_contamination_warning"])
+
     def test_scan_graphify_mode_populates_interfaces(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d) / "repo"
@@ -918,6 +1065,19 @@ class RenderIndexTests(unittest.TestCase):
         text = ss.render_index(state, "demo-repo")
         self.assertIn("**WARNING:**", text)
         self.assertIn("only 20% of on-disk modules matched the graph", text)
+
+    def test_render_index_surfaces_graph_cep_contamination_warning(self):
+        # Same "must reach CEP-INDEX.md readers, not just scan-time stderr"
+        # reasoning as the overlap-warning test above, for the other
+        # non-fatal graph warning.
+        state = ss.empty_state()
+        state["repo_scan"] = {
+            "graph_source": "graphify", "graph_path": "x", "scanned_at": "now",
+            "graph_cep_contamination_warning": "12% of graph.json's nodes (1/8) live under CEP-owned paths",
+        }
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("**WARNING:**", text)
+        self.assertIn("12% of graph.json's nodes (1/8) live under CEP-owned paths", text)
 
     def test_render_index_repo_docs_section_reports_each_kind(self):
         state = ss.empty_state()
