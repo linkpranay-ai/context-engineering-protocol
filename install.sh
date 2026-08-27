@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,skill2>] [--runtime claude|copilot|both]
+Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,skill2>] [--runtime claude|copilot|cursor|codex|both]
 
   --target <dir>    Required. Path to an existing target project directory.
   --init-project    Also scaffold context-config.yaml (if absent) and
@@ -21,15 +21,20 @@ Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,sk
                      .github/prompts/<name>.prompt.md, and
                      .cursor/rules/<name>.mdc, and trims AGENTS.md's merged
                      block down to only those skills' rows.
-  --runtime <v>     Which tool(s) the install targets: "claude" copies
-                     .github/skills/ only (Claude Code reads skill files
-                     natively). "copilot" additionally copies
-                     .github/prompts/ and .cursor/rules/ - each prompt/rule
-                     file is itself a thin pointer back into
-                     .github/skills/, so that tree comes along regardless of
-                     which value is chosen. "both" (default) is today's
-                     unconditional copy of all three - unchanged behavior
-                     when this flag is omitted.
+  --runtime <v>     Which tool the install targets. .github/skills/ is
+                     always copied (every value reads it natively via
+                     the CEP skill format). What else comes along:
+                       claude   - skills only.
+                       copilot  - skills + .github/prompts/ (each prompt
+                                  file is a thin pointer back into
+                                  .github/skills/).
+                       cursor   - skills + .github/prompts/ + .cursor/rules/.
+                       codex    - skills + AGENTS.md merge (codex reads
+                                  project instructions from AGENTS.md,
+                                  not a prompts/rules tree).
+                       both     - everything above, unconditionally
+                                  (default; unchanged behavior when this
+                                  flag is omitted).
   --dry-run         Print what would be done without writing anything.
   -h, --help        Show this help.
 EOF
@@ -82,9 +87,9 @@ if [ -z "$TARGET" ]; then
 fi
 
 case "$RUNTIME" in
-  claude|copilot|both) ;;
+  claude|copilot|cursor|codex|both) ;;
   *)
-    echo "Error: --runtime must be one of: claude, copilot, both (got: $RUNTIME)" >&2
+    echo "Error: --runtime must be one of: claude, copilot, cursor, codex, both (got: $RUNTIME)" >&2
     exit 1
     ;;
 esac
@@ -432,22 +437,46 @@ EOF
   log_action "wrote: .cep-install.json"
 }
 
-# include_prompts_and_rules: --runtime claude installs only .github/skills/
-# (the tree Claude Code itself reads); copilot/both also install
-# .github/prompts/ and .cursor/rules/ - each prompt/rule file is a thin
-# pointer back into .github/skills/, so that tree is always copied
-# regardless of --runtime.
-include_prompts_and_rules=1
-[ "$RUNTIME" = "claude" ] && include_prompts_and_rules=0
+# include_prompts / include_cursor_rules / include_agents_md: .github/skills/
+# is always copied (every --runtime value reads it natively via the CEP
+# skill format); which of the other three trees comes along is scoped
+# per-value instead of one flag conflating all of them - see usage()'s
+# --runtime entry for the full per-value mapping. "both" is today's
+# unconditional copy of everything, unchanged when --runtime is omitted.
+include_prompts=0
+include_cursor_rules=0
+include_agents_md=0
+case "$RUNTIME" in
+  claude)
+    ;;
+  copilot)
+    include_prompts=1
+    ;;
+  cursor)
+    include_prompts=1
+    include_cursor_rules=1
+    ;;
+  codex)
+    include_agents_md=1
+    ;;
+  both)
+    include_prompts=1
+    include_cursor_rules=1
+    include_agents_md=1
+    ;;
+esac
 
 if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
   for _name in "${ONLY_NAMES[@]}"; do
     copy_tree ".github/skills/$_name" ".github/skills/$_name"
     OWNED_PATHS+=(".github/skills/$_name")
-    if [ "$include_prompts_and_rules" -eq 1 ]; then
+    if [ "$include_prompts" -eq 1 ]; then
       copy_tree ".github/prompts/${_name}.prompt.md" ".github/prompts/${_name}.prompt.md"
+      OWNED_PATHS+=(".github/prompts/${_name}.prompt.md")
+    fi
+    if [ "$include_cursor_rules" -eq 1 ]; then
       copy_tree ".cursor/rules/${_name}.mdc" ".cursor/rules/${_name}.mdc"
-      OWNED_PATHS+=(".github/prompts/${_name}.prompt.md" ".cursor/rules/${_name}.mdc")
+      OWNED_PATHS+=(".cursor/rules/${_name}.mdc")
     fi
     if [ "$_name" = "$CEP_WIZARD_SKILL_NAME" ]; then
       copy_cep_wizard_docs
@@ -457,14 +486,19 @@ if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
 else
   copy_tree ".github/skills" ".github/skills"
   OWNED_PATHS+=(".github/skills")
-  if [ "$include_prompts_and_rules" -eq 1 ]; then
+  if [ "$include_prompts" -eq 1 ]; then
     copy_tree ".github/prompts" ".github/prompts"
+    OWNED_PATHS+=(".github/prompts")
+  fi
+  if [ "$include_cursor_rules" -eq 1 ]; then
     copy_tree ".cursor/rules" ".cursor/rules"
-    OWNED_PATHS+=(".github/prompts" ".cursor/rules")
+    OWNED_PATHS+=(".cursor/rules")
   fi
   copy_cep_wizard_docs
 fi
-merge_agents_md
+if [ "$include_agents_md" -eq 1 ]; then
+  merge_agents_md
+fi
 
 if [ "$INIT_PROJECT" -eq 1 ]; then
   scaffold_context_config

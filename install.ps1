@@ -23,13 +23,17 @@
     AGENTS.md's merged block down to only those skills' rows.
 
 .PARAMETER Runtime
-    Which tool(s) the install targets: "claude" copies .github/skills/ only
-    (Claude Code reads skill files natively). "copilot" additionally copies
-    .github/prompts/ and .cursor/rules/ — each prompt/rule file is itself a
-    thin pointer back into .github/skills/, so that tree comes along
-    regardless of which value is chosen. "both" (default) is today's
-    unconditional copy of all three — unchanged behavior when this
-    parameter is omitted.
+    Which tool the install targets. .github/skills/ is always copied (every
+    value reads it natively via the CEP skill format). What else comes
+    along:
+      claude   - skills only.
+      copilot  - skills + .github/prompts/ (each prompt file is a thin
+                 pointer back into .github/skills/).
+      cursor   - skills + .github/prompts/ + .cursor/rules/.
+      codex    - skills + AGENTS.md merge (codex reads project instructions
+                 from AGENTS.md, not a prompts/rules tree).
+      both     - everything above, unconditionally (default; unchanged
+                 behavior when this parameter is omitted).
 
 .PARAMETER DryRun
     Print what would be done without writing anything.
@@ -39,7 +43,7 @@ param(
     [string]$TargetPath = "",
     [switch]$InitProject,
     [string]$Only = "",
-    [ValidateSet("claude", "copilot", "both")]
+    [ValidateSet("claude", "copilot", "cursor", "codex", "both")]
     [string]$Runtime = "both",
     [switch]$DryRun
 )
@@ -401,21 +405,27 @@ function New-CepInstallManifest {
     Write-InstallAction "wrote: .cep-install.json"
 }
 
-# IncludePromptsAndRules: -Runtime claude installs only .github/skills/ (the
-# tree Claude Code itself reads); copilot/both also install .github/prompts/
-# and .cursor/rules/ — each prompt/rule file is a thin pointer back into
-# .github/skills/, so that tree is always copied regardless of -Runtime.
-$IncludePromptsAndRules = ($Runtime -ne "claude")
+# IncludePrompts / IncludeCursorRules / IncludeAgentsMd: .github/skills/ is
+# always copied (every -Runtime value reads it natively via the CEP skill
+# format); which of the other three trees comes along is scoped per-value
+# instead of one switch conflating all of them — see the .PARAMETER Runtime
+# doc comment above for the full per-value mapping. "both" is today's
+# unconditional copy of everything, unchanged when -Runtime is omitted.
+$IncludePrompts = @("copilot", "cursor", "both") -contains $Runtime
+$IncludeCursorRules = @("cursor", "both") -contains $Runtime
+$IncludeAgentsMd = @("codex", "both") -contains $Runtime
 
 $OwnedPaths = @()
 if ($OnlyNames.Count -gt 0) {
     foreach ($name in $OnlyNames) {
         Copy-LibraryTree ".github/skills/$name" ".github/skills/$name"
         $OwnedPaths += ".github/skills/$name"
-        if ($IncludePromptsAndRules) {
+        if ($IncludePrompts) {
             Copy-LibraryTree ".github/prompts/$name.prompt.md" ".github/prompts/$name.prompt.md"
-            Copy-LibraryTree ".cursor/rules/$name.mdc" ".cursor/rules/$name.mdc"
             $OwnedPaths += ".github/prompts/$name.prompt.md"
+        }
+        if ($IncludeCursorRules) {
+            Copy-LibraryTree ".cursor/rules/$name.mdc" ".cursor/rules/$name.mdc"
             $OwnedPaths += ".cursor/rules/$name.mdc"
         }
         if ($name -eq $CepWizardSkillName) {
@@ -427,15 +437,19 @@ if ($OnlyNames.Count -gt 0) {
 else {
     Copy-LibraryTree ".github/skills" ".github/skills"
     $OwnedPaths += ".github/skills"
-    if ($IncludePromptsAndRules) {
+    if ($IncludePrompts) {
         Copy-LibraryTree ".github/prompts" ".github/prompts"
-        Copy-LibraryTree ".cursor/rules" ".cursor/rules"
         $OwnedPaths += ".github/prompts"
+    }
+    if ($IncludeCursorRules) {
+        Copy-LibraryTree ".cursor/rules" ".cursor/rules"
         $OwnedPaths += ".cursor/rules"
     }
     Copy-CepWizardDocs
 }
-Merge-AgentsMd
+if ($IncludeAgentsMd) {
+    Merge-AgentsMd
+}
 
 if ($InitProject) {
     New-ContextConfig

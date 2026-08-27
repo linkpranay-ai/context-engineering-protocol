@@ -12,9 +12,12 @@ additions with the same on-disk-contract framing: bundling CEP's own docs
 in a real install, and writing .cep-install.json recording what the
 installer itself just put on disk (see cep_retrofit.py/discover_layers.py/
 scaffold_state.py's own manifest-consumer docstrings for why that fact
-matters downstream). Also covers --runtime/-Runtime claude|copilot|both,
-which scopes whether .github/prompts/ and .cursor/rules/ are installed
-alongside .github/skills/ (always copied) or skipped entirely.
+matters downstream). Also covers --runtime/-Runtime claude|copilot|cursor|codex|both, which
+scopes which of .github/prompts/, .cursor/rules/, and an AGENTS.md merge
+come along beside .github/skills/ (always copied, every value) - claude:
+skills only; copilot: skills + prompts; cursor: skills + prompts + rules;
+codex: skills + AGENTS.md; both: everything (default, unchanged when the
+flag is omitted).
 
 Reuses generated_config_text() from test_generated_context_config.py rather
 than re-deriving the substitution table a third time (install.sh and
@@ -341,20 +344,48 @@ class _InstallScriptTestBase:
             self.assertTrue((target / ".github/skills").is_dir())
             self.assertFalse((target / ".github/prompts").exists())
             self.assertFalse((target / ".cursor/rules").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
             # The bundled ult-cep-wizard docs live under .github/skills/, so
             # they're still copied even though prompts/rules are skipped.
             _assert_cep_wizard_docs_bundle(self, target)
             _assert_cep_install_manifest(self, target, mode="full", runtime=["claude"])
 
-    def test_runtime_copilot_installs_all_three_trees(self):
+    def test_runtime_copilot_installs_prompts_but_not_cursor_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
             result = self._run(target, [self.runtime_flag, "copilot"])
             self.assertEqual(result.returncode, 0, result.stderr)
+            for rel in (".github/skills", ".github/prompts"):
+                ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
+                _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            self.assertFalse((target / ".cursor/rules").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
+            _assert_cep_install_manifest(self, target, mode="full", runtime=["copilot"])
+
+    def test_runtime_cursor_installs_skills_prompts_and_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "cursor"])
+            self.assertEqual(result.returncode, 0, result.stderr)
             for rel in LIBRARY_DIRS:
                 ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
                 _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
-            _assert_cep_install_manifest(self, target, mode="full", runtime=["copilot"])
+            self.assertFalse((target / "AGENTS.md").exists())
+            _assert_cep_install_manifest(self, target, mode="full", runtime=["cursor"])
+
+    def test_runtime_codex_installs_skills_and_agents_md_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "codex"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((target / ".github/skills").is_dir())
+            self.assertFalse((target / ".github/prompts").exists())
+            self.assertFalse((target / ".cursor/rules").exists())
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn(BEGIN_MARKER, agents)
+            self.assertIn(END_MARKER, agents)
+            _assert_cep_wizard_docs_bundle(self, target)
+            _assert_cep_install_manifest(self, target, mode="full", runtime=["codex"])
 
     def test_runtime_both_matches_default_behavior(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -364,6 +395,8 @@ class _InstallScriptTestBase:
             for rel in LIBRARY_DIRS:
                 ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
                 _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn(BEGIN_MARKER, agents)
             _assert_cep_install_manifest(self, target, mode="full", runtime=["claude", "copilot"])
 
     def test_runtime_claude_with_only_flag_skips_prompts_and_rules(self):
@@ -376,6 +409,7 @@ class _InstallScriptTestBase:
             self.assertTrue((target / ".github/skills/demo-consume-context").is_dir())
             self.assertFalse((target / ".github/prompts/demo-consume-context.prompt.md").exists())
             self.assertFalse((target / ".cursor/rules/demo-consume-context.mdc").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
             _assert_cep_install_manifest(
                 self,
                 target,
@@ -383,6 +417,15 @@ class _InstallScriptTestBase:
                 only_skills=["demo-consume-context"],
                 runtime=["claude"],
             )
+
+    def test_runtime_copilot_dry_run_excludes_cursor_and_agents_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "copilot", self.dry_run_flag])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            transcript = result.stdout
+            self.assertNotIn(".cursor/rules", transcript)
+            self.assertNotIn("AGENTS.md", transcript)
 
     def test_runtime_rejects_unknown_value(self):
         with tempfile.TemporaryDirectory() as tmp:
