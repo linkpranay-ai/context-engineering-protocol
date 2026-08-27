@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import wizard_auth  # noqa: E402
+import wizard_docs  # noqa: E402
 import wizard_preflight  # noqa: E402
 import wizard_server as ws  # noqa: E402
 
@@ -429,6 +430,65 @@ class TestApiPicker(WizardServerTestCase):
         self.assertEqual(resp.status, 400)
         payload = json.loads(resp.read().decode("utf-8"))
         self.assertIn("error", payload)
+
+
+class TestApiDocAsset(WizardServerTestCase):
+    """Regression tests proving _handle_api_doc_asset is gated on the exact
+    same wizard_docs.docs_root() trust check list_docs()/_handle_api_docs
+    already require - not a second, independently-maintained check that could
+    silently drift looser than the first and let this route serve a file out
+    of a root the docs list itself would have refused to trust. docs_root()
+    is about this *skill's own* install location, not the target repo under
+    test, so these monkeypatch wizard_docs._docs_dir/_self_test_root exactly
+    the way TestDocsRoot in test_wizard_docs.py already does for the function
+    directly - here the same fixture is driven through the real HTTP route."""
+
+    def setUp(self):
+        super().setUp()
+        self._orig_docs_dir = wizard_docs._docs_dir
+        self._orig_self_test_root = wizard_docs._self_test_root
+
+    def tearDown(self):
+        wizard_docs._docs_dir = self._orig_docs_dir
+        wizard_docs._self_test_root = self._orig_self_test_root
+        super().tearDown()
+
+    def test_no_cookie_is_401(self):
+        resp = self._get("/api/docs-assets/hero.png")
+        self.assertEqual(resp.status, 401)
+
+    def test_asset_refused_when_docs_root_unverified(self):
+        # Neither location verifies: the bundled docs/ sibling doesn't exist
+        # and the fallback root has no CONCEPT.md+PROTOCOL.md pair - the same
+        # "not this skill's own CEP bundle" case TestBundleVerification in
+        # test_wizard_docs.py covers for list_docs() directly. A real file
+        # sits right where the route would look, to prove the 404 comes from
+        # the trust gate and not merely from the file being absent.
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_bundle = Path(tmp) / "docs"
+            unrelated = Path(tmp) / "unrelated"
+            unrelated.mkdir()
+            (unrelated / "hero.png").write_bytes(b"not actually verified")
+            wizard_docs._docs_dir = lambda: missing_bundle
+            wizard_docs._self_test_root = lambda: unrelated
+            cookie = self._authenticated_cookie()
+            resp = self._get("/api/docs-assets/hero.png", cookie=cookie)
+            self.assertEqual(resp.status, 404)
+
+    def test_asset_served_when_docs_root_verified(self):
+        # The permit path: once docs_root() verifies (a bundled docs/ sibling
+        # is trusted outright, same as list_docs()'s own resolution order), a
+        # real asset under it is served - proving the gate above is a real
+        # trust check, not an always-404 regression hiding behind it.
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = Path(tmp) / "docs"
+            bundled.mkdir()
+            (bundled / "hero.png").write_bytes(b"fake-png-bytes")
+            wizard_docs._docs_dir = lambda: bundled
+            cookie = self._authenticated_cookie()
+            resp = self._get("/api/docs-assets/hero.png", cookie=cookie)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.read(), b"fake-png-bytes")
 
 
 class TestStaticAssets(WizardServerTestCase):
