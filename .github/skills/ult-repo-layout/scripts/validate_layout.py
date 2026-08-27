@@ -89,16 +89,16 @@ md_index.py / content_hash.py.
 
 CLI:
     python validate_layout.py --validate [<repo-root>]
-    python validate_layout.py --init [--workspace-root <path>] [--no-ci-hook] [<repo-root>]
+    python validate_layout.py --init [--workspace-root <path>] [--ci-hook] [<repo-root>]
 
 `--init` backs only the mechanical half of SKILL.md's `init` mode - scaffold
 each installed slot's directory/marker, write `project_layout` into
-context-config.yaml, and (by default) a pre-commit hook. The conversational
-half (asking the human for project_name/description, whether to opt into
-workspace_root, generating context-config.yaml itself, offering to
-rename/relocate a slot's default location, suggesting - never silently
-adding - what_l2.include_roots) stays the agent's job; see `run_init`
-below and SKILL.md's `init` section.
+context-config.yaml, and, only with `--ci-hook` (opt-in - omitted by
+default), a pre-commit hook. The conversational half (asking the human for
+project_name/description, whether to opt into workspace_root, generating
+context-config.yaml itself, offering to rename/relocate a slot's default
+location, suggesting - never silently adding - what_l2.include_roots) stays
+the agent's job; see `run_init` below and SKILL.md's `init` section.
 """
 
 import argparse
@@ -454,6 +454,23 @@ def resolve_what_l2_path(config):
     return "docs/requirements/"
 
 
+def resolve_what_l2_path_for_init(config, effective_workspace_root):
+    """Like resolve_what_l2_path, but resolves against an explicit
+    workspace_root value instead of re-reading `layout.workspace_root` from
+    config. run_init needs this: when --workspace-root is passed to the
+    same `init` call, it hasn't been persisted to context-config.yaml yet
+    at the point run_init decides whether What-L2's shipped default path
+    exists on disk."""
+    what_l2 = (config.get("layers") or {}).get("what_l2")
+    if isinstance(what_l2, dict):
+        path = what_l2.get("path")
+        if isinstance(path, str) and path:
+            return path
+    if effective_workspace_root and effective_workspace_root != ".":
+        return f"{effective_workspace_root}/"
+    return "docs/requirements/"
+
+
 def resolve_what_l2_exclude(config):
     """`layers.what_l2.exclude` (§16.5): list of subtree paths relative to
     `what_l2.path` to skip. Defaults to `[]`."""
@@ -493,6 +510,28 @@ def resolve_what_l2_index_path(config):
     return "specs-out/l2_index.json"
 
 
+def resolve_what_l2_enabled(config):
+    """`layers.what_l2.enabled`: defaults to True (the starter kit ships
+    What-L2 always-on, unlike the opt-in What-L1/How-L1) if absent or not a
+    dict. `run_init` is the only code path that ever writes this key
+    explicitly, and only when the layer's own shipped default path doesn't
+    exist yet in the target repo (S28) - see run_init's own comment."""
+    what_l2 = (config.get("layers") or {}).get("what_l2")
+    if isinstance(what_l2, dict):
+        return bool(what_l2.get("enabled", True))
+    return True
+
+
+def resolve_what_l2_path_explicit(config):
+    """True if `layers.what_l2.path` is set explicitly in config, as
+    opposed to falling back to the workspace_root-relative or pre-D21
+    default inside resolve_what_l2_path. run_init uses this to avoid
+    silently disabling a path the user deliberately configured, even if
+    that path doesn't exist on disk yet."""
+    what_l2 = (config.get("layers") or {}).get("what_l2")
+    return isinstance(what_l2, dict) and bool(what_l2.get("path"))
+
+
 # ---------------------------------------------------------------------------
 # What-L1 / How-L2 / How-L1 resolution helpers (D23 §17.8, S28)
 #
@@ -513,6 +552,22 @@ def resolve_how_l2_path(config):
         if isinstance(path, str) and path:
             return path
     return "org/"
+
+
+def resolve_how_l2_enabled(config):
+    """`how_dimension.how_l2.enabled`: defaults to True, same rationale as
+    resolve_what_l2_enabled."""
+    how_l2 = (config.get("how_dimension") or {}).get("how_l2")
+    if isinstance(how_l2, dict):
+        return bool(how_l2.get("enabled", True))
+    return True
+
+
+def resolve_how_l2_path_explicit(config):
+    """True if `how_dimension.how_l2.path` is set explicitly in config -
+    same rationale as resolve_what_l2_path_explicit."""
+    how_l2 = (config.get("how_dimension") or {}).get("how_l2")
+    return isinstance(how_l2, dict) and bool(how_l2.get("path"))
 
 
 def resolve_what_l1_path(config):
@@ -678,12 +733,16 @@ def check_what_l2_exclude_typos(repo_root, config):
 
 def check_layer_paths_populated(repo_root, config):
     """§17.8/S28: WARN if an *enabled* layer's resolved path doesn't exist or
-    contains no files. What-L2 and How-L2 are always checked (no opt-out in
-    the shipped config surface - both default to `enabled: true` and neither
-    template exposes a documented way to disable them); What-L1 and How-L1
-    are checked only when their own `enabled: true` is set. A disabled
-    What-L1/How-L1 - the starter kit's default - is never checked, so leaving
-    an opt-in layer at its placeholder or absent `path` never warns.
+    contains no files. What-L2 and How-L2 default to `enabled: true` (the
+    starter kit ships them always-on) and are checked unless `run_init` has
+    explicitly set `enabled: false` for one - it does this only when that
+    layer's own shipped default path doesn't exist yet in the target repo,
+    so a fresh install validates silent-clean instead of warning about its
+    own shipped defaults on day one (see run_init). What-L1 and How-L1 are
+    opt-in and checked only when their own `enabled: true` is set. A
+    disabled What-L1/How-L1 - the starter kit's default - is never checked,
+    so leaving an opt-in layer at its placeholder or absent `path` never
+    warns.
 
     Before this check, a misconfigured path and a project that genuinely has
     no such content produced identical, silent behavior (D8 fallback,
@@ -693,8 +752,8 @@ def check_layer_paths_populated(repo_root, config):
     problems = []
 
     layer_checks = [
-        ("layers.what_l2", resolve_what_l2_path(config), True),
-        ("how_dimension.how_l2", resolve_how_l2_path(config), True),
+        ("layers.what_l2", resolve_what_l2_path(config), resolve_what_l2_enabled(config)),
+        ("how_dimension.how_l2", resolve_how_l2_path(config), resolve_how_l2_enabled(config)),
         ("layers.what_l1", resolve_what_l1_path(config), resolve_what_l1_enabled(config)),
         ("how_dimension.how_l1", resolve_how_l1_path(config), resolve_how_l1_enabled(config)),
     ]
@@ -989,9 +1048,14 @@ def _remove_top_level_key(lines, name):
 
 PRE_COMMIT_HOOK_TEXT = (
     "#!/bin/sh\n"
-    "# Scaffolded by `ult-repo-layout init` (SKILL.md \"CI / pre-commit "
-    "hook\", S15.9). No LLM involved - a deterministic project_layout check.\n"
-    "python .github/skills/ult-repo-layout/scripts/validate_layout.py --validate\n"
+    "# Scaffolded by `ult-repo-layout init --ci-hook` (SKILL.md \"CI / "
+    "pre-commit hook\", S15.9). No LLM involved - a deterministic "
+    "project_layout check. Fails open (exit 0) rather than blocking a\n"
+    "# commit if python3/python isn't on PATH or the check itself errors -\n"
+    "# this hook is meant to be a convenience nudge, never a hard gate an\n"
+    "# adopter didn't explicitly ask for.\n"
+    "PY=$(command -v python3 || command -v python) || exit 0\n"
+    "\"$PY\" .github/skills/ult-repo-layout/scripts/validate_layout.py --validate || exit 0\n"
 )
 
 
@@ -1077,15 +1141,16 @@ def _write_project_layout_section(lines, entries):
     lines.extend(block)
 
 
-def run_init(repo_root, workspace_root=None, no_ci_hook=False):
+def run_init(repo_root, workspace_root=None, ci_hook=False):
     """Back only the mechanical half of `init` mode (SKILL.md "Modes >
     init") - scaffold each installed slot's directory/marker, write
-    `project_layout` into context-config.yaml, and (by default) a
-    pre-commit hook. The conversational half - asking the human for
-    project_name/description, whether to opt into workspace_root,
-    generating context-config.yaml itself from the starter-kit template,
-    offering to rename/relocate a slot's default location before
-    scaffolding, and suggesting (never silently adding)
+    `project_layout` into context-config.yaml, and, only if `ci_hook` is
+    explicitly requested (opt-in - a fresh `init` never touches
+    `.git/hooks/` on its own), a pre-commit hook. The conversational half -
+    asking the human for project_name/description, whether to opt into
+    workspace_root, generating context-config.yaml itself from the
+    starter-kit template, offering to rename/relocate a slot's default
+    location before scaffolding, and suggesting (never silently adding)
     what_l2.include_roots when output_docs_structure/ exists - stays the
     agent's job: the same split every other ult-* skill in this repo
     already draws between SKILL.md-driven agent behavior and a
@@ -1153,13 +1218,23 @@ def run_init(repo_root, workspace_root=None, no_ci_hook=False):
             target.mkdir(parents=True, exist_ok=True)
             _write_marker(target, slot, kind, None)
             resolved_display = rel.as_posix() + "/"
+            messages.append(f"Scaffolded '{slot}' at '{resolved_display}'.")
         else:
+            # kind == "file": init only registers the marker + slot
+            # location - it never creates the file itself. That's the
+            # owning skill's job on its own first run. Say so explicitly;
+            # claiming "Scaffolded" here would be a false positive (the
+            # file doesn't exist yet) that --validate immediately
+            # contradicts the next time it runs.
             target.parent.mkdir(parents=True, exist_ok=True)
             _write_marker(target.parent, slot, kind, target.name)
             resolved_display = rel.as_posix()
+            messages.append(
+                f"Registered '{slot}' at '{resolved_display}' - the file "
+                f"itself is written by {spec['owning_skill']} on first run."
+            )
 
         entries[slot] = (resolved_display, kind, spec["owning_skill"])
-        messages.append(f"Scaffolded '{slot}' at '{resolved_display}'.")
 
     if not entries:
         return 1, [
@@ -1180,11 +1255,40 @@ def run_init(repo_root, workspace_root=None, no_ci_hook=False):
             f"pre-populated layers.what_l2.exclude (§16.5 recommended triad)."
         )
 
+    # S28 day-one silent-clean: What-L2/How-L2 ship enabled: true with no
+    # documented opt-out, but a fresh repo almost never already has content
+    # at either layer's shipped default path - check_layer_paths_populated
+    # would immediately WARN about the very defaults this installer just
+    # shipped. Only touch it when the path is still the shipped default
+    # (never override a path the user explicitly configured, even if that
+    # path doesn't exist yet) and it genuinely doesn't exist on disk.
+    if not resolve_what_l2_path_explicit(config):
+        what_l2_default = resolve_what_l2_path_for_init(config, effective_wr)
+        if not (repo_root / what_l2_default.rstrip("/")).exists():
+            set_scalar(config_lines, ["layers", "what_l2", "enabled"], "false")
+            messages.append(
+                f"Set layers.what_l2.enabled = false - the shipped default "
+                f"'{what_l2_default}' doesn't exist in this repo yet. Set it "
+                f"back to true (and layers.what_l2.path, if different) once "
+                f"there's content to index."
+            )
+
+    if not resolve_how_l2_path_explicit(config):
+        how_l2_default = resolve_how_l2_path(config)
+        if not (repo_root / how_l2_default.rstrip("/")).exists():
+            set_scalar(config_lines, ["how_dimension", "how_l2", "enabled"], "false")
+            messages.append(
+                f"Set how_dimension.how_l2.enabled = false - the shipped "
+                f"default '{how_l2_default}' doesn't exist in this repo yet. "
+                f"Set it back to true (and how_dimension.how_l2.path, if "
+                f"different) once there's content to index."
+            )
+
     _write_project_layout_section(config_lines, entries)
     config_path.write_text("\n".join(config_lines) + "\n", encoding="utf-8")
     messages.append(f"Wrote project_layout with {len(entries)} slot(s) to context-config.yaml.")
 
-    if not no_ci_hook:
+    if ci_hook:
         messages.append(_scaffold_pre_commit_hook(repo_root))
 
     return 0, messages
@@ -1265,7 +1369,13 @@ def validate(repo_root):
                     f"'{rel_path.as_posix()}' is a {actual_kind} on disk "
                     f"(type-consistency violation)."
                 )
-        else:
+        elif kind != "file":
+            # kind == "directory" slots are scaffolded eagerly by `init` (the
+            # directory itself is created on the spot), so a missing one is
+            # worth flagging. kind == "file" slots only ever get a marker at
+            # init time - the file itself is written by the owning skill on
+            # its own first run (see run_init) - so its absence here is the
+            # normal, expected pre-first-run state, not something to report.
             report.append(
                 f"INFO: slot '{slot}' marker found at '{rel_path.as_posix()}' "
                 f"but that path doesn't exist yet."
@@ -1399,14 +1509,25 @@ def main(argv=None):
              "what_l2.exclude triad (§16.5); errors if one is already set",
     )
     parser.add_argument(
+        "--ci-hook", action="store_true",
+        help="only with --init: scaffold the .git/hooks/pre-commit wrapper "
+             "(opt-in - omitted unless explicitly requested)",
+    )
+    parser.add_argument(
         "--no-ci-hook", action="store_true",
-        help="only with --init: skip scaffolding the .git/hooks/pre-commit wrapper",
+        help=argparse.SUPPRESS,  # deprecated no-op - the hook is opt-in by default now
     )
     args = parser.parse_args(argv)
 
     if args.init:
+        if args.no_ci_hook:
+            print(
+                "--no-ci-hook is deprecated and is now a no-op - the "
+                "pre-commit hook is opt-in by default; pass --ci-hook to "
+                "scaffold it."
+            )
         code, messages = run_init(
-            args.repo_root, workspace_root=args.workspace_root, no_ci_hook=args.no_ci_hook,
+            args.repo_root, workspace_root=args.workspace_root, ci_hook=args.ci_hook,
         )
         for message in messages:
             print(message)

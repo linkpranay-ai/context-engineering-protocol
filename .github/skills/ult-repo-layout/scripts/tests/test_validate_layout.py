@@ -1462,18 +1462,9 @@ class TestRunInit(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertTrue(any("S22" in m for m in messages))
 
-    def test_no_ci_hook_skips_hook_scaffold(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._install_skills(root, "ult-context-generate")
-            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
-            (root / ".git" / "hooks").mkdir(parents=True)
-            code, messages = vl.run_init(root, no_ci_hook=True)
-            self.assertEqual(code, 0, messages)
-            self.assertFalse((root / ".git" / "hooks" / "pre-commit").exists())
-            self.assertFalse(any("pre-commit" in m for m in messages))
-
-    def test_default_scaffolds_hook_when_git_hooks_present(self):
+    def test_default_omits_hook_scaffold(self):
+        # ci_hook defaults to False - init never touches .git/hooks/ unless
+        # explicitly asked to, even when a hooks dir is present.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._install_skills(root, "ult-context-generate")
@@ -1481,17 +1472,43 @@ class TestRunInit(unittest.TestCase):
             (root / ".git" / "hooks").mkdir(parents=True)
             code, messages = vl.run_init(root)
             self.assertEqual(code, 0, messages)
+            self.assertFalse((root / ".git" / "hooks" / "pre-commit").exists())
+            self.assertFalse(any("pre-commit" in m for m in messages))
+
+    def test_ci_hook_true_scaffolds_hook_when_git_hooks_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / ".git" / "hooks").mkdir(parents=True)
+            code, messages = vl.run_init(root, ci_hook=True)
+            self.assertEqual(code, 0, messages)
             hook = root / ".git" / "hooks" / "pre-commit"
             self.assertTrue(hook.exists())
-            self.assertIn("validate_layout.py --validate", hook.read_text(encoding="utf-8"))
+            hook_text = hook.read_text(encoding="utf-8")
+            self.assertIn("validate_layout.py --validate", hook_text)
             self.assertTrue(any("Scaffolded pre-commit hook" in m for m in messages))
+
+    def test_ci_hook_writes_fail_open_hook_text(self):
+        # The hook must never block a commit outright: no python3/python on
+        # PATH, or a non-zero --validate exit, both fall through to exit 0.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / ".git" / "hooks").mkdir(parents=True)
+            code, messages = vl.run_init(root, ci_hook=True)
+            self.assertEqual(code, 0, messages)
+            hook_text = (root / ".git" / "hooks" / "pre-commit").read_text(encoding="utf-8")
+            self.assertIn("command -v python3 || command -v python", hook_text)
+            self.assertIn("|| exit 0", hook_text)
 
     def test_hook_skipped_when_git_hooks_absent(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._install_skills(root, "ult-context-generate")
             write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
-            code, messages = vl.run_init(root)
+            code, messages = vl.run_init(root, ci_hook=True)
             self.assertEqual(code, 0, messages)
             self.assertTrue(any("Skipped pre-commit hook" in m for m in messages))
 
@@ -1503,10 +1520,125 @@ class TestRunInit(unittest.TestCase):
             hooks_dir = root / ".git" / "hooks"
             hooks_dir.mkdir(parents=True)
             write(hooks_dir / "pre-commit", "#!/bin/sh\necho custom hook\n")
-            code, messages = vl.run_init(root)
+            code, messages = vl.run_init(root, ci_hook=True)
             self.assertEqual(code, 0, messages)
             self.assertIn("custom hook", (hooks_dir / "pre-commit").read_text(encoding="utf-8"))
             self.assertTrue(any("already exists" in m for m in messages))
+
+    def test_ci_hook_fails_open_when_only_python3_on_path(self):
+        # Fabricated PATH with only a `python3` shim (no `python`) - the
+        # hook must still exit 0, whether it's because it found python3 and
+        # validate passed/failed, or because neither interpreter existed.
+        import os
+        import stat
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / ".git" / "hooks").mkdir(parents=True)
+            code, messages = vl.run_init(root, ci_hook=True)
+            self.assertEqual(code, 0, messages)
+            hook = root / ".git" / "hooks" / "pre-commit"
+            hook.chmod(hook.stat().st_mode | stat.S_IEXEC)
+
+            fake_bin = Path(tmp) / "fakebin"
+            fake_bin.mkdir()
+            python3_shim = fake_bin / "python3"
+            # A shim that always fails, standing in for a validate error -
+            # the hook must still exit 0 (fail-open), not propagate this.
+            write(python3_shim, "#!/bin/sh\nexit 1\n")
+            python3_shim.chmod(python3_shim.stat().st_mode | stat.S_IEXEC)
+
+            env = dict(os.environ)
+            env["PATH"] = str(fake_bin)
+            result = subprocess.run(
+                ["sh", str(hook)], cwd=str(root), env=env,
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_init_registers_file_kind_slots_without_claiming_scaffolded(self):
+        # kind: file slots only ever get a marker at init time - the file
+        # itself is written by the owning skill on its own first run.
+        # "Scaffolded" would be a false claim; init must say "Registered".
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-institutional-memory-distill")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            registered = [m for m in messages if "decision_ledger" in m]
+            self.assertTrue(registered, messages)
+            self.assertTrue(all("Registered" in m for m in registered), messages)
+            self.assertFalse(any("Scaffolded 'decision_ledger'" in m for m in messages), messages)
+            self.assertFalse(
+                (root / "starter_kit" / "decision_ledger" / "DECISION-LEDGER.json").exists()
+            )
+
+    def test_validate_after_init_is_silent_for_unwritten_file_slots(self):
+        # A fresh init claims success; --validate immediately after must
+        # not contradict it by flagging the file-kind slot it just
+        # correctly registered (not scaffolded) as a problem.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-institutional-memory-distill")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, _ = vl.run_init(root)
+            self.assertEqual(code, 0)
+
+            ok, report = vl.validate(root)
+            self.assertFalse(any("decision_ledger" in line for line in report), report)
+
+    def test_init_disables_what_l2_and_how_l2_when_shipped_defaults_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            self.assertTrue(any("layers.what_l2.enabled = false" in m for m in messages), messages)
+            self.assertTrue(
+                any("how_dimension.how_l2.enabled = false" in m for m in messages), messages
+            )
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertFalse(vl.resolve_what_l2_enabled(config))
+            self.assertFalse(vl.resolve_how_l2_enabled(config))
+
+            ok, report = vl.validate(root)
+            self.assertFalse(any("what_l2" in line and "S28" in line for line in report), report)
+            self.assertFalse(any("how_l2" in line and "S28" in line for line in report), report)
+
+    def test_init_leaves_explicit_what_l2_path_alone_even_if_absent(self):
+        # An explicitly-configured path (even one that doesn't exist yet)
+        # is the user's own decision - init must never silently disable it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(
+                root / "context-config.yaml",
+                "cache:\n  product_context_path: contexts/\n"
+                "layers:\n  what_l2:\n    path: docs/spec/\n",
+            )
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            self.assertFalse(any("layers.what_l2.enabled" in m for m in messages), messages)
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertTrue(vl.resolve_what_l2_enabled(config))
+
+    def test_init_leaves_what_l2_enabled_when_shipped_default_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / "docs" / "requirements").mkdir(parents=True)
+            write(root / "docs" / "requirements" / "spec.md", "# spec\n")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            self.assertFalse(any("layers.what_l2.enabled" in m for m in messages), messages)
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertTrue(vl.resolve_what_l2_enabled(config))
 
     def test_freshly_scaffolded_repo_validates_clean(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1552,6 +1684,40 @@ class TestMain(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("Scaffolded 'context_packages'", buf.getvalue())
             self.assertTrue((root / "contexts").is_dir())
+
+    def test_init_flag_default_omits_hook_and_no_ci_hook_flag_is_noop(self):
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "skills" / "ult-context-generate").mkdir(parents=True)
+            (root / ".git" / "hooks").mkdir(parents=True)
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = vl.main(["--init", "--no-ci-hook", str(root)])
+            self.assertEqual(rc, 0)
+            self.assertIn("deprecated", buf.getvalue())
+            self.assertIn("no-op", buf.getvalue())
+            self.assertFalse((root / ".git" / "hooks" / "pre-commit").exists())
+
+    def test_init_flag_ci_hook_scaffolds_hook(self):
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "skills" / "ult-context-generate").mkdir(parents=True)
+            (root / ".git" / "hooks").mkdir(parents=True)
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = vl.main(["--init", "--ci-hook", str(root)])
+            self.assertEqual(rc, 0)
+            self.assertTrue((root / ".git" / "hooks" / "pre-commit").exists())
 
     def test_init_flag_with_workspace_root(self):
         import contextlib

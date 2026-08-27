@@ -283,7 +283,7 @@ generates it inline using the table above before continuing.
 ### `init` — greenfield projects
 
 Steps 1-3 and 5 below are mechanical and backed by
-`validate_layout.py --init [--workspace-root <path>] [--no-ci-hook]` — run it
+`validate_layout.py --init [--workspace-root <path>] [--ci-hook]` — run it
 verbatim once the pre-step-1 conversational items (config completion,
 `workspace_root` opt-in, pointer regeneration) and step 4's rename-before-
 scaffold offer are settled; it performs the refuse-if-initialized check, the
@@ -405,8 +405,10 @@ use if the human opted in above):
    rename or relocate any of these before we start?" A team that wants a
    custom layout from day one does it in one pass; each marker is written at
    its chosen location either way.
-5. **Scaffold a CI/pre-commit hook by default** — see "CI /
-   pre-commit hook" below. Opt out with `init --no-ci-hook`.
+5. **Scaffold a CI/pre-commit hook only if requested** — see "CI /
+   pre-commit hook" below. Opt in with `init --ci-hook`; omitted by
+   default. (`--no-ci-hook` is accepted as a deprecated no-op for one
+   release, since the hook is already off unless asked for.)
 
 ### `reconcile` — rebuild the index from markers; the repair tool for drift
 
@@ -610,18 +612,22 @@ A ready-to-copy template with these keys (annotated) is at
 
 ## CI / pre-commit hook
 
-`init` (unless run with `--no-ci-hook`) scaffolds a hook that runs, from the
-repo root:
+`init --ci-hook` (opt-in — omitted unless explicitly requested) scaffolds a
+hook that runs, from the repo root:
 
-```
-python .github/skills/ult-repo-layout/scripts/validate_layout.py --validate
+```sh
+PY=$(command -v python3 || command -v python) || exit 0
+"$PY" .github/skills/ult-repo-layout/scripts/validate_layout.py --validate || exit 0
 ```
 
-failing the build/commit on a non-zero exit code. This is the only thing the
-hook does — no LLM involved (§15.9), same precedent as
-`content_hash.py`/`md_index.py`. Wire it into whatever this repo already uses
-(`.github/workflows/`, `.pre-commit-config.yaml`, etc.) —
-`validate_layout.py` itself has no opinion on the wrapper.
+**Fails open, not closed**: a missing `python3`/`python` on `PATH`, or a
+non-zero exit from `--validate` itself, exits 0 rather than blocking the
+commit — a convenience nudge that prints the report either way, never a
+hard gate an adopter didn't explicitly ask for. No LLM involved (§15.9),
+same deterministic-check precedent as `content_hash.py`/`md_index.py`. Wire
+it into whatever this repo already uses (`.github/workflows/`,
+`.pre-commit-config.yaml`, etc.) — `validate_layout.py` itself has no
+opinion on the wrapper.
 
 ## `scripts/validate_layout.py`
 
