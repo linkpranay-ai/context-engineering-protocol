@@ -158,14 +158,18 @@ SCHEMA_VERSION = 1
 
 _STATUSES = ("pending", "generated", "skipped")
 
-# Mirrors ult-repo-layout/discover_layers.py's SCAN_IGNORED_DIR_NAMES +
-# CEP_BUCKET_DIR_NAMES -- a small local duplicate, not an import (house
-# convention: see module docstring). Adds "graphify-out" on top of that
-# base set: it's ult-codegraph's own fixed, always-gitignored tool output
-# location (SKILL.md: "graphify-out/ should be gitignored in the consuming
-# project"), never a real module candidate -- without this exclusion a
-# repo that has already run ult-codegraph would see its own graph output
-# enumerated and tiered as if it were application code.
+# Content-identical to ult-repo-layout/discover_layers.py's own
+# SCAN_IGNORED_DIR_NAMES (plus that module's separate CEP_BUCKET_DIR_NAMES,
+# also mirrored below) -- a small local duplicate, not a shared import
+# (house convention: see module docstring). Keep the two sets equal; both
+# skills' test suites assert this so a future edit to one that forgets the
+# other fails loudly instead of silently diverging again.
+#
+# "graphify-out" is ult-codegraph's own fixed, always-gitignored tool
+# output location (SKILL.md: "graphify-out/ should be gitignored in the
+# consuming project"), never a real module candidate -- without this
+# exclusion a repo that has already run ult-codegraph would see its own
+# graph output enumerated and tiered as if it were application code.
 #
 # The second line below is a name-based stopgap, deliberately kept even
 # though _top_level_candidate_dirs also drops manifest `owned_paths` (see

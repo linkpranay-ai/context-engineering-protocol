@@ -752,5 +752,40 @@ class TestPerCandidateDriftTracking(TempRepoTestCase):
         self.assertEqual(first, second)
 
 
+class TestScanIgnoredDirNamesParity(unittest.TestCase):
+    """discover_layers.SCAN_IGNORED_DIR_NAMES and ult-autoscaffold-content's
+    scaffold_state.SCAN_IGNORED_DIR_NAMES are deliberately kept as two small
+    local duplicates rather than a shared import (house convention - see
+    either module's own comment on the pair). A cross-suite equality check
+    is the only thing that catches the two silently drifting apart again,
+    since neither skill's own suite can see the other's module on its own.
+    """
+
+    def test_scan_ignored_dir_names_match_ult_autoscaffold_content(self):
+        autoscaffold_scripts = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "ult-autoscaffold-content"
+            / "scripts"
+        )
+        self.assertTrue(
+            autoscaffold_scripts.is_dir(),
+            f"expected sibling skill scripts dir at {autoscaffold_scripts}",
+        )
+        sys.path.insert(0, str(autoscaffold_scripts))
+        try:
+            import scaffold_state as ss  # noqa: E402
+        finally:
+            sys.path.remove(str(autoscaffold_scripts))
+
+        self.assertEqual(
+            dl.SCAN_IGNORED_DIR_NAMES,
+            ss.SCAN_IGNORED_DIR_NAMES,
+            "discover_layers.SCAN_IGNORED_DIR_NAMES and "
+            "scaffold_state.SCAN_IGNORED_DIR_NAMES have drifted apart - "
+            "keep the two sets content-identical (see either module's "
+            "comment on this pair).",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

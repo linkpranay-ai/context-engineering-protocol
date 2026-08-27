@@ -99,10 +99,22 @@ CEP_BUCKET_DIR_NAMES = {"contexts", "inputs", "cache"}
 HOW_L2_GITHUB_CANDIDATE_EXCLUDE = {"skills", "prompts"}
 
 # §17.4's What-L2/How-L2 sibling-scan exclusion list, applied in addition to
-# CEP_BUCKET_DIR_NAMES.
+# CEP_BUCKET_DIR_NAMES. Mirrored by ult-autoscaffold-content/scaffold_state.py's
+# own SCAN_IGNORED_DIR_NAMES -- a small local duplicate, not a shared import
+# (house convention: see that module's own comment on this pair). Keep the
+# two sets content-identical; test_scaffold_state.py and this skill's own
+# test suite both assert the two are equal so a future edit to one that
+# forgets the other fails loudly instead of silently diverging again.
+# "graphify-out" is ult-codegraph's own fixed, always-gitignored tool output
+# location; "third_party"/"starter_kit"/"output_docs"/"extern"/"external"/
+# "deps"/"submodules" are vendor/CEP-bucket names no first-party application
+# module is likely to use (see scaffold_state.py's comment for the full
+# rationale on each).
 SCAN_IGNORED_DIR_NAMES = {
     ".git", "node_modules", "vendor", "dist", "build", "target",
-    ".venv", "__pycache__",
+    ".venv", "__pycache__", "graphify-out",
+    "third_party", "starter_kit", "output_docs", "extern", "external",
+    "deps", "submodules",
 }
 
 DOC_EXTENSIONS = (".md", ".rst", ".adoc")
