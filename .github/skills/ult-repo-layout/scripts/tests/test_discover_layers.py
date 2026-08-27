@@ -339,6 +339,35 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertNotIn(".github/", section.render())
 
+    def test_only_install_manifest_naming_a_nested_skill_dir_still_excludes(self):
+        # Regression test: a --only install of a single skill writes a
+        # manifest naming the skill-dir itself (.github/skills/<name>),
+        # never the container (.github/skills). _manifest_extra_ignored
+        # must still resolve this to the immediate-child name "skills" via
+        # a descendant match, not just a direct-child (owned.parent ==
+        # cand_dir) match - and the result must be unioned with the
+        # hardcoded {"skills", "prompts"} fallback, not replace it, so a
+        # narrower --only manifest that says nothing about .github/prompts
+        # still excludes it exactly as the no-manifest case would. Before
+        # the fix, this exact fixture surfaced .github/ as a CONFIRM
+        # candidate - worse than having no manifest at all.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "prompts" / "do-thing.prompt.md", "# Do Thing")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": [".github/skills/some-skill"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
     def test_manifest_absent_falls_back_to_hardcoded_pair_unchanged(self):
         # No .cep-install.json in this fixture (this repo's own tempdir
         # fixtures never write one unless a test does so explicitly) -

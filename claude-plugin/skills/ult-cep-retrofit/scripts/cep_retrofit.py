@@ -313,13 +313,20 @@ def inventory(root, excludes=None, manifest_owned=None):
         for f in filenames:
             if _is_flat_skill_file(f, is_root):
                 fpath = os.path.join(dir_path, f)
+                if Path(fpath).resolve() in manifest_owned:
+                    # This exact file is CEP's own installed content (an
+                    # individually-listed owned_paths entry, not just a
+                    # container directory already pruned above) -- excluded
+                    # like any other manifest-owned path, not reported.
+                    continue
                 note = ""
-                if Path(dir_path).name.lower() == "docs":
+                if "docs" in Path(_rel(dir_path, root)).parts:
                     note = (
-                        'flat-file unit found directly under a directory named '
-                        '"docs" -- a weaker signal than a dedicated skill-dir/'
-                        'manifest-dir (heuristic (c) vs. (a)/(b)); treat as '
-                        'supplementary, not canonical'
+                        'flat-file unit found under a directory named "docs" '
+                        '(at this or an ancestor level) -- a weaker signal '
+                        'than a dedicated skill-dir/manifest-dir (heuristic '
+                        '(c) vs. (a)/(b)); treat as supplementary, not '
+                        'canonical'
                     )
                 units.append({
                     "unit_id": _rel(fpath, root),

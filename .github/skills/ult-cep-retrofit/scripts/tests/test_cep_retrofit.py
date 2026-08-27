@@ -254,6 +254,21 @@ class InventoryManifestExclusionTest(unittest.TestCase):
             unit_ids = {u["unit_id"] for u in result["units"]}
             self.assertIn(".github/skills/example-skill", unit_ids)
 
+    def test_manifest_owned_individual_file_excluded_from_flat_file_units(self):
+        # owned_paths can name an individual file, not just a container
+        # directory (e.g. a bundled doc copied next to project content
+        # rather than under a container the walk already prunes). A flat
+        # file exactly matching a manifest-owned path must be excluded the
+        # same way an owned container is, not surfaced as a flat-file unit.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "docs" / "cep-bundled-note.md", "# CEP note\n")
+            _write(Path(tmp) / "docs" / "genuine-guide.md", "# Genuine guide\n")
+            self._write_manifest(tmp, ["docs/cep-bundled-note.md"])
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertNotIn("docs/cep-bundled-note.md", unit_ids)
+            self.assertIn("docs/genuine-guide.md", unit_ids)
+
     def test_manifest_owned_param_overrides_autodetection(self):
         # Passing manifest_owned explicitly (e.g. manifest_owned=set())
         # disables manifest-based exclusion entirely, even when a real

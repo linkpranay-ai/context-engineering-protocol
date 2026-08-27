@@ -236,14 +236,27 @@ def _manifest_extra_ignored(cand_dir, manifest_owned):
     `.github/`). Works for any candidate, not just `.github/` - e.g. an
     install that lands a candidate-adjacent CEP path elsewhere is excluded
     the same way, with no new hardcoded pair needed. Returns an empty set
-    when there's no manifest (discover_how_l2 falls back to
-    HOW_L2_GITHUB_CANDIDATE_EXCLUDE for `.github/` in that case)."""
+    when there's no manifest (discover_how_l2 unions this with
+    HOW_L2_GITHUB_CANDIDATE_EXCLUDE for `.github/` in that case, rather than
+    replacing it - see that call site).
+
+    Matches any *descendant* of `cand_dir`, not just a direct child: a
+    manifest entry like `.github/skills/<name>` (written by a `--only`
+    install of a single skill) has to resolve to the immediate-child name
+    `skills` when `cand_dir` is `.github/`, the same as a full-install
+    entry of `.github/skills` itself would. An exact `owned.parent ==
+    cand_dir` check misses this - it only matches an owned path that is
+    itself a direct child, not one nested inside a direct child."""
     if not manifest_owned:
         return set()
     names = set()
     for owned in manifest_owned:
-        if owned.parent == cand_dir:
-            names.add(owned.name)
+        try:
+            rel = owned.relative_to(cand_dir)
+        except ValueError:
+            continue
+        if rel.parts:
+            names.add(rel.parts[0])
     return names
 
 
@@ -699,18 +712,22 @@ def discover_how_l2(repo_root, config):
     for cand_rel in HOW_L2_CANDIDATE_DIRS:
         cand = repo_root / cand_rel.rstrip("/")
         if cand.is_dir():
-            if manifest_owned is not None:
-                # Manifest present: ask it what CEP actually put under this
-                # candidate, for any HOW_L2_CANDIDATE_DIRS entry - not just
-                # the hardcoded .github/ case below.
-                extra_ignored = _manifest_extra_ignored(cand, manifest_owned)
-            else:
-                # No manifest (older install, or CEP copied in by hand):
-                # fall back to exactly today's hardcoded .github/-only pair.
-                # See HOW_L2_GITHUB_CANDIDATE_EXCLUDE's own docstring.
-                extra_ignored = (
-                    HOW_L2_GITHUB_CANDIDATE_EXCLUDE if cand_rel == ".github/" else frozenset()
-                )
+            # Manifest-derived names are unioned with, never a replacement
+            # for, the hardcoded .github/-only fallback below. A manifest
+            # is a positive, additive signal - it tells us about paths CEP
+            # itself is certain it owns, but it is never proof that nothing
+            # else needs excluding (a narrower/older manifest, e.g. from a
+            # single-skill --only install, must never make results worse
+            # than having no manifest at all).
+            manifest_names = (
+                _manifest_extra_ignored(cand, manifest_owned)
+                if manifest_owned is not None
+                else set()
+            )
+            hardcoded_fallback = (
+                HOW_L2_GITHUB_CANDIDATE_EXCLUDE if cand_rel == ".github/" else frozenset()
+            )
+            extra_ignored = manifest_names | hardcoded_fallback
             doc_count = _count_docs(cand, extra_ignored)
             if doc_count > 0 or any(True for _ in _iter_files(cand, extra_ignored)):
                 ranked.append((cand_rel, doc_count, _dir_mtime(cand)))
