@@ -89,6 +89,16 @@ md_index.py / content_hash.py.
 
 CLI:
     python validate_layout.py --validate [<repo-root>]
+    python validate_layout.py --init [--workspace-root <path>] [--no-ci-hook] [<repo-root>]
+
+`--init` backs only the mechanical half of SKILL.md's `init` mode - scaffold
+each installed slot's directory/marker, write `project_layout` into
+context-config.yaml, and (by default) a pre-commit hook. The conversational
+half (asking the human for project_name/description, whether to opt into
+workspace_root, generating context-config.yaml itself, offering to
+rename/relocate a slot's default location, suggesting - never silently
+adding - what_l2.include_roots) stays the agent's job; see `run_init`
+below and SKILL.md's `init` section.
 """
 
 import argparse
@@ -820,6 +830,367 @@ def check_registry_consistency(repo_root):
 
 
 # ---------------------------------------------------------------------------
+# Comment-preserving YAML editor (no pyyaml dependency - load_yaml_lite above
+# discards comments and cannot round-trip). This is the same engine
+# confirm_layers.py already has (its own "Comment-preserving YAML editor"
+# section) - duplicated here rather than imported, because
+# layout_decision_grammar.py (the one module this skill already shares
+# between discover_layers.py/confirm_layers.py/wizard_layout_source.py)
+# documents this write engine as deliberately staying local to
+# confirm_layers.py, bound up with run_confirm's atomicity contract, not
+# reusable vocabulary; and importing confirm_layers.py itself here would be
+# circular (confirm_layers.py already imports this module as `vl`). Same
+# no-shared-library-across-modules convention as the manifest reader in
+# each of cep_retrofit.py/scaffold_state.py/wizard_docs.py/discover_layers.py.
+# `run_init` below is this module's own first marker/config *writer* - every
+# other function above it is read-only.
+# ---------------------------------------------------------------------------
+
+def _line_indent(line):
+    return len(line) - len(line.lstrip(" "))
+
+
+def _key_of(line):
+    return line.strip().split(":", 1)[0].strip()
+
+
+def _is_blank_or_comment(line):
+    s = line.strip()
+    return s == "" or s.startswith("#")
+
+
+def _scope_end(lines, start, indent):
+    """First index >= start whose content (ignoring blank/comment lines)
+    sits at indent <= `indent` - i.e. where a block that started at `indent`
+    ends. len(lines) if the block runs to the end of the file."""
+    i = start
+    while i < len(lines):
+        if not _is_blank_or_comment(lines[i]) and _line_indent(lines[i]) <= indent:
+            return i
+        i += 1
+    return len(lines)
+
+
+def _find_child(lines, start, end, indent, name):
+    i = start
+    while i < end:
+        line = lines[i]
+        if not _is_blank_or_comment(line) and _line_indent(line) == indent and _key_of(line) == name:
+            return i
+        i += 1
+    return None
+
+
+def _locate_or_create_mapping_key(lines, start, end, indent, name):
+    idx = _find_child(lines, start, end, indent, name)
+    if idx is not None:
+        return idx, end
+    lines.insert(end, " " * indent + name + ":")
+    return end, end + 1
+
+
+def _walk_to_parent_scope(lines, parents):
+    """Ensure every key in `parents` exists as a mapping (creating any that
+    are missing), descending one level per key. Returns (start, end, indent)
+    - the scope in which the final leaf key lives."""
+    indent = 0
+    start, end = 0, len(lines)
+    for part in parents:
+        idx, end = _locate_or_create_mapping_key(lines, start, end, indent, part)
+        start = idx + 1
+        end = _scope_end(lines, start, indent)
+        indent += 2
+    return start, end, indent
+
+
+def set_scalar(lines, dotted_parts, value):
+    """Set `dotted_parts[-1]: value` under the mapping chain
+    `dotted_parts[:-1]`, creating any missing parent keys. Preserves an
+    existing trailing same-line comment verbatim."""
+    *parents, leaf = dotted_parts
+    start, end, indent = _walk_to_parent_scope(lines, parents)
+    idx = _find_child(lines, start, end, indent, leaf)
+    prefix = " " * indent
+    if idx is None:
+        lines.insert(end, f"{prefix}{leaf}: {value}")
+        return
+    line = lines[idx]
+    if "#" in line:
+        _, _, comment = line.partition("#")
+        lines[idx] = f"{prefix}{leaf}: {value}  #{comment}"
+    else:
+        lines[idx] = f"{prefix}{leaf}: {value}"
+
+
+def _list_item_indices(lines, key_idx, end, indent):
+    """Indices of the `- item` lines directly under the list key at
+    `key_idx` (which sits at `indent`), in order."""
+    items = []
+    j = key_idx + 1
+    while j < end:
+        line = lines[j]
+        if _is_blank_or_comment(line):
+            j += 1
+            continue
+        if _line_indent(line) == indent + 2 and line.lstrip().startswith("- "):
+            items.append(j)
+            j += 1
+            continue
+        break
+    return items
+
+
+def append_list_item(lines, dotted_parts, item):
+    """Append `- item` to the list at `dotted_parts`, creating the key (and
+    converting an inline `key: []` to block form) if needed."""
+    *parents, leaf = dotted_parts
+    start, end, indent = _walk_to_parent_scope(lines, parents)
+    idx = _find_child(lines, start, end, indent, leaf)
+    item_indent = " " * (indent + 2)
+    if idx is None:
+        lines.insert(end, " " * indent + f"{leaf}:")
+        lines.insert(end + 1, f"{item_indent}- {item}")
+        return
+    items = _list_item_indices(lines, idx, end, indent)
+    if items:
+        lines.insert(items[-1] + 1, f"{item_indent}- {item}")
+        return
+    line = lines[idx]
+    value_part = line.split(":", 1)[1] if ":" in line else ""
+    value_no_comment = value_part.split("#", 1)[0].strip()
+    if value_no_comment in ("[]", ""):
+        if "#" in line:
+            before, _, comment = line.partition("#")
+            key_part = before.split(":", 1)[0]
+            lines[idx] = f"{key_part}:  #{comment}"
+        else:
+            lines[idx] = " " * indent + f"{leaf}:"
+        lines.insert(idx + 1, f"{item_indent}- {item}")
+        return
+    # Existing scalar (non-list, non-empty) value with no comprehensible
+    # list form - insert the item right after the key line rather than
+    # silently dropping it.
+    lines.insert(idx + 1, f"{item_indent}- {item}")
+
+
+def _remove_top_level_key(lines, name):
+    """Remove an existing top-level `name:` mapping block (key line through
+    its full scope) in place, if present. No-op if absent."""
+    idx = _find_child(lines, 0, len(lines), 0, name)
+    if idx is None:
+        return
+    end = _scope_end(lines, idx + 1, 0)
+    del lines[idx:end]
+
+
+# ---------------------------------------------------------------------------
+# init mode (§15.5/§16.2, mechanical half only - see module docstring)
+# ---------------------------------------------------------------------------
+
+PRE_COMMIT_HOOK_TEXT = (
+    "#!/bin/sh\n"
+    "# Scaffolded by `ult-repo-layout init` (SKILL.md \"CI / pre-commit "
+    "hook\", S15.9). No LLM involved - a deterministic project_layout check.\n"
+    "python .github/skills/ult-repo-layout/scripts/validate_layout.py --validate\n"
+)
+
+
+def _scaffold_pre_commit_hook(repo_root):
+    """Write a `.git/hooks/pre-commit` wrapper invoking `validate_layout.py
+    --validate`, per SKILL.md's "CI / pre-commit hook" section - the doc's
+    own "no LLM involved, just wire it in" framing, and the one integration
+    point that exists in every git repo without guessing which CI system is
+    present. Never overwrites an existing hook. Returns a message string
+    describing what happened (scaffolded / skipped-and-why), never raises."""
+    hooks_dir = repo_root / ".git" / "hooks"
+    if not hooks_dir.is_dir():
+        return (
+            "Skipped pre-commit hook - no .git/hooks/ directory found. Wire "
+            "'validate_layout.py --validate' into your CI/pre-commit setup "
+            "by hand (see SKILL.md \"CI / pre-commit hook\")."
+        )
+    hook_path = hooks_dir / "pre-commit"
+    if hook_path.exists():
+        return (
+            f"Skipped pre-commit hook - '{hook_path.relative_to(repo_root).as_posix()}' "
+            f"already exists. Add 'python .github/skills/ult-repo-layout/scripts/"
+            f"validate_layout.py --validate' to it by hand if you want this "
+            f"check wired in."
+        )
+    hook_path.write_text(PRE_COMMIT_HOOK_TEXT, encoding="utf-8")
+    try:
+        hook_path.chmod(hook_path.stat().st_mode | 0o111)
+    except OSError:
+        pass  # best-effort - e.g. unsupported on this filesystem
+    return f"Scaffolded pre-commit hook at '{hook_path.relative_to(repo_root).as_posix()}'."
+
+
+def _marker_entry_lines(slot, kind, file_name):
+    lines = [f"  - slot: {slot}", f"    kind: {kind}"]
+    if file_name:
+        lines.append(f"    file: {file_name}")
+    lines.append(f"    schema_version: {2 if kind == 'file' else 1}")
+    return lines
+
+
+def _write_marker(marker_dir, slot, kind, file_name):
+    """Write or extend `<marker_dir>/.layout-slots.yaml` with one new
+    `slot:` entry (see "Marker file format" in SKILL.md). Slots that resolve
+    to the same directory share one marker file's `slots:` list - if the
+    file already exists (a sibling `kind: file` slot scaffolded earlier in
+    this same `init` run, e.g. autoscaffold_content_state and
+    autoscaffold_content_index sharing one directory), the new entry is
+    appended rather than the file being overwritten."""
+    marker_path = marker_dir / ".layout-slots.yaml"
+    entry_lines = _marker_entry_lines(slot, kind, file_name)
+    if marker_path.exists():
+        existing = load_yaml_file(marker_path) or {}
+        already_present = any(
+            isinstance(e, dict) and e.get("slot") == slot
+            for e in (existing.get("slots") or [])
+        )
+        if already_present:
+            return
+        lines = marker_path.read_text(encoding="utf-8-sig").splitlines()
+        lines.extend(entry_lines)
+        marker_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    else:
+        marker_path.write_text("slots:\n" + "\n".join(entry_lines) + "\n", encoding="utf-8")
+
+
+def _write_project_layout_section(lines, entries):
+    """Append a fresh `project_layout:` block with one `slots:` entry per
+    `(slot -> (path, kind, owning_skill))` in `entries` (insertion order),
+    replacing any existing `project_layout:` scope outright. `run_init` only
+    ever reaches this after its refuse-if-initialized gate, so there is
+    nothing to merge - only a stray partial block (e.g. from a previously
+    interrupted `init` run) to clear before writing the real one."""
+    _remove_top_level_key(lines, "project_layout")
+    if lines and lines[-1].strip() != "":
+        lines.append("")
+    block = ["project_layout:", "  version: 1", "  initialized: true", "  slots:"]
+    for slot, (path, kind, owning_skill) in entries.items():
+        block.append(f"    {slot}:")
+        block.append(f"      path: {path}")
+        block.append(f"      kind: {kind}")
+        block.append(f"      owning_skill: {owning_skill}")
+    lines.extend(block)
+
+
+def run_init(repo_root, workspace_root=None, no_ci_hook=False):
+    """Back only the mechanical half of `init` mode (SKILL.md "Modes >
+    init") - scaffold each installed slot's directory/marker, write
+    `project_layout` into context-config.yaml, and (by default) a
+    pre-commit hook. The conversational half - asking the human for
+    project_name/description, whether to opt into workspace_root,
+    generating context-config.yaml itself from the starter-kit template,
+    offering to rename/relocate a slot's default location before
+    scaffolding, and suggesting (never silently adding)
+    what_l2.include_roots when output_docs_structure/ exists - stays the
+    agent's job: the same split every other ult-* skill in this repo
+    already draws between SKILL.md-driven agent behavior and a
+    deterministic script (confirm_layers.py's own "agent/human produces the
+    decisions, the script applies them atomically" precedent). Returns
+    (exit_code, messages) - 0/[...] on success, 1/[...] on refusal."""
+    repo_root = Path(repo_root).resolve()
+    config_path = repo_root / "context-config.yaml"
+    if not config_path.exists():
+        return 1, [
+            "context-config.yaml not found - generate it first "
+            "(install.ps1/install.sh -InitProject, or copy "
+            "starter_kits/context_engineering/context-config.yaml.template "
+            "by hand). init only writes project_layout, not the rest of "
+            "the config file.",
+        ]
+
+    config = load_yaml_file(config_path) or {}
+    existing_project_layout = config.get("project_layout")
+    if isinstance(existing_project_layout, dict) and existing_project_layout.get("initialized"):
+        return 1, [
+            "Already initialized. Run /ult-repo-layout reconcile to update "
+            "the index, or discover to re-confirm slot locations.",
+        ]
+
+    existing_wr = _normalize_workspace_root(config)
+    if workspace_root is not None:
+        if existing_wr:
+            return 1, [
+                f"layout.workspace_root is already set to '{existing_wr}' - "
+                f"init never overwrites an existing value (the same "
+                f"never-silently-reset rule reconcile follows). Omit "
+                f"--workspace-root to keep it, or edit context-config.yaml "
+                f"by hand to change it.",
+            ]
+        wr_clean = workspace_root.rstrip("/")
+        if wr_clean in ("", "."):
+            return 1, [
+                f"--workspace-root = '{workspace_root}' is invalid - the "
+                f"repo root cannot be the workspace root (S22). Use a "
+                f"repo-relative subdirectory (e.g. 'docs/')."
+            ]
+        path_problems = check_path_wellformedness(Path(wr_clean))
+        if path_problems:
+            return 1, [f"--workspace-root '{workspace_root}' - {p}" for p in path_problems]
+
+    effective_wr = workspace_root.rstrip("/") if workspace_root else existing_wr
+
+    entries = {}
+    messages = []
+    for slot, spec in SLOT_REGISTRY.items():
+        if not _owning_skill_installed(repo_root, spec["owning_skill"]):
+            continue
+
+        if effective_wr and spec.get("workspace_root_leaf"):
+            default = f"{effective_wr}/{spec['workspace_root_leaf']}"
+        else:
+            default = resolve_pre_d21_default(slot, config)
+
+        rel = Path(default.rstrip("/"))
+        kind = spec["kind"]
+        target = repo_root / rel
+
+        if kind == "directory":
+            target.mkdir(parents=True, exist_ok=True)
+            _write_marker(target, slot, kind, None)
+            resolved_display = rel.as_posix() + "/"
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _write_marker(target.parent, slot, kind, target.name)
+            resolved_display = rel.as_posix()
+
+        entries[slot] = (resolved_display, kind, spec["owning_skill"])
+        messages.append(f"Scaffolded '{slot}' at '{resolved_display}'.")
+
+    if not entries:
+        return 1, [
+            "No registered slot's owning skill is installed under "
+            ".github/skills/ - nothing to initialize.",
+        ]
+
+    config_lines = config_path.read_text(encoding="utf-8-sig").splitlines()
+
+    if workspace_root is not None:
+        set_scalar(config_lines, ["layout", "workspace_root"], workspace_root.rstrip("/"))
+        current_exclude = resolve_what_l2_exclude(config)
+        for leaf in ("contexts/", "inputs/", "cache/"):
+            if leaf not in current_exclude:
+                append_list_item(config_lines, ["layers", "what_l2", "exclude"], leaf)
+        messages.append(
+            f"Set layout.workspace_root = '{workspace_root.rstrip('/')}' and "
+            f"pre-populated layers.what_l2.exclude (§16.5 recommended triad)."
+        )
+
+    _write_project_layout_section(config_lines, entries)
+    config_path.write_text("\n".join(config_lines) + "\n", encoding="utf-8")
+    messages.append(f"Wrote project_layout with {len(entries)} slot(s) to context-config.yaml.")
+
+    if not no_ci_hook:
+        messages.append(_scaffold_pre_commit_hook(repo_root))
+
+    return 0, messages
+
+
+# ---------------------------------------------------------------------------
 # Top-level validation
 # ---------------------------------------------------------------------------
 
@@ -1017,7 +1388,29 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("repo_root", nargs="?", default=".", help="repo root (default: .)")
     parser.add_argument("--validate", action="store_true", help="run all checks and report")
+    parser.add_argument(
+        "--init", action="store_true",
+        help="scaffold installed slots' directories/markers and write project_layout "
+             "(mechanical half of SKILL.md's init mode - see module docstring)",
+    )
+    parser.add_argument(
+        "--workspace-root", default=None, metavar="<path>",
+        help="only with --init: set layout.workspace_root and pre-populate the "
+             "what_l2.exclude triad (§16.5); errors if one is already set",
+    )
+    parser.add_argument(
+        "--no-ci-hook", action="store_true",
+        help="only with --init: skip scaffolding the .git/hooks/pre-commit wrapper",
+    )
     args = parser.parse_args(argv)
+
+    if args.init:
+        code, messages = run_init(
+            args.repo_root, workspace_root=args.workspace_root, no_ci_hook=args.no_ci_hook,
+        )
+        for message in messages:
+            print(message)
+        return code
 
     if not args.validate:
         parser.print_help(sys.stderr)

@@ -282,6 +282,16 @@ generates it inline using the table above before continuing.
 
 ### `init` — greenfield projects
 
+Steps 1-3 and 5 below are mechanical and backed by
+`validate_layout.py --init [--workspace-root <path>] [--no-ci-hook]` — run it
+verbatim once the pre-step-1 conversational items (config completion,
+`workspace_root` opt-in, pointer regeneration) and step 4's rename-before-
+scaffold offer are settled; it performs the refuse-if-initialized check, the
+per-slot scaffold+marker writes, the `project_layout` write, and the
+pre-commit hook scaffold in one pass. It refuses cleanly (rather than
+generating one) if `context-config.yaml` doesn't exist yet — run the
+pre-step-1 config-completion item first.
+
 **Before step 1 — config completion and pointer regeneration:**
 
 - If `context-config.yaml` doesn't exist at the project root, generate it

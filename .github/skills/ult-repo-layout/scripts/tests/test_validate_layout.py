@@ -1308,6 +1308,220 @@ class TestGitHistoryCheck(unittest.TestCase):
             self.assertIn("S4", result)
 
 
+class TestRunInit(unittest.TestCase):
+    """run_init() backs the mechanical half of SKILL.md's `init` mode. See
+    SKILL.md's own note that steps 1-3 and 5 are backed by
+    `validate_layout.py --init`."""
+
+    def _install_skills(self, root, *names):
+        for name in names:
+            (root / ".github" / "skills" / name).mkdir(parents=True, exist_ok=True)
+
+    def test_missing_config_yaml_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 1)
+            self.assertTrue(any("context-config.yaml not found" in m for m in messages))
+
+    def test_already_initialized_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(
+                root / "context-config.yaml",
+                "project_layout:\n  version: 1\n  initialized: true\n",
+            )
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 1)
+            self.assertTrue(any("Already initialized" in m for m in messages))
+
+    def test_zero_installed_skills_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "skills").mkdir(parents=True)
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 1)
+            self.assertTrue(any("nothing to initialize" in m for m in messages))
+
+    def test_partial_install_gate_scaffolds_only_installed_slots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate", "ult-autoscaffold-content")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+
+            # context_packages (ult-context-generate, directory kind) scaffolded.
+            self.assertTrue((root / "contexts").is_dir())
+            self.assertTrue((root / "contexts" / ".layout-slots.yaml").exists())
+
+            # autoscaffold_content_state + autoscaffold_content_index
+            # (ult-autoscaffold-content, both file kind) share one directory
+            # and therefore one marker file. The artifacts themselves are
+            # derived/regenerable (only ever written by scaffold_state.py),
+            # so init scaffolds the containing directory + marker only, not
+            # the files - they don't exist yet.
+            shared_dir = root / "starter_kit" / "autoscaffold-content"
+            self.assertTrue(shared_dir.is_dir())
+            self.assertFalse((shared_dir / "TRIAGE-STATE.json").exists())
+            self.assertFalse((shared_dir / "CEP-INDEX.md").exists())
+            marker = vl.load_yaml_file(shared_dir / ".layout-slots.yaml")
+            marker_slots = {e["slot"] for e in marker["slots"]}
+            self.assertEqual(
+                marker_slots, {"autoscaffold_content_state", "autoscaffold_content_index"}
+            )
+
+            # decision_ledger's owning skill (ult-institutional-memory-distill)
+            # was never installed - nothing scaffolded for it.
+            self.assertFalse((root / "starter_kit" / "decision_ledger").exists())
+
+    def test_marker_round_trips_for_directory_and_file_slot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate", "ult-institutional-memory-distill")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, _ = vl.run_init(root)
+            self.assertEqual(code, 0)
+
+            markers = vl.find_markers(root)
+            dir_hits = vl.find_slot_markers(markers, "context_packages")
+            self.assertEqual(len(dir_hits), 1)
+            marker_path, entry = dir_hits[0]
+            resolved, kind = vl.resolved_path_for_marker(
+                marker_path, entry, vl.SLOT_REGISTRY["context_packages"], root
+            )
+            self.assertEqual(resolved, Path("contexts"))
+            self.assertEqual(kind, "directory")
+
+            file_hits = vl.find_slot_markers(markers, "decision_ledger")
+            self.assertEqual(len(file_hits), 1)
+            marker_path, entry = file_hits[0]
+            resolved, kind = vl.resolved_path_for_marker(
+                marker_path, entry, vl.SLOT_REGISTRY["decision_ledger"], root
+            )
+            self.assertEqual(resolved, Path("starter_kit/decision_ledger/DECISION-LEDGER.json"))
+            self.assertEqual(kind, "file")
+
+    def test_project_layout_block_correctness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, _ = vl.run_init(root)
+            self.assertEqual(code, 0)
+
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            layout = config["project_layout"]
+            self.assertEqual(layout["version"], 1)
+            self.assertTrue(layout["initialized"])
+            slot = layout["slots"]["context_packages"]
+            self.assertEqual(slot["path"], "contexts/")
+            self.assertEqual(slot["kind"], "directory")
+            self.assertEqual(slot["owning_skill"], "ult-context-generate")
+
+    def test_workspace_root_success_and_exclude_triad_dedup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(
+                root / "context-config.yaml",
+                "cache:\n  product_context_path: contexts/\n"
+                "layers:\n  what_l2:\n    exclude:\n      - contexts/\n",
+            )
+            code, messages = vl.run_init(root, workspace_root="docs/")
+            self.assertEqual(code, 0, messages)
+
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertEqual(vl._normalize_workspace_root(config), "docs")
+            exclude = vl.resolve_what_l2_exclude(config)
+            self.assertEqual(exclude.count("contexts/"), 1)
+            self.assertIn("inputs/", exclude)
+            self.assertIn("cache/", exclude)
+            # workspace_root-relative default, not the pre-D21 "contexts/" default.
+            self.assertEqual(config["project_layout"]["slots"]["context_packages"]["path"], "docs/contexts/")
+
+    def test_workspace_root_already_set_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "layout:\n  workspace_root: docs/\n")
+            code, messages = vl.run_init(root, workspace_root="other/")
+            self.assertEqual(code, 1)
+            self.assertTrue(any("already set" in m for m in messages))
+
+    def test_workspace_root_invalid_value_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, messages = vl.run_init(root, workspace_root=".")
+            self.assertEqual(code, 1)
+            self.assertTrue(any("S22" in m for m in messages))
+
+    def test_no_ci_hook_skips_hook_scaffold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / ".git" / "hooks").mkdir(parents=True)
+            code, messages = vl.run_init(root, no_ci_hook=True)
+            self.assertEqual(code, 0, messages)
+            self.assertFalse((root / ".git" / "hooks" / "pre-commit").exists())
+            self.assertFalse(any("pre-commit" in m for m in messages))
+
+    def test_default_scaffolds_hook_when_git_hooks_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / ".git" / "hooks").mkdir(parents=True)
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            hook = root / ".git" / "hooks" / "pre-commit"
+            self.assertTrue(hook.exists())
+            self.assertIn("validate_layout.py --validate", hook.read_text(encoding="utf-8"))
+            self.assertTrue(any("Scaffolded pre-commit hook" in m for m in messages))
+
+    def test_hook_skipped_when_git_hooks_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            self.assertTrue(any("Skipped pre-commit hook" in m for m in messages))
+
+    def test_existing_hook_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            hooks_dir = root / ".git" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            write(hooks_dir / "pre-commit", "#!/bin/sh\necho custom hook\n")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            self.assertIn("custom hook", (hooks_dir / "pre-commit").read_text(encoding="utf-8"))
+            self.assertTrue(any("already exists" in m for m in messages))
+
+    def test_freshly_scaffolded_repo_validates_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, _ = vl.run_init(root)
+            self.assertEqual(code, 0)
+
+            ok, report = vl.validate(root)
+            fails = [line for line in report if line.startswith("FAIL")]
+            self.assertEqual(fails, [])
+            self.assertTrue(ok)
+
+
 class TestMain(unittest.TestCase):
     def test_validate_clean_repo_exits_zero(self):
         import contextlib
@@ -1322,6 +1536,56 @@ class TestMain(unittest.TestCase):
 
     def test_no_validate_flag_returns_usage_error(self):
         self.assertEqual(vl.main([tempfile.gettempdir()]), 2)
+
+    def test_init_flag_scaffolds_and_exits_zero(self):
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "skills" / "ult-context-generate").mkdir(parents=True)
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = vl.main(["--init", "--no-ci-hook", str(root)])
+            self.assertEqual(rc, 0)
+            self.assertIn("Scaffolded 'context_packages'", buf.getvalue())
+            self.assertTrue((root / "contexts").is_dir())
+
+    def test_init_flag_with_workspace_root(self):
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "skills" / "ult-context-generate").mkdir(parents=True)
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = vl.main(["--init", "--workspace-root", "docs/", "--no-ci-hook", str(root)])
+            self.assertEqual(rc, 0)
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertEqual(vl._normalize_workspace_root(config), "docs")
+
+    def test_init_flag_refuses_when_already_initialized(self):
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "skills" / "ult-context-generate").mkdir(parents=True)
+            write(
+                root / "context-config.yaml",
+                "project_layout:\n  version: 1\n  initialized: true\n",
+            )
+
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = vl.main(["--init", str(root)])
+            self.assertEqual(rc, 1)
+            self.assertIn("Already initialized", buf.getvalue())
 
 
 if __name__ == "__main__":
