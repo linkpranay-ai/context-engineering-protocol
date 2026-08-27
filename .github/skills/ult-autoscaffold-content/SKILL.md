@@ -219,7 +219,11 @@ uses).
        decided in Step 3.5).
     2. Present the resulting tier table to the user (Tier 1
        high-importance, Tier 2 ordinary, Tier 3 leaf, Tier 0
-       generated/vendor — auto-skipped, shown for transparency).
+       generated/vendor — auto-skipped, shown for transparency, plus an
+       Empty bucket — a directory with zero files, or zero graph nodes
+       under it in graph mode — also auto-skipped and shown for the same
+       reason: never silently omitted, just never offered as a module
+       worth generating content for).
     3. Ask **how much to generate now**: all pending modules, Tier 1 only,
        or a hand-picked subset. This is a "how much work right now" call,
        not a layout-config decision — one question, answered once per run,

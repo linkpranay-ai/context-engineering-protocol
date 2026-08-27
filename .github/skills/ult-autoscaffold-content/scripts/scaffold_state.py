@@ -454,6 +454,22 @@ def _graph_in_degrees(graph):
     return {module: len(s) for module, s in senders.items()}
 
 
+def _graph_module_node_counts(graph):
+    """{module_name: node_count} for every graph node whose source_file maps
+    to a module (see _module_of()). Distinct from _graph_in_degrees(): a
+    module can legitimately have in_degree 0 (a real leaf, tier 3 -- other
+    code just never imports it) while still containing plenty of its own
+    nodes. This counts total nodes per module instead, so a module with
+    ZERO nodes -- graphify found nothing to index there at all -- can be
+    told apart from a real leaf. Used by _tier_for_graph()'s empty-module
+    check."""
+    node_module = _node_module_map(graph)
+    counts = {}
+    for module in node_module.values():
+        counts[module] = counts.get(module, 0) + 1
+    return counts
+
+
 def _interface_id(module_a, module_b):
     """Stable id for an unordered module pair -- callers must already have
     sorted (module_a, module_b), this just joins them."""
@@ -635,9 +651,19 @@ def _check_graph_repo_root_alignment(graph_modules, module_names, graph_path):
 # Tier assignment                                                            #
 # --------------------------------------------------------------------------- #
 
-def _tier_for_graph(in_degree, generated):
+def _tier_for_graph(in_degree, generated, node_count):
     if generated:
         return 0, "generated"
+    # A module with zero graph nodes is not a real leaf (tier 3) -- it's
+    # empty: graphify found nothing under it to index at all (e.g. a
+    # directory graphify never walked, or one with no parseable files).
+    # in_degree alone can't tell these apart -- a genuine tier-3 leaf with
+    # plenty of its own nodes also has in_degree 0, since nothing else
+    # imports it. node_count is the distinguishing signal (see
+    # _graph_module_node_counts()). Checked before the thresholds below so
+    # it never gets miscounted as a normal, selectable tier-3 module.
+    if node_count == 0:
+        return None, "empty"
     if in_degree >= TIER1_MIN_IN_DEGREE:
         return 1, "graph:in-degree"
     if in_degree >= 1:
@@ -648,6 +674,11 @@ def _tier_for_graph(in_degree, generated):
 def _tier_for_heuristic(file_count, generated):
     if generated:
         return 0, "generated"
+    # Same empty-vs-leaf distinction as _tier_for_graph()'s node_count
+    # check, but heuristic mode's own existing signal (file_count) already
+    # carries it directly -- no separate lookup needed.
+    if file_count == 0:
+        return None, "empty"
     if file_count >= TIER1_MIN_FILE_COUNT:
         return 1, "heuristic:file-count"
     if file_count >= 1:
@@ -762,6 +793,7 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
     module_names = _top_level_candidate_dirs(repo_root)
 
     in_degrees = {}
+    node_counts = {}
     alignment_warning = None
     if graph_mode == "graphify":
         graph = _load_graph(graph_path)
@@ -772,6 +804,7 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
             _graph_module_names(graph), module_names, graph_path
         )
         in_degrees = _graph_in_degrees(graph)
+        node_counts = _graph_module_node_counts(graph)
         # Same one-time graph load, same access pattern as in_degrees above
         # -- see _graph_crossing_edges()'s docstring for why this is the
         # pair, not the direction.
@@ -804,10 +837,25 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
 
         if graph_mode == "graphify":
             in_degree = in_degrees.get(name, 0)
-            tier, basis = _tier_for_graph(in_degree, generated)
+            node_count = node_counts.get(name, 0)
+            tier, basis = _tier_for_graph(in_degree, generated, node_count)
         else:
             in_degree = None
             tier, basis = _tier_for_heuristic(len(files), generated)
+
+        if tier == 0:
+            skip_reason = "generated/vendor code (auto-detected)"
+        elif tier is None:
+            # Distinct wording from the tier-0 case above so "why was this
+            # skipped" stays answerable at a glance -- generated/vendor and
+            # empty are different reasons a module never became selectable.
+            skip_reason = (
+                "empty directory (no graph nodes found under it)"
+                if graph_mode == "graphify"
+                else "empty directory (no files found)"
+            )
+        else:
+            skip_reason = None
 
         entry = {
             "id": module_id,
@@ -815,10 +863,10 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
             "in_degree": in_degree,
             "file_count": len(files),
             "basis": basis,
-            "status": "skipped" if tier == 0 else "pending",
+            "status": "pending" if tier not in (0, None) else "skipped",
             "generated_at": None,
             "output_path": None,
-            "skip_reason": "generated/vendor code (auto-detected)" if tier == 0 else None,
+            "skip_reason": skip_reason,
         }
         new_modules.append(entry)
 
@@ -950,12 +998,13 @@ _TIER_TITLES = {
     2: "## Tier 2 -- ordinary modules",
     3: "## Tier 3 -- leaf modules (no other module depends on these)",
     0: "## Tier 0 -- generated/vendor (auto-skipped)",
+    None: "## Empty (auto-skipped, no files/nodes found)",
 }
 
 
 def render_index(state, repo_name):
     modules = state.get("modules", [])
-    by_tier = {0: [], 1: [], 2: [], 3: []}
+    by_tier = {0: [], 1: [], 2: [], 3: [], None: []}
     for m in modules:
         by_tier.setdefault(m["tier"], []).append(m)
 
@@ -981,7 +1030,7 @@ def render_index(state, repo_name):
         lines.append("**WARNING:** {}".format(overlap_warning))
     lines.append("")
 
-    for tier in (1, 2, 3, 0):
+    for tier in (1, 2, 3, 0, None):
         entries = by_tier.get(tier, [])
         lines.append(_TIER_TITLES[tier])
         lines.append("")
@@ -990,7 +1039,12 @@ def render_index(state, repo_name):
             lines.append("")
             continue
         for m in sorted(entries, key=lambda e: e["id"]):
-            if m.get("in_degree") is not None:
+            if tier is None:
+                # Empty modules: file_count is always 0 here, and in_degree
+                # (graph mode) is trivially 0 too -- neither is informative,
+                # so skip the usual in-degree/file-count detail entirely.
+                detail = "empty"
+            elif m.get("in_degree") is not None:
                 detail = "in-degree {}".format(m["in_degree"])
             else:
                 detail = "{} files".format(m.get("file_count"))

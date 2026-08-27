@@ -494,18 +494,35 @@ class GraphRepoRootAlignmentTests(unittest.TestCase):
 
 class TierAssignmentTests(unittest.TestCase):
     def test_tier_for_graph_thresholds(self):
-        self.assertEqual(ss._tier_for_graph(10, False), (1, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(9, False), (2, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(1, False), (2, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(0, False), (3, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(62, True), (0, "generated"))
+        # node_count > 0 in every non-empty case below -- a real module with
+        # its own nodes, regardless of in-degree.
+        self.assertEqual(ss._tier_for_graph(10, False, 5), (1, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(9, False, 5), (2, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(1, False, 5), (2, "graph:in-degree"))
+        # in_degree 0 with node_count > 0 -- a real tier-3 leaf (has its own
+        # nodes, nothing else just imports it), not empty.
+        self.assertEqual(ss._tier_for_graph(0, False, 5), (3, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(62, True, 5), (0, "generated"))
+
+    def test_tier_for_graph_zero_nodes_is_empty_not_leaf(self):
+        # node_count == 0 -- graphify found nothing under this directory at
+        # all. Distinct from the in_degree==0-but-has-nodes leaf case above:
+        # this must never be offered as a selectable tier-3 module.
+        self.assertEqual(ss._tier_for_graph(0, False, 0), (None, "empty"))
+        # generated still takes priority over empty, same as it does over
+        # every other tier.
+        self.assertEqual(ss._tier_for_graph(0, True, 0), (0, "generated"))
 
     def test_tier_for_heuristic_thresholds(self):
         self.assertEqual(ss._tier_for_heuristic(50, False), (1, "heuristic:file-count"))
         self.assertEqual(ss._tier_for_heuristic(49, False), (2, "heuristic:file-count"))
         self.assertEqual(ss._tier_for_heuristic(1, False), (2, "heuristic:file-count"))
-        self.assertEqual(ss._tier_for_heuristic(0, False), (3, "heuristic:file-count"))
         self.assertEqual(ss._tier_for_heuristic(5, True), (0, "generated"))
+
+    def test_tier_for_heuristic_zero_files_is_empty_not_leaf(self):
+        self.assertEqual(ss._tier_for_heuristic(0, False), (None, "empty"))
+        # generated still takes priority over empty.
+        self.assertEqual(ss._tier_for_heuristic(0, True), (0, "generated"))
 
 
 class ScanTests(unittest.TestCase):
@@ -550,6 +567,40 @@ class ScanTests(unittest.TestCase):
             for module_id in ("core/", "utils/", "legacy/", "orphan/"):
                 self.assertEqual(by_id[module_id]["basis"], "heuristic:file-count")
             self.assertEqual(state["repo_scan"]["graph_source"], "heuristic")
+
+    def test_scan_empty_directory_is_skipped_not_offered_pending(self):
+        # A genuinely empty top-level directory (zero files, zero graph
+        # nodes) must never be offered as a selectable "pending" module in
+        # either mode -- it lands in the tier=None empty-skip bucket
+        # instead, distinct from tier 0 generated/vendor.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            (root / "trantor").mkdir()
+
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIsNone(by_id["trantor/"]["tier"])
+            self.assertEqual(by_id["trantor/"]["status"], "skipped")
+            self.assertEqual(by_id["trantor/"]["basis"], "empty")
+            self.assertIn("empty", by_id["trantor/"]["skip_reason"])
+            pending_ids = {m["id"] for m in state["modules"] if m["status"] == "pending"}
+            self.assertNotIn("trantor/", pending_ids)
+
+            graph_path = Path(d) / "graph.json"
+            import json
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+            graph_state = ss.empty_state()
+            ss.scan(graph_state, root, "graphify", graph_path=graph_path)
+            by_id_graph = {m["id"]: m for m in graph_state["modules"]}
+            self.assertIsNone(by_id_graph["trantor/"]["tier"])
+            self.assertEqual(by_id_graph["trantor/"]["status"], "skipped")
+            self.assertEqual(by_id_graph["trantor/"]["basis"], "empty")
+            pending_ids_graph = {
+                m["id"] for m in graph_state["modules"] if m["status"] == "pending"
+            }
+            self.assertNotIn("trantor/", pending_ids_graph)
 
     def test_scan_rejects_bad_graph_mode(self):
         with tempfile.TemporaryDirectory() as d:
