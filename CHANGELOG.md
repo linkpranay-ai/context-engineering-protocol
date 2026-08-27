@@ -220,14 +220,20 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   false drop of nested files like `rules/agents.md` that merely share a name with a
   root-level convention file. Every unit now carries a `tier` (`"canonical"` for a real
   skill-dir/manifest marker, `"supplementary"` for a bare flat-file guess, with a `note`
-  when it sits directly under a `docs/` directory) and the result reports `tier_counts` —
-  nothing is dropped on tier grounds alone, tiering is a confidence label for the calling
-  skill to group or filter by. `wizard_retrofit_inventory.py`'s duplicate-flat-file
-  detection is fixed to strip the `.prompt.md` double-suffix before comparing stems and
-  to require path proximity before two same-stem files count as a likely duplicate,
-  fixing both a missed `.prompt.md`-companion dedupe and a false collision between
-  unrelated same-stem files elsewhere in the repo. `tier`/`note` now propagate through
-  the wizard's own inventory build, and both `cep_retrofit.py`'s module docstring and
+  when it sits under a `docs/` directory at any depth, not just as its immediate parent)
+  and the result reports `tier_counts` — nothing is dropped on tier grounds alone, tiering
+  is a confidence label for the calling skill to group or filter by. Both are now rendered
+  in the wizard's own retrofit-inventory UI: a `tier_counts` header line, a per-unit tier
+  badge and note sub-text, and a "reviewed this inventory" checkbox that gates the
+  select/draft controls until checked. `wizard_retrofit_inventory.py`'s duplicate-flat-file
+  detection is fixed to strip the `.prompt.md` double-suffix before comparing stems; a
+  flat-file unit whose stem matches any skill-dir/manifest-dir unit's leaf name anywhere in
+  the inventory is now tagged `"supplementary"` with a `note` naming the matching canonical
+  path — no longer gated on the two paths being close together in the tree, which
+  previously missed real duplicates living in separate top-level trees (a flat `docs/*.md`
+  guess and its real `skill-dir/SKILL.md` counterpart elsewhere in the repo), and never
+  silently dropped either way. `tier`/`note` now propagate through the wizard's own
+  inventory build, and both `cep_retrofit.py`'s module docstring and
   `ult-cep-retrofit/SKILL.md` are corrected to describe the depth-0-only name-based
   exception accurately instead of claiming detection is purely shape-based.
 - **Wizard onboarding cards resolved What/How pending-decision status by matching a
@@ -268,15 +274,26 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   and writing the `project_layout` section into `context-config.yaml` were all left to
   the agent to do by hand from prose instructions. `validate_layout.py` gains an
   `--init` mode (alongside its existing `--validate`) that performs exactly the
-  mechanical half: scaffolds each installed slot, writes its marker, writes
-  `project_layout`, optionally sets `layout.workspace_root` plus the `what_l2.exclude`
-  triad, and scaffolds a `.git/hooks/pre-commit` wrapper by default. It refuses cleanly
-  if `context-config.yaml` is missing or already initialized, and never overwrites an
-  existing `workspace_root` or hook. The conversational half — asking for the project's
-  name and description, offering to relocate a slot's default path, suggesting rather
-  than silently adding `include_roots` — stays the agent's job, matching how every other
-  `ult-*` skill in this repo splits labor between agent judgment and a deterministic
-  script.
+  mechanical half: for a `kind: directory` slot it scaffolds the directory itself and
+  writes its marker ("Scaffolded ..."); for a `kind: file` slot (e.g. the decision
+  ledger, the autoscaffold-content index) it only registers the marker and the slot's
+  resolved location ("Registered ...") — the content file itself is left for the
+  owning skill to write on its own first run, and `init` says so explicitly rather than
+  claiming it created a file that doesn't exist yet. It also writes `project_layout`,
+  optionally sets `layout.workspace_root` plus the `what_l2.exclude` triad, and disables
+  the What-L2/How-L2 layers in `context-config.yaml` when their shipped default paths
+  don't exist yet in the target repo (leaving an explicitly-configured path alone even
+  if unpopulated), so a fresh install validates clean instead of warning about its own
+  defaults on day one. A `.git/hooks/pre-commit` wrapper is scaffolded only when asked
+  for via `--ci-hook` — it's opt-in, not a default — and when it is scaffolded, it's
+  written to fail open: it resolves `python3`/`python` off `PATH` and exits `0` rather
+  than blocking a commit if neither is found or validation itself errors. `init` refuses
+  cleanly if `context-config.yaml` is missing or already initialized, and never
+  overwrites an existing `workspace_root` or hook. The conversational half — asking for
+  the project's name and description, offering to relocate a slot's default path,
+  suggesting rather than silently adding `include_roots` — stays the agent's job,
+  matching how every other `ult-*` skill in this repo splits labor between agent
+  judgment and a deterministic script.
 - **Several docs promised `GRAPH_REPORT.md`/`graph.html` unconditionally**, even though
   the documented default invocation (`graphify update . --no-cluster`) skips the
   clustering step that produces them — only a follow-up cluster-only run does. Added a
@@ -285,13 +302,18 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   `ult-autoscaffold-content/SKILL.md` and `ult-context-generate/SKILL.md`, so a consuming
   skill treats its absence under `--no-cluster` as expected rather than a broken graph.
 - **The installer always copied all three trees (`.github/skills/`, `.github/prompts/`,
-  `.cursor/rules/`) regardless of which coding agent the user actually uses.**
-  `install.ps1` gains `-Runtime` and `install.sh` gains `--runtime`, both accepting
-  `claude`/`copilot`/`both` (default `both`, unchanged behavior when omitted). `claude`
-  installs `.github/skills/` only; `copilot` additionally installs `.github/prompts/` and
-  `.cursor/rules/`, since each prompt/rule file is a thin pointer back into
-  `.github/skills/` and that tree comes along regardless. The selection is recorded into
-  the `.cep-install.json` manifest's `runtime` field.
+  `.cursor/rules/`) and always merged `AGENTS.md`, regardless of which coding agent the
+  user actually uses.** `install.ps1` gains `-Runtime` and `install.sh` gains
+  `--runtime`, both accepting `claude`/`copilot`/`cursor`/`codex`/`both` (default `both`,
+  unchanged behavior when omitted). Internally each of `.github/prompts/`,
+  `.cursor/rules/`, and the `AGENTS.md` merge is now gated by its own independent flag
+  rather than one shared boolean, so a runtime that needs only one of the three no
+  longer pulls in the other two: `claude` installs `.github/skills/` only; `copilot`
+  additionally installs `.github/prompts/`; `cursor` additionally installs
+  `.cursor/rules/` on top of `.github/prompts/`; `codex` additionally merges
+  `AGENTS.md`; `both` installs everything, same as omitting `--runtime`/`-Runtime`
+  entirely. The selection is recorded into the `.cep-install.json` manifest's `runtime`
+  field.
 - **The installer's own Bash test harness passed native Windows paths straight to
   `bash.exe` as arguments**, relying on whichever Git Bash build happened to be on
   `PATH` to accept a drive-letter path unconverted. Added `_to_git_bash_path()`,
