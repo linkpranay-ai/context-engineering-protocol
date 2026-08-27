@@ -129,8 +129,11 @@ function Copy-LibraryTree([string]$RelSrc, [string]$RelDst) {
         # /XD excludes gitignored local build artifacts (__pycache__,
         # .pytest_cache) that may exist in the source clone's working tree
         # if tests were ever run there — these must never leak into an
-        # installed target project.
-        $null = robocopy $src $dst /MIR /XD __pycache__ .pytest_cache /NFL /NDL /NJH /NJS /NC /NS /NP
+        # installed target project. Also excludes tests/ itself: no
+        # consumer runs CEP's own unit tests once installed (measured on a
+        # full install: 7 tests/ dirs, 51 files, 755K — shipping into
+        # every target for no reason any installed skill needs).
+        $null = robocopy $src $dst /MIR /XD __pycache__ .pytest_cache tests /NFL /NDL /NJH /NJS /NC /NS /NP
         if ($LASTEXITCODE -ge 8) {
             Write-Error "robocopy failed copying $src to $dst (exit code $LASTEXITCODE)"
             exit 1
@@ -160,11 +163,11 @@ function Copy-LibraryTree([string]$RelSrc, [string]$RelDst) {
         Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
 
         # No robocopy /XD equivalent here, so strip gitignored local build
-        # artifacts (__pycache__, .pytest_cache) post-copy instead — same
-        # reasoning as the Windows branch above.
+        # artifacts (__pycache__, .pytest_cache) and tests/ itself
+        # post-copy instead — same reasoning as the Windows branch above.
         if ((Get-Item -LiteralPath $dst).PSIsContainer) {
             Get-ChildItem -LiteralPath $dst -Recurse -Force -Directory |
-                Where-Object { $_.Name -eq "__pycache__" -or $_.Name -eq ".pytest_cache" } |
+                Where-Object { $_.Name -eq "__pycache__" -or $_.Name -eq ".pytest_cache" -or $_.Name -eq "tests" } |
                 Remove-Item -Recurse -Force
         }
     }
@@ -333,21 +336,27 @@ your own files alongside it; they are never touched.
 $CepWizardSkillName = "ult-cep-wizard"
 
 # Copy-CepWizardDocs: bundles CEP's own project docs (CONCEPT.md, PROTOCOL.md,
-# README.md, FAQ.md, case-studies/) into the installed ult-cep-wizard skill's
-# own docs/ subdirectory, so its in-app docs viewer (wizard_docs.py) has real
-# CEP content to serve in every install that includes this skill. Previously
+# README.md, FAQ.md) into the installed ult-cep-wizard skill's own docs/
+# subdirectory, so its in-app docs viewer (wizard_docs.py) has real CEP
+# content to serve in every install that includes this skill. Previously
 # this script only ever copied .github/skills/, .github/prompts/, and
 # .cursor/rules/, so wizard_docs.py's docs viewer had nothing to find in any
 # real install regardless of its own root-detection logic — see
 # wizard_docs.py's module docstring for the reader side of this fix. Callers
 # below only invoke this when the wizard skill itself is actually being
 # installed.
+#
+# Deliberately does NOT bundle case-studies/ - measured on a full install:
+# 83 files, 8.6M, the single largest thing this function ever copied, almost
+# none of it needed for the wizard's own onboarding flow (the 4 docs above
+# cover that). wizard_docs.py's list_docs() already treats a missing
+# case-studies/ as "not available" and degrades cleanly - no reader-side
+# change needed for this.
 function Copy-CepWizardDocs {
     Copy-LibraryTree "CONCEPT.md" ".github/skills/$CepWizardSkillName/docs/CONCEPT.md"
     Copy-LibraryTree "PROTOCOL.md" ".github/skills/$CepWizardSkillName/docs/PROTOCOL.md"
     Copy-LibraryTree "README.md" ".github/skills/$CepWizardSkillName/docs/README.md"
     Copy-LibraryTree "FAQ.md" ".github/skills/$CepWizardSkillName/docs/FAQ.md"
-    Copy-LibraryTree "case-studies" ".github/skills/$CepWizardSkillName/docs/case-studies"
 }
 
 # New-CepInstallManifest: writes .cep-install.json at the target root — the

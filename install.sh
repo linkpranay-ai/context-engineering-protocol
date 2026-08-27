@@ -173,9 +173,12 @@ copy_tree() {
 
   # Strip gitignored local build artifacts (__pycache__, .pytest_cache) that
   # may exist in the source clone's working tree if tests were ever run
-  # there — these must never leak into an installed target project.
+  # there — these must never leak into an installed target project. Also
+  # strip tests/ itself: no consumer runs CEP's own unit tests once
+  # installed (measured on a full install: 7 tests/ dirs, 51 files, 755K —
+  # shipping into every target for no reason any installed skill needs).
   if [ -d "$dst" ]; then
-    find "$dst" -depth -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -exec rm -rf {} +
+    find "$dst" -depth -type d \( -name '__pycache__' -o -name '.pytest_cache' -o -name 'tests' \) -exec rm -rf {} +
   fi
 
   if [ "$existed" -eq 1 ]; then
@@ -369,21 +372,27 @@ POINTER_EOF
 CEP_WIZARD_SKILL_NAME="ult-cep-wizard"
 
 # copy_cep_wizard_docs: bundles CEP's own project docs (CONCEPT.md,
-# PROTOCOL.md, README.md, FAQ.md, case-studies/) into the installed
-# ult-cep-wizard skill's own docs/ subdirectory, so its in-app docs viewer
-# (wizard_docs.py) has real CEP content to serve in every install that
-# includes this skill. Previously this script only ever copied
-# .github/skills/, .github/prompts/, and .cursor/rules/, so wizard_docs.py's
-# docs viewer had nothing to find in any real install regardless of its own
-# root-detection logic - see wizard_docs.py's module docstring for the
-# reader side of this fix. Callers below only invoke this when the wizard
-# skill itself is actually being installed.
+# PROTOCOL.md, README.md, FAQ.md) into the installed ult-cep-wizard skill's
+# own docs/ subdirectory, so its in-app docs viewer (wizard_docs.py) has
+# real CEP content to serve in every install that includes this skill.
+# Previously this script only ever copied .github/skills/, .github/prompts/,
+# and .cursor/rules/, so wizard_docs.py's docs viewer had nothing to find in
+# any real install regardless of its own root-detection logic - see
+# wizard_docs.py's module docstring for the reader side of this fix.
+# Callers below only invoke this when the wizard skill itself is actually
+# being installed.
+#
+# Deliberately does NOT bundle case-studies/ - measured on a full install:
+# 83 files, 8.6M, the single largest thing this function ever copied,
+# almost none of it needed for the wizard's own onboarding flow (the 4 docs
+# above cover that). wizard_docs.py's list_docs() already treats a missing
+# case-studies/ as "not available" and degrades cleanly - no reader-side
+# change needed for this.
 copy_cep_wizard_docs() {
   copy_tree "CONCEPT.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/CONCEPT.md"
   copy_tree "PROTOCOL.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/PROTOCOL.md"
   copy_tree "README.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/README.md"
   copy_tree "FAQ.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/FAQ.md"
-  copy_tree "case-studies" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/case-studies"
 }
 
 OWNED_PATHS=()

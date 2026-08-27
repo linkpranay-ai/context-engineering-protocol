@@ -62,10 +62,10 @@ LIBRARY_DIRS = [
 # content comes from repo-root files, composed at install time), so
 # test_plain_install_copies_library excludes it from the strict
 # .github/skills tree-match and _assert_cep_wizard_docs_bundle checks it
-# separately instead.
+# separately instead. Deliberately just the 4 docs, not case-studies/ - see
+# copy_cep_wizard_docs/Copy-CepWizardDocs's own comment on why.
 DOCS_BUNDLE_REL = "ult-cep-wizard/docs"
 DOCS_BUNDLE_SOURCE_FILES = ["CONCEPT.md", "PROTOCOL.md", "README.md", "FAQ.md"]
-DOCS_BUNDLE_SOURCE_DIRNAME = "case-studies"
 
 BEGIN_MARKER = "<!-- BEGIN context-engineering-protocol SKILLS (auto-generated, do not edit) -->"
 END_MARKER = "<!-- END context-engineering-protocol SKILLS -->"
@@ -83,12 +83,17 @@ your own files alongside it; they are never touched.
 
 
 
-# Gitignored local build artifacts (see repo .gitignore) that may exist in
-# this checkout's working tree if tests were ever run here. Both installers
-# now exclude these when copying (never leak into an installed target
-# project), so the source side of the comparison must ignore them too -
-# otherwise this test just re-encodes the leak as "correct" behavior.
-_IGNORED_DIR_NAMES = {"__pycache__", ".pytest_cache"}
+# Directory names both installers now always strip when copying, so the
+# source side of every tree-match comparison below must ignore them too -
+# otherwise this test just re-encodes a leak (or a since-removed bundle) as
+# "correct" behavior. __pycache__/.pytest_cache are gitignored local build
+# artifacts that may exist in this checkout's working tree if tests were
+# ever run here; "tests" is CEP's own unit-test subtree, deliberately never
+# shipped into an installed target (see copy_tree/Copy-LibraryTree's own
+# comment on this) - test_no_tests_directories_are_installed below is the
+# positive-absence check that this exclusion isn't just quietly hiding a
+# real leak.
+_IGNORED_DIR_NAMES = {"__pycache__", ".pytest_cache", "tests"}
 
 
 def _tree_files(root: Path, ignore_prefixes=()):
@@ -122,7 +127,9 @@ def _assert_tree_matches(test, src: Path, dst: Path, ignore_prefixes=()):
 def _assert_cep_wizard_docs_bundle(test, target: Path):
     """Asserts the bundled docs/ subtree (see DOCS_BUNDLE_REL) is present
     under the installed ult-cep-wizard skill and byte-identical to its
-    repo-root source files."""
+    repo-root source files, and that case-studies/ was NOT bundled
+    alongside it (deliberately dropped - see copy_cep_wizard_docs/
+    Copy-CepWizardDocs's own comment)."""
     bundle = target / ".github/skills" / DOCS_BUNDLE_REL
     test.assertTrue(bundle.is_dir(), f"missing bundled docs dir: {bundle}")
     for name in DOCS_BUNDLE_SOURCE_FILES:
@@ -131,10 +138,9 @@ def _assert_cep_wizard_docs_bundle(test, target: Path):
             (bundle / name).read_bytes(),
             f"content mismatch: {name}",
         )
-    _assert_tree_matches(
-        test,
-        REPO_ROOT / DOCS_BUNDLE_SOURCE_DIRNAME,
-        bundle / DOCS_BUNDLE_SOURCE_DIRNAME,
+    test.assertFalse(
+        (bundle / "case-studies").exists(),
+        f"case-studies/ must not be bundled into an install: {bundle / 'case-studies'}",
     )
 
 
@@ -246,6 +252,25 @@ class _InstallScriptTestBase:
             self.assertFalse((target / "context-config.yaml").exists())
             self.assertFalse((target / "starter_kit").exists())
             _assert_cep_install_manifest(self, target, mode="full")
+
+    def test_no_tests_directories_are_installed(self):
+        # CEP's own unit-test subtree (scripts/tests/ under every skill
+        # that has one) is never something an installed target needs to
+        # run - a positive-absence check, not just the negative-space
+        # tolerance _IGNORED_DIR_NAMES gives the tree-match assertions
+        # above.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            skills_root = target / ".github" / "skills"
+            self.assertTrue(skills_root.is_dir())
+            found = [
+                str(p.relative_to(target))
+                for p in skills_root.rglob("tests")
+                if p.is_dir()
+            ]
+            self.assertEqual(found, [], f"tests/ dir(s) leaked into install: {found}")
 
     def test_init_project_scaffolds_config_and_pointer(self):
         with tempfile.TemporaryDirectory() as tmp:
