@@ -25,7 +25,6 @@ separate modules.
 from __future__ import annotations
 
 import importlib
-import posixpath
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -92,66 +91,53 @@ class RetrofitInventoryResult:
     tier_counts: dict = field(default_factory=dict)  # {"canonical": N, "supplementary": M}
 
 
-def _dirs_proximate(dir_a: str, dir_b: str) -> bool:
-    """True when `dir_a` and `dir_b` (POSIX-style, target-relative directory
-    paths, "" meaning the target root) are the same directory, or exactly
-    one level apart in either direction. Used by _dedupe_flat_file_units()
-    below to bound its stem-collision check to genuinely nearby files.
-
-    Three relations, any one of which counts as proximate:
-      - dir_a == dir_b                          (same directory - siblings)
-      - dir_a == parent(dir_b)                   (dir_a one level shallower)
-      - parent(dir_a) == dir_b                   (dir_a one level deeper)
-
-    Verified against both the case this guards for and the case it guards
-    against: `skills/widget.md`'s parent ("skills") is the same as
-    `skills/widget/SKILL.md`'s parent ("skills") - proximate, correctly
-    flagged as a likely duplicate. `widget.md` at the target root (parent
-    "") is one level shallower than `skills/widget/SKILL.md`'s parent
-    ("skills", whose own parent is "") - proximate. But `rules/build.md`
-    (parent "rules") against `tools/build/SKILL.md` (parent "tools") is
-    none of the three - correctly rejected as an unrelated same-stem
-    coincidence rather than a duplicate.
-    """
-    if dir_a == dir_b:
-        return True
-    return posixpath.dirname(dir_b) == dir_a or posixpath.dirname(dir_a) == dir_b
-
-
-def _dedupe_flat_file_units(raw_units: list, double_suffix: str = ".prompt.md") -> list:
-    """Drop a "flat-file" raw unit whose primary-file stem exactly matches the
-    directory name of a "skill-dir"/"manifest-dir" unit found nearby in the
-    same inventory - e.g. `skills/widget.md` sitting alongside
-    `skills/widget/SKILL.md`. cep_retrofit.inventory() itself intentionally
-    returns the union of all three shape-based heuristics with no
-    cross-heuristic winner (see its docstring's binding constraint) - that
-    constraint is what keeps it usable against any target library without
-    encoding knowledge of one. This name-based judgment call - "a flat file
-    named after a nearby skill directory is almost certainly stray/
-    duplicate documentation of that same logical skill, not an independently
-    retrofit-able unit" - belongs here instead, in the wizard's read-only
-    view, one specific consumer, not the shared primitive every other
+def _flag_stray_duplicate_flat_files(raw_units: list, double_suffix: str = ".prompt.md") -> list:
+    """Flags - never drops - a "flat-file" raw unit whose primary-file stem
+    exactly matches the directory name of a "skill-dir"/"manifest-dir" unit
+    found anywhere else in the same inventory - e.g. a stray
+    `docs/engineering/implement.md` alongside a wholly separate
+    `skills/engineering/implement/SKILL.md` tree. cep_retrofit.inventory()
+    itself intentionally returns the union of all three shape-based
+    heuristics with no cross-heuristic winner (see its docstring's binding
+    constraint) - that constraint is what keeps it usable against any target
+    library without encoding knowledge of one. This name-based judgment call
+    - "a flat file named after a skill directory found elsewhere in the
+    inventory is very likely stray/duplicate documentation of that same
+    logical skill" - belongs here instead, in the wizard's read-only view,
+    one specific consumer, not the shared primitive every other
     cep_retrofit.py caller relies on.
 
-    Two guards keep this from over-matching:
-      - `double_suffix` (cep_retrofit.py's `_FLAT_FILE_DOUBLE_SUFFIX`,
-        passed in by build_inventory() so the value lives in one place) is
-        stripped before comparing stems, so a `.prompt.md` companion of a
-        skill-dir named `widget` (i.e. `widget.prompt.md`) correctly
-        compares as stem `"widget"`, not `"widget.prompt"`.
-      - `_dirs_proximate()` requires the flat file's directory and the
-        matched skill-dir/manifest-dir's own directory to be the same
-        directory or one level apart, so two same-stem files in unrelated
-        parts of a large repo (e.g. `rules/build.md` next to an unrelated
-        `tools/build/SKILL.md`) are never treated as duplicates just
-        because they share a name.
+    An earlier version of this function required the flat file's directory
+    and the matched skill-dir/manifest-dir's own directory to be the same
+    directory or one level apart before flagging (see git history for
+    `_dirs_proximate()`), and before that, dropped a matching unit outright
+    rather than flagging it. Both were found, against a real skill library,
+    to silently miss (or silently drop) the exact pair this exists to catch
+    - `docs/engineering/implement.md` and
+    `skills/engineering/implement/SKILL.md` sit in two entirely separate
+    top-level trees, sharing only the leaf name, so no proximity check ever
+    matches them. Matching is now unconditional on location: any stem match
+    anywhere in the inventory is flagged. This can occasionally flag two
+    genuinely unrelated same-stem files (e.g. `rules/build.md` next to an
+    unrelated `tools/build/SKILL.md`) - an acceptable trade-off, since the
+    flag is advisory only (a "supplementary" tier plus a visible note the
+    human reviews before selecting units), never a silent drop - the same
+    "never silently drop" constraint the original dedupe design was meant to
+    honor in the first place.
 
-    Filtered before describe()/recommend() run (build_inventory() calls this
-    on the raw dicts, not the built RetrofitUnit list) so a unit dropped here
-    never costs an extra file read.
-    """
+    `double_suffix` (cep_retrofit.py's `_FLAT_FILE_DOUBLE_SUFFIX`, passed in
+    by build_inventory() so the value lives in one place) is stripped before
+    comparing stems, so a `.prompt.md` companion of a skill-dir named
+    `widget` (i.e. `widget.prompt.md`) correctly compares as stem
+    `"widget"`, not `"widget.prompt"`.
+
+    Mutates and returns `raw_units` in place - the same dicts
+    build_inventory() reads tier/note off of afterward - rather than
+    filtering the list. Runs before describe()/recommend() (build_inventory()
+    calls this on the raw dicts, not the built RetrofitUnit list), same as
+    before, though nothing is skipped as a result of it any more."""
     claimed = [
-        (Path(u["path"]).name.lower(), posixpath.dirname(u["path"]))
+        (Path(u["path"]).name.lower(), u["path"])
         for u in raw_units
         if u["type"] in ("skill-dir", "manifest-dir")
     ]
@@ -162,17 +148,21 @@ def _dedupe_flat_file_units(raw_units: list, double_suffix: str = ".prompt.md") 
             return Path(primary_file[: -len(double_suffix)]).name.lower()
         return Path(primary_file).stem.lower()
 
-    def _is_stray_duplicate(u: dict) -> bool:
+    for u in raw_units:
         if u["type"] != "flat-file":
-            return False
+            continue
         stem = _stem(u["primary_file"])
-        flat_dir = posixpath.dirname(u["path"])
-        return any(
-            stem == claimed_stem and _dirs_proximate(flat_dir, claimed_dir)
-            for claimed_stem, claimed_dir in claimed
+        claimed_path = next(
+            (path for claimed_stem, path in claimed if claimed_stem == stem), None
         )
+        if claimed_path is None:
+            continue
+        u["tier"] = "supplementary"
+        dup_note = f"duplicates {claimed_path}"
+        existing_note = u.get("note") or ""
+        u["note"] = f"{existing_note}; {dup_note}" if existing_note else dup_note
 
-    return [u for u in raw_units if not _is_stray_duplicate(u)]
+    return raw_units
 
 
 def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
@@ -218,7 +208,7 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
         return f"{target_rel}/{child_rel}"
 
     units: List[RetrofitUnit] = []
-    for raw_unit in _dedupe_flat_file_units(raw["units"], cr._FLAT_FILE_DOUBLE_SUFFIX):
+    for raw_unit in _flag_stray_duplicate_flat_files(raw["units"], cr._FLAT_FILE_DOUBLE_SUFFIX):
         unit = RetrofitUnit(
             unit_id=raw_unit["unit_id"],
             type=raw_unit["type"],
@@ -245,11 +235,11 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
             unit.describe_error = str(exc)
         units.append(unit)
 
-    # Recomputed from the deduped `units`, not taken verbatim from
-    # raw["tier_counts"] - _dedupe_flat_file_units() may have dropped some
-    # "supplementary" units above, and the counts reported to the frontend
-    # must reflect what's actually in this result, not cep_retrofit's
-    # pre-dedupe view.
+    # Recomputed from the final `units`, not taken verbatim from
+    # raw["tier_counts"] - _flag_stray_duplicate_flat_files() never drops a
+    # unit, but it can still change what "supplementary" means for a given
+    # unit's note, and the counts reported to the frontend should reflect
+    # this module's own view of `units`, not cep_retrofit's pre-flag one.
     tier_counts: dict = {}
     for unit in units:
         if unit.tier:

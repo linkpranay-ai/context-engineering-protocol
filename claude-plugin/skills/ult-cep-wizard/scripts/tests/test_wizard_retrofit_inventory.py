@@ -213,71 +213,90 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         for unit in result.units:
             self.assertTrue((self.root / unit.primary_file).is_file())
 
-    def test_skill_directory_is_preferred_over_duplicate_flat_documentation(self):
+    def test_flat_file_matching_skill_dir_name_is_flagged_not_dropped(self):
         # Regression test: cep_retrofit.inventory()'s union-of-heuristics
         # design (correct and intentional at that layer - see its docstring)
-        # means a flat *.md file named after an existing, *nearby* skill
-        # directory (e.g. a stray skills/implement.md sibling of
-        # skills/implement/SKILL.md) previously surfaced as a second,
-        # independent unit. Real library run returned 82 units instead of
-        # the true 37, with duplicate "implement" entries. The dedupe
-        # belongs in this wizard view, not cep_retrofit.py itself - see
-        # _dedupe_flat_file_units's own docstring. Sibling placement here
-        # (both directly under "skills") is what makes the two "the same
-        # directory" under _dirs_proximate() - see
-        # test_distant_same_stem_flat_file_is_not_treated_as_duplicate below
-        # for the case this must *not* fire on.
+        # means a flat *.md file named after an existing skill directory
+        # (e.g. a stray skills/implement.md sibling of
+        # skills/implement/SKILL.md) surfaces as a second, independent
+        # unit. Real library run returned 82 units instead of the true 37,
+        # with duplicate "implement" entries. This wizard view flags that
+        # unit rather than silently dropping it - see
+        # _flag_stray_duplicate_flat_files's own docstring for why a drop
+        # (an earlier version of this function) turned out to be the wrong
+        # call. Sibling placement here (both directly under "skills") is
+        # the easy case; test_separate_top_level_trees_with_matching_leaf_
+        # name_are_flagged below covers the shape that a proximity-gated
+        # version of this check used to miss entirely.
         _write(self.root / "library" / "skills" / "implement" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
         _write(self.root / "library" / "skills" / "implement.md", SECOND_WIDGET_MD)
 
         result = wri.build_inventory(str(self.root), "library")
 
-        self.assertEqual(
-            [(unit.type, unit.primary_file) for unit in result.units],
-            [("skill-dir", "library/skills/implement/SKILL.md")],
-        )
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"skills/implement", "skills/implement.md"})
 
-    def test_root_adjacent_same_stem_flat_file_is_treated_as_duplicate(self):
-        # One level apart (target-root vs. one directory down) also counts
-        # as proximate - a flat file sitting right outside the directory
-        # tree holding the skill-dir it duplicates.
+        skill_dir = by_id["skills/implement"]
+        self.assertEqual(skill_dir.type, "skill-dir")
+        self.assertEqual(skill_dir.tier, "canonical")
+        self.assertEqual(skill_dir.note, "")
+
+        flat_file = by_id["skills/implement.md"]
+        self.assertEqual(flat_file.type, "flat-file")
+        self.assertEqual(flat_file.tier, "supplementary")
+        self.assertIn("duplicates skills/implement", flat_file.note)
+
+    def test_root_adjacent_same_stem_flat_file_is_flagged_not_dropped(self):
+        # A flat file sitting right outside the directory tree holding the
+        # skill-dir it duplicates - same flag-not-drop treatment as the
+        # sibling case above.
         _write(self.root / "library" / "skills" / "implement" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
         _write(self.root / "library" / "implement.md", SECOND_WIDGET_MD)
 
         result = wri.build_inventory(str(self.root), "library")
 
-        self.assertEqual(
-            [(unit.type, unit.primary_file) for unit in result.units],
-            [("skill-dir", "library/skills/implement/SKILL.md")],
-        )
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"skills/implement", "implement.md"})
 
-    def test_distant_same_stem_flat_file_is_not_treated_as_duplicate(self):
-        # Guards against the false-collision defect: two same-stem files in
-        # unrelated parts of a larger tree (parents "rules" and "tools" here
-        # satisfy none of _dirs_proximate()'s three relations) must both
-        # survive as independent units, not get silently deduped just
-        # because they share a filename.
-        _write(self.root / "library" / "tools" / "build" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
-        _write(self.root / "library" / "rules" / "build.md", SECOND_WIDGET_MD)
+        flat_file = by_id["implement.md"]
+        self.assertEqual(flat_file.tier, "supplementary")
+        self.assertIn("duplicates skills/implement", flat_file.note)
+
+    def test_separate_top_level_trees_with_matching_leaf_name_are_flagged(self):
+        # The exact real-world shape a proximity-gated version of this check
+        # used to miss: a documentation flat-file and its skill-dir
+        # counterpart living in two entirely separate top-level trees
+        # (docs/ vs. skills/), sharing only a leaf name ("implement") - not
+        # siblings, not one level apart. Matching is unconditional on
+        # location now, so this pair must be flagged, not silently missed.
+        _write(self.root / "library" / "skills" / "engineering" / "implement" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "docs" / "engineering" / "implement.md", SECOND_WIDGET_MD)
 
         result = wri.build_inventory(str(self.root), "library")
 
         by_id = {u.unit_id: u for u in result.units}
-        self.assertEqual(set(by_id), {"tools/build", "rules/build.md"})
+        self.assertEqual(set(by_id), {"skills/engineering/implement", "docs/engineering/implement.md"})
 
-    def test_double_suffix_companion_is_treated_as_duplicate(self):
-        # A .prompt.md companion of a skill-dir must dedupe correctly - the
-        # double suffix has to be stripped before stem comparison, or
-        # "widget.prompt" (the un-stripped stem) never matches "widget".
+        flat_file = by_id["docs/engineering/implement.md"]
+        self.assertEqual(flat_file.tier, "supplementary")
+        self.assertIn("duplicates skills/engineering/implement", flat_file.note)
+
+    def test_double_suffix_companion_is_flagged_not_dropped(self):
+        # A .prompt.md companion of a skill-dir must still be recognized as
+        # a stem match - the double suffix has to be stripped before stem
+        # comparison, or "widget.prompt" (the un-stripped stem) never
+        # matches "widget".
         _write(self.root / "library" / "skills" / "widget" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
         _write(self.root / "library" / "skills" / "widget.prompt.md", SECOND_WIDGET_MD)
 
         result = wri.build_inventory(str(self.root), "library")
 
-        self.assertEqual(
-            [(unit.type, unit.primary_file) for unit in result.units],
-            [("skill-dir", "library/skills/widget/SKILL.md")],
-        )
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"skills/widget", "skills/widget.prompt.md"})
+
+        flat_file = by_id["skills/widget.prompt.md"]
+        self.assertEqual(flat_file.tier, "supplementary")
+        self.assertIn("duplicates skills/widget", flat_file.note)
 
 
 class TestTierPropagation(RetrofitInventoryTestCase):
@@ -300,18 +319,25 @@ class TestTierPropagation(RetrofitInventoryTestCase):
         self.assertEqual(docs_flat_file.tier, "supplementary")
         self.assertNotEqual(docs_flat_file.note, "")
 
-    def test_result_reports_tier_counts_reflecting_dedupe(self):
-        # tier_counts must reflect what's actually left in result.units after
-        # _dedupe_flat_file_units() runs, not cep_retrofit's raw pre-dedupe
-        # counts - the duplicate here is dropped, so it must not be counted.
+    def test_result_reports_tier_counts_reflecting_all_units_including_flagged_duplicates(self):
+        # tier_counts must reflect what's actually in result.units after
+        # _flag_stray_duplicate_flat_files() runs. Nothing is dropped any
+        # more, so all three units survive; the stem-matched flat file is
+        # flagged supplementary with a duplicate note, and the unrelated
+        # flat file is supplementary too (cep_retrofit.py's own default tier
+        # for every flat-file unit) but carries no duplicate note.
         _write(self.root / "skills" / "widget" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
         _write(self.root / "skills" / "widget.md", SECOND_WIDGET_MD)
         _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
 
         result = wri.build_inventory(str(self.root), ".")
 
-        self.assertEqual(len(result.units), 2)  # the duplicate was dropped
-        self.assertEqual(result.tier_counts, {"canonical": 1, "supplementary": 1})
+        self.assertEqual(len(result.units), 3)
+        self.assertEqual(result.tier_counts, {"canonical": 1, "supplementary": 2})
+
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertIn("duplicates skills/widget", by_id["skills/widget.md"].note)
+        self.assertEqual(by_id["second-widget.md"].note, "")
 
 
 class TestDescribeErrorIsolation(RetrofitInventoryTestCase):
