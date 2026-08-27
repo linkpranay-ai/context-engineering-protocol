@@ -1073,6 +1073,60 @@ class TestApiRetrofitInventory(WizardServerTestCase):
         payload = json.loads(resp.read().decode("utf-8"))
         self.assertIn("error", payload)
 
+    def test_tier_counts_are_present_and_non_empty_for_a_mixed_target(self):
+        # tier_counts must actually reach the frontend non-empty for a
+        # target that has both a canonical and a supplementary unit - the
+        # data the wizard.js header line / per-unit badges read from. The
+        # base fixture (_make_valid_target_repo plus this class's own
+        # EXTRA_SKILLS) already contributes its own canonical units, so this
+        # only asserts on what widget-reviewer/widget-reviewer.md add, not
+        # on the repo-root inventory's total.
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD
+        )
+        _write(self.repo_root / "widget-reviewer.md", "Stray duplicate doc.")
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/retrofit/inventory", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        tier_counts = payload["tier_counts"]
+        self.assertGreaterEqual(tier_counts.get("canonical", 0), 1)
+        self.assertEqual(tier_counts.get("supplementary", 0), 1)
+        flat = next(u for u in payload["units"] if u["unit_id"] == "widget-reviewer.md")
+        self.assertEqual(flat["tier"], "supplementary")
+        self.assertIn("duplicates widget-reviewer", flat["note"])
+
+
+class TestRetrofitInventoryReviewGateMarkup(WizardServerTestCase):
+    """A lightweight static-source presence check, not a full DOM
+    render - this wizard's retrofit-inventory rendering is entirely
+    client-side JS (see renderRetrofitUnitRow/renderRetrofitInventory in
+    wizard.js), so there is no server-rendered markup a Python test could
+    inspect directly. What this can and does check: the tier badge and
+    review-gate checkbox the plan calls for are actually present in the
+    static sources the browser receives, not just described in a commit
+    message."""
+
+    def test_index_html_has_the_review_gate_checkbox(self):
+        # index.html is only ever served templated through the session-gated
+        # "/" route (_handle_index), never under /static/ - STATIC_ASSETS is
+        # a closed set that deliberately excludes it (see wizard_server.py's
+        # own comment on that dict).
+        cookie = self._authenticated_cookie()
+        resp = self._get("/", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        body = resp.read().decode("utf-8")
+        self.assertIn('id="retrofit-inventory-reviewed"', body)
+        self.assertIn('id="retrofit-tier-summary"', body)
+
+    def test_wizard_js_renders_the_tier_badge_and_enforces_the_review_gate(self):
+        resp = self._get("/static/wizard.js")
+        self.assertEqual(resp.status, 200)
+        body = resp.read().decode("utf-8")
+        self.assertIn("retrofit-tier-badge", body)
+        self.assertIn("retrofit-inventory-reviewed", body)
+        self.assertIn("applyRetrofitReviewGate", body)
+
 
 class TestApiRetrofitState(WizardServerTestCase):
     """Route-wiring only for GET /api/retrofit/state - the state file's own

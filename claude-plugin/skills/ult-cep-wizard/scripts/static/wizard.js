@@ -861,6 +861,26 @@
   // line in place, without forcing a full inventory re-scan that would
   // collapse every <details> the human had open.
   var retrofitDraftPanelsByUnitId = {};
+  // Review gate (see renderRetrofitUnitRow / applyRetrofitReviewGate):
+  // whether the human has ticked "I have reviewed this inventory" for the
+  // *current* inventory load. Reset to false at the top of every
+  // loadRetrofitInventory() call, same lifecycle as retrofitDraftPanelsByUnitId
+  // above - a fresh scan of a (possibly different) target needs its own
+  // fresh review, a prior target's review does not carry over.
+  var retrofitInventoryReviewed = false;
+  // Every row's "select" (includeCheckbox) and "draft" (draftButton) control,
+  // collected as renderRetrofitUnitRow builds each row, so
+  // applyRetrofitReviewGate() can toggle all of them at once - mirrors
+  // setDocsNavAvailability()'s button.disabled pattern above, applied here to
+  // a dynamically-rebuilt list instead of a fixed one. Rebuilt fresh on every
+  // renderRetrofitInventory() call, same as retrofitDraftPanelsByUnitId.
+  var retrofitSelectDraftControls = [];
+
+  function applyRetrofitReviewGate() {
+    retrofitSelectDraftControls.forEach(function (control) {
+      control.disabled = !retrofitInventoryReviewed;
+    });
+  }
 
   function retrofitOverlayIsOpen() {
     return document.getElementById("retrofit-overlay").style.display !== "none";
@@ -1029,6 +1049,16 @@
     summary.appendChild(el("span", { class: "retrofit-unit-name", text: unit.name || unit.unit_id }));
     summary.appendChild(el("span", { class: "retrofit-unit-type-badge", text: unit.type }));
     summary.appendChild(el("span", { class: "retrofit-unit-path", text: unit.path }));
+    // Surface cep_retrofit's/the wizard's own tier judgment directly on
+    // the row, rather than leaving "canonical" vs. "supplementary" (and why)
+    // implicit in server-side data the human never sees. tier/note come
+    // from build_inventory()'s inventory step, independent of describe() -
+    // still set even when describe_error is non-empty below.
+    if (unit.tier) {
+      summary.appendChild(
+        el("span", { class: "retrofit-tier-badge tier-" + unit.tier, text: unit.tier })
+      );
+    }
     if (unit.code_related) {
       summary.appendChild(el("span", { class: "retrofit-relate-badge code", text: "code" }));
     }
@@ -1044,6 +1074,17 @@
     details.appendChild(summary);
 
     var body = el("div", { class: "retrofit-unit-detail" });
+    // cep_retrofit/wizard_retrofit_inventory only ever set a note on a
+    // "supplementary" unit (a weaker-signal tier, or a stem match with an
+    // existing canonical unit elsewhere in the inventory - see
+    // _flag_stray_duplicate_flat_files) - never on a "canonical" one, so no
+    // separate tier check is needed here beyond "is there a note at all".
+    // Rendered ahead of the describe_error early return below, since
+    // tier/note come from the inventory step, not describe() - still
+    // meaningful for a unit describe() couldn't read.
+    if (unit.note) {
+      body.appendChild(el("p", { class: "retrofit-unit-note", text: "Note: " + unit.note }));
+    }
     if (unit.describe_error) {
       body.appendChild(
         el("p", { class: "retrofit-unit-error", text: "Could not read this unit: " + unit.describe_error })
@@ -1068,6 +1109,12 @@
     includeLabel.appendChild(includeCheckbox);
     includeLabel.appendChild(document.createTextNode(" Include this unit in the retrofit"));
     body.appendChild(includeLabel);
+    // Review gate: this row's "select" control starts disabled until the
+    // human ticks "I have reviewed this inventory" (see
+    // applyRetrofitReviewGate) - registered here, the draft button below
+    // registers itself the same way once it exists.
+    includeCheckbox.disabled = !retrofitInventoryReviewed;
+    retrofitSelectDraftControls.push(includeCheckbox);
 
     // Step 5's exactly-two-shapes reference resolution: same-repo (this
     // wizard computes a relative-path default, always editable) or
@@ -1203,6 +1250,11 @@
         });
       });
     });
+
+    // Review gate: this row's "draft" control, same starting-disabled
+    // treatment as includeCheckbox above.
+    draftButton.disabled = !retrofitInventoryReviewed;
+    retrofitSelectDraftControls.push(draftButton);
 
     body.appendChild(draftButton);
     body.appendChild(draftMessage);
@@ -1418,6 +1470,13 @@
     document.getElementById("retrofit-inventory-target").textContent =
       "Target: " + result.target_rel_path;
 
+    // tier_counts header line, sourced straight from the server's own
+    // recount (see wizard_retrofit_inventory.py's tier_counts comment) so it
+    // never drifts from what the rows below actually show.
+    var counts = result.tier_counts || {};
+    document.getElementById("retrofit-tier-summary").textContent =
+      (counts.canonical || 0) + " canonical · " + (counts.supplementary || 0) + " supplementary";
+
     var unclaimedList = document.getElementById("retrofit-unclaimed-dirs");
     unclaimedList.innerHTML = "";
     (result.unclaimed_dirs || []).forEach(function (dir) {
@@ -1432,6 +1491,10 @@
     // along with them so a leftover entry can never be mistaken for a still-
     // live row later (see the variable's own comment).
     retrofitDraftPanelsByUnitId = {};
+    // Same reasoning for the review-gate control list - see
+    // applyRetrofitReviewGate/loadRetrofitInventory for the reset of
+    // retrofitInventoryReviewed itself.
+    retrofitSelectDraftControls = [];
     if (result.units.length === 0) {
       unitsList.appendChild(
         el("li", { class: "retrofit-units-empty", text: "No candidate skill units found here." })
@@ -1457,6 +1520,11 @@
     // there looking like it still describes what's on screen now.
     document.getElementById("retrofit-apply-report").style.display = "none";
     retrofitBatchExcludedUnitIds = {};
+    // Review gate: a fresh scan of a (possibly different) target starts
+    // unreviewed again, same "no carry-over" reasoning as
+    // retrofitBatchExcludedUnitIds above.
+    retrofitInventoryReviewed = false;
+    document.getElementById("retrofit-inventory-reviewed").checked = false;
     loadRetrofitState().then(function () {
       fetchJson("/api/retrofit/inventory?target=" + encodeURIComponent(targetRelPath)).then(
         function (result) {
@@ -1510,6 +1578,10 @@
     });
     document.getElementById("retrofit-picker-use-dir").addEventListener("click", function () {
       loadRetrofitInventory(retrofitCurrentPath);
+    });
+    document.getElementById("retrofit-inventory-reviewed").addEventListener("change", function (event) {
+      retrofitInventoryReviewed = event.target.checked;
+      applyRetrofitReviewGate();
     });
     document.getElementById("retrofit-batch-apply-button").addEventListener("click", function () {
       applyRetrofitBatch();
