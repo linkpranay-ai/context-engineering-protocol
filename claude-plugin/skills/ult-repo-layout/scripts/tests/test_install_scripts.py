@@ -392,6 +392,23 @@ class _InstallScriptTestBase:
             self.assertIn("runtime", (result.stderr + result.stdout).lower())
 
 
+def _to_git_bash_path(win_path) -> str:
+    """Converts a native Windows path (e.g. "C:\\foo\\bar") to the MSYS2
+    mount-point form ("/c/foo/bar") Git Bash's own POSIX layer always
+    accepts as an argument. Not every bash build on PATH can be assumed to
+    understand a raw drive-letter path passed straight through as argv (the
+    specific build matters here, not just "is bash present") — converting
+    explicitly removes that assumption instead of depending on it. A no-op
+    shape (backslashes flipped to forward slashes) on any path that isn't
+    drive-letter-rooted, which also makes it harmless on POSIX."""
+    p = str(win_path)
+    if len(p) >= 2 and p[1] == ":" and p[0].isalpha():
+        drive = p[0].lower()
+        rest = p[2:].replace("\\", "/")
+        return f"/{drive}{rest}"
+    return p.replace("\\", "/")
+
+
 @unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
 class TestInstallSh(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "--init-project"
@@ -401,7 +418,13 @@ class TestInstallSh(_InstallScriptTestBase, unittest.TestCase):
 
     def _run(self, target, args):
         return subprocess.run(
-            ["bash", str(INSTALL_SH), "--target", str(target), *args],
+            [
+                "bash",
+                _to_git_bash_path(INSTALL_SH),
+                "--target",
+                _to_git_bash_path(target),
+                *args,
+            ],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
