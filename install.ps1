@@ -253,6 +253,7 @@ function Merge-AgentsMd {
         Set-Content -LiteralPath $dst -Value "$block`n" -NoNewline
         Write-InstallAction "created: AGENTS.md"
     }
+    $script:OwnedPaths += "AGENTS.md"
 }
 
 # New-ContextConfig: creates context-config.yaml from the template with the
@@ -372,6 +373,11 @@ function New-CepInstallManifest {
     }
 
     $dst = Join-Path $TargetPath ".cep-install.json"
+    # .cep-install.json records its own path too - it's a file this run
+    # itself wrote, same as everything else in $OwnedPaths, and consumers
+    # (discover_layers.py/cep_retrofit.py/scaffold_state.py's manifest
+    # readers) should never treat it as project-authored content either.
+    $OwnedPaths += ".cep-install.json"
     # RuntimeList: the -Runtime selection expressed as the manifest's own
     # `runtime` array — "both" means literally both tools got their trees
     # copied, so it expands to both names; "claude"/"copilot" alone record
@@ -446,6 +452,7 @@ else {
         $OwnedPaths += ".cursor/rules"
     }
     Copy-CepWizardDocs
+    $OwnedPaths += ".github/skills/$CepWizardSkillName/docs"
 }
 if ($IncludeAgentsMd) {
     Merge-AgentsMd
@@ -454,6 +461,7 @@ if ($IncludeAgentsMd) {
 if ($InitProject) {
     New-ContextConfig
     New-ProjectGuidelinesPointer
+    $OwnedPaths += "context-config.yaml"
     $OwnedPaths += "starter_kit/project_guidelines"
 }
 

@@ -162,6 +162,64 @@ def _assert_cep_install_manifest(test, target: Path, mode: str, only_skills=None
     return data
 
 
+# Verb vocabulary log_action (install.sh) / Write-InstallAction (install.ps1)
+# use for a dry-run line that means "this path would be written" — both
+# scripts share the exact wording at every call site (see
+# copy_tree/Copy-LibraryTree, merge_agents_md/Merge-AgentsMd,
+# scaffold_context_config/New-ContextConfig,
+# scaffold_pointer/New-ProjectGuidelinesPointer, and
+# write_cep_install_manifest/New-CepInstallManifest). These are the
+# dry-run-specific present-tense phrasings ("would create", not "would
+# created") — not derivable from the real-run past-tense verbs by just
+# prefixing "would ". "would update: ..." (the pointer's existing-file
+# dry-run case) is omitted: it only fires when the target already has a
+# pointer file, which a fresh temp dir never does.
+_DRY_RUN_CREATE_VERBS = {
+    "would create",
+    "would overwrite",
+    "would write",
+    "would update block in",
+    "would append block to",
+}
+
+
+def _parse_created_paths(transcript: str):
+    """Extracts every path a dry-run transcript claims it would write, using
+    _DRY_RUN_CREATE_VERBS. Each write site logs exactly one line per
+    top-level call — a whole-directory copy (e.g. ".github/skills") is one
+    line for the whole subtree, while copy_cep_wizard_docs/Copy-CepWizardDocs
+    calls copy_tree/Copy-LibraryTree once per doc file, so it contributes one
+    line per file."""
+    paths = []
+    for line in transcript.splitlines():
+        line = line.strip()
+        if ": " not in line:
+            continue
+        verb, _, rest = line.partition(": ")
+        if verb in _DRY_RUN_CREATE_VERBS:
+            paths.append(rest.strip())
+    return paths
+
+
+def _owned_path_covers(rel: str, owned_paths) -> bool:
+    """True iff `rel` exactly matches one of owned_paths, or is a descendant
+    of one — mirrors the descendant-aware convention discover_layers.py's
+    _manifest_extra_ignored already uses for the same owned_paths list, so a
+    directory entry like ".github/skills" covers every file dry-run reports
+    under it without each file needing its own owned_paths entry."""
+    rel_path = Path(rel)
+    for owned in owned_paths:
+        owned_path = Path(owned)
+        if rel_path == owned_path:
+            return True
+        try:
+            rel_path.relative_to(owned_path)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
 class _InstallScriptTestBase:
     """Shared assertions across both installers; subclasses provide _run()."""
 
@@ -433,6 +491,52 @@ class _InstallScriptTestBase:
             result = self._run(target, [self.runtime_flag, "bogus-runtime"])
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("runtime", (result.stderr + result.stdout).lower())
+
+    def _assert_dry_run_paths_covered_by_owned_paths(self, args, mode, **manifest_kwargs):
+        """Runs a dry-run and a real install with the same `args` in two
+        separate temp dirs, then asserts every path the dry-run transcript
+        reports writing is covered (see _owned_path_covers) by the real
+        install's .cep-install.json owned_paths. Catches the exact defect
+        class this manifest exists to prevent: a write site the installer
+        performs but forgets to record as CEP-owned."""
+        with tempfile.TemporaryDirectory() as dry_tmp, tempfile.TemporaryDirectory() as real_tmp:
+            dry_target = Path(dry_tmp)
+            dry_result = self._run(dry_target, [*args, self.dry_run_flag])
+            self.assertEqual(dry_result.returncode, 0, dry_result.stderr)
+            created = _parse_created_paths(dry_result.stdout)
+            self.assertTrue(created, "dry-run transcript reported no writes to check")
+
+            real_target = Path(real_tmp)
+            real_result = self._run(real_target, args)
+            self.assertEqual(real_result.returncode, 0, real_result.stderr)
+            data = _assert_cep_install_manifest(self, real_target, mode=mode, **manifest_kwargs)
+            owned_paths = data["owned_paths"]
+
+            for rel in created:
+                if rel == ".cep-install.json":
+                    # Recorded by construction (write_cep_install_manifest /
+                    # New-CepInstallManifest appends its own path before
+                    # serializing) — checked directly rather than via
+                    # _owned_path_covers so a future rename of that self-
+                    # append still fails this assertion instead of silently
+                    # passing through the descendant-match fallback.
+                    self.assertIn(".cep-install.json", owned_paths)
+                    continue
+                self.assertTrue(
+                    _owned_path_covers(rel, owned_paths),
+                    f"dry-run reported writing {rel!r} but no owned_paths entry covers it: "
+                    f"{owned_paths!r}",
+                )
+
+    def test_full_install_owned_paths_cover_everything_the_dry_run_reports(self):
+        self._assert_dry_run_paths_covered_by_owned_paths([self.init_flag], mode="full")
+
+    def test_only_install_owned_paths_cover_everything_the_dry_run_reports(self):
+        self._assert_dry_run_paths_covered_by_owned_paths(
+            [self.only_flag, "ult-cep-wizard", self.init_flag],
+            mode="only",
+            only_skills=["ult-cep-wizard"],
+        )
 
 
 def _to_git_bash_path(win_path) -> str:

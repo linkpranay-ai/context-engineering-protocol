@@ -282,6 +282,7 @@ merge_agents_md() {
     cp "$block_file" "$dst"
     log_action "created: AGENTS.md"
   fi
+  OWNED_PATHS+=("AGENTS.md")
 
   rm -f "$block_file"
 }
@@ -406,8 +407,12 @@ write_cep_install_manifest() {
     return
   fi
 
+  # .cep-install.json records its own path too - it's a file this run
+  # itself wrote, same as everything else in OWNED_PATHS, and consumers
+  # (discover_layers.py/cep_retrofit.py/scaffold_state.py's manifest
+  # readers) should never treat it as project-authored content either.
   local owned_json only_json runtime_json
-  owned_json="$(printf '"%s",' "${OWNED_PATHS[@]}")"
+  owned_json="$(printf '"%s",' "${OWNED_PATHS[@]}" ".cep-install.json")"
   owned_json="[${owned_json%,}]"
   if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
     only_json="$(printf '"%s",' "${ONLY_NAMES[@]}")"
@@ -495,6 +500,7 @@ else
     OWNED_PATHS+=(".cursor/rules")
   fi
   copy_cep_wizard_docs
+  OWNED_PATHS+=(".github/skills/$CEP_WIZARD_SKILL_NAME/docs")
 fi
 if [ "$include_agents_md" -eq 1 ]; then
   merge_agents_md
@@ -503,7 +509,7 @@ fi
 if [ "$INIT_PROJECT" -eq 1 ]; then
   scaffold_context_config
   scaffold_pointer
-  OWNED_PATHS+=("starter_kit/project_guidelines")
+  OWNED_PATHS+=("context-config.yaml" "starter_kit/project_guidelines")
 fi
 
 if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
