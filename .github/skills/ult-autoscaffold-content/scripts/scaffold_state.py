@@ -157,9 +157,23 @@ _STATUSES = ("pending", "generated", "skipped")
 # project"), never a real module candidate -- without this exclusion a
 # repo that has already run ult-codegraph would see its own graph output
 # enumerated and tiered as if it were application code.
+#
+# The second line below is a name-based stopgap, deliberately kept even
+# though _top_level_candidate_dirs also drops manifest `owned_paths` (see
+# _manifest_owned_top_level_names): the manifest only knows about paths
+# CEP itself installed, and "starter_kit"/"output_docs" are exactly that,
+# so a manifest-unaware repo (manually installed, or predating the
+# manifest) still needs a name-based fallback for them. "third_party",
+# "extern", "external", "deps", and "submodules" are a different, wider
+# problem the manifest can never solve either way -- a project's own
+# vendored/third-party code, conventionally named one of these, is not
+# CEP's to know about at all. None of these seven is a name a real
+# first-party application module is likely to use.
 SCAN_IGNORED_DIR_NAMES = {
     ".git", "node_modules", "vendor", "dist", "build", "target",
     ".venv", "__pycache__", "graphify-out",
+    "third_party", "starter_kit", "output_docs", "extern", "external",
+    "deps", "submodules",
 }
 CEP_BUCKET_DIR_NAMES = {"contexts", "inputs", "cache"}
 

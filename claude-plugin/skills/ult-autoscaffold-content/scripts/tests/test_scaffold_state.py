@@ -112,18 +112,45 @@ class FilesystemScanHelperTests(unittest.TestCase):
                 (root / name).mkdir()
             self.assertEqual(ss._top_level_candidate_dirs(root), ["core"])
 
+    def test_top_level_candidate_dirs_prunes_vendor_and_cep_scaffold_stopgap_names(self):
+        # The seven name-based stopgap entries SCAN_IGNORED_DIR_NAMES adds on
+        # top of graphify-out: "starter_kit"/"output_docs" (CEP's own
+        # scaffolded locations, kept as a fallback for manifest-unaware
+        # repos -- see test_top_level_candidate_dirs_keeps_manifest_owned_
+        # name_without_manifest_when_not_denylisted below for the case a
+        # manifest-unaware repo still needs) and "third_party"/"extern"/
+        # "external"/"deps"/"submodules" (a project's own vendored code, a
+        # problem the manifest can never see at all).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            stopgap_names = (
+                "third_party", "starter_kit", "output_docs", "extern",
+                "external", "deps", "submodules",
+            )
+            for name in ("core",) + stopgap_names:
+                (root / name).mkdir()
+            self.assertEqual(ss._top_level_candidate_dirs(root), ["core"])
+
     def test_top_level_candidate_dirs_missing_root_returns_empty(self):
         self.assertEqual(ss._top_level_candidate_dirs("/does/not/exist/anywhere"), [])
 
     def test_top_level_candidate_dirs_excludes_manifest_owned_top_level_name(self):
-        # starter_kit/ has no dot prefix and isn't in SCAN_IGNORED_DIR_NAMES,
-        # so without manifest awareness it would be walked and tiered like a
-        # real application module -- the exact false-positive
-        # _manifest_owned_top_level_names exists to close.
+        # custom_output_bucket/ has no dot prefix and isn't in
+        # SCAN_IGNORED_DIR_NAMES, so without manifest awareness it would be
+        # walked and tiered like a real application module -- the exact
+        # false-positive _manifest_owned_top_level_names exists to close.
+        # Deliberately not "starter_kit" here (that name is covered by the
+        # denylist stopgap test above regardless of manifest presence) --
+        # this fixture isolates manifest-driven exclusion from the
+        # name-based denylist, so a regression in either one shows up as
+        # exactly one of these two test pairs failing, not both.
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "core").mkdir()
-            _write(root / "starter_kit" / "project_guidelines" / "GUIDE.md", "# guide")
+            _write(
+                root / "custom_output_bucket" / "project_guidelines" / "GUIDE.md",
+                "# guide",
+            )
             _write(
                 root / ".cep-install.json",
                 json.dumps({
@@ -134,25 +161,34 @@ class FilesystemScanHelperTests(unittest.TestCase):
                     "owned_paths": [
                         ".github/skills",
                         ".github/prompts",
-                        "starter_kit/project_guidelines",
+                        "custom_output_bucket/project_guidelines",
                     ],
                     "installed_at": "2026-01-01T00:00:00Z",
                 }),
             )
             self.assertEqual(ss._top_level_candidate_dirs(root), ["core"])
 
-    def test_top_level_candidate_dirs_keeps_same_name_without_manifest(self):
-        # Same starter_kit/ fixture as above, but with no .cep-install.json
-        # present -- _read_cep_manifest must return None (not raise), and
-        # scaffold_state falls back to pre-manifest behavior: starter_kit/
-        # still surfaces as a real candidate module, exactly as it always
-        # has for a manually-installed or unmanifested repo.
+    def test_top_level_candidate_dirs_keeps_manifest_owned_name_without_manifest_when_not_denylisted(self):
+        # Same custom_output_bucket/ fixture as above, but with no
+        # .cep-install.json present -- _read_cep_manifest must return None
+        # (not raise), and scaffold_state falls back to pre-manifest
+        # behavior: custom_output_bucket/ still surfaces as a real
+        # candidate module, exactly as it always has for a manually
+        # installed or unmanifested repo. (A name actually in
+        # SCAN_IGNORED_DIR_NAMES, like starter_kit, would stay pruned even
+        # here -- that's the point of the denylist stopgap; this test picks
+        # a name outside it specifically to isolate manifest-only behavior.)
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "core").mkdir()
-            _write(root / "starter_kit" / "project_guidelines" / "GUIDE.md", "# guide")
+            _write(
+                root / "custom_output_bucket" / "project_guidelines" / "GUIDE.md",
+                "# guide",
+            )
             self.assertIsNone(ss._read_cep_manifest(root))
-            self.assertEqual(ss._top_level_candidate_dirs(root), ["core", "starter_kit"])
+            self.assertEqual(
+                ss._top_level_candidate_dirs(root), ["core", "custom_output_bucket"]
+            )
 
     def test_iter_files_prunes_nested_ignored_dirs(self):
         with tempfile.TemporaryDirectory() as d:
