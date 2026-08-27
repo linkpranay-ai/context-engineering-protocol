@@ -136,6 +136,17 @@ class TestGuidelinesCard(unittest.TestCase):
         )
         self.assertIsNone(card)
 
+    def test_layer_decisions_pending_suppresses_the_card(self):
+        # Closes the What/How-vs-Guidelines/Trip-wire card-gating asymmetry:
+        # an uninitialized, otherwise card-worthy state is still suppressed
+        # while a What/How layer decision is unresolved.
+        card = wsc.guidelines_card(
+            self.root, initialized=False,
+            default_path="starter_kit/project_guidelines/COMPILED-GUIDELINES.md",
+            layer_decisions_pending=True,
+        )
+        self.assertIsNone(card)
+
 
 class TestTripwireCard(unittest.TestCase):
     def setUp(self):
@@ -199,6 +210,15 @@ class TestTripwireCard(unittest.TestCase):
         )
         self.assertIn("evidence", card.prompt_text)
         self.assertIn("source streams", card.prompt_text)
+
+    def test_layer_decisions_pending_suppresses_the_card(self):
+        # Same card-gating asymmetry fix as guidelines_card's own test above.
+        card = wsc.tripwire_card(
+            self.root, available=True, initialized=False, entries=0,
+            ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
+            layer_decisions_pending=True,
+        )
+        self.assertIsNone(card)
 
 
 class TestZeroOnDiskMutation(unittest.TestCase):

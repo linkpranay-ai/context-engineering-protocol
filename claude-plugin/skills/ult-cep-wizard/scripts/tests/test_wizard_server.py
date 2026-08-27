@@ -524,6 +524,61 @@ class TestApiStatusWithPendingDecisions(WizardServerTestCase):
         self.assertIn("What", stub_titles)
         self.assertNotIn("How", stub_titles)
 
+    def test_rediscovery_section_title_still_marks_its_layer_pending(self):
+        # Regression test: the old `section_title.startswith("What"/"How")`
+        # check missed a re-issued section, since discover_layers.py titles
+        # those "Re-discovery - <canonical title> - <date>", which starts
+        # with "Re-discovery", not "What"/"How". resolve_section_layer()
+        # must still resolve this to the "what" layer so the What card stays
+        # suppressed while the re-discovered decision is unresolved.
+        _write_discovery_artifact(
+            self.repo_root,
+            content=(
+                f"# Context Layout Discovery - test-repo\n\n"
+                f"## Re-discovery - {WHAT_L2_TITLE} - 2026-01-01\n"
+                "**Status:** enabled by default.\n\n"
+                "    decision: PENDING   # CONFIRM: docs/reqs/ | CUSTOM: <path> | SKIP\n\n"
+                f"## {HOW_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: CONFIRM: org/   # CONFIRMED 2026-01-01\n"
+            ),
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertNotIn("What", stub_titles)
+        self.assertIn("How", stub_titles)
+
+    def test_collision_section_title_marks_both_layers_pending(self):
+        # Regression test: COLLISION_TITLE ("Cross-layer path collisions
+        # (S30)") starts with neither "What" nor "How", so the old check
+        # treated a still-unresolved collision as pending for *neither*
+        # layer - a false-negative gap the review found by reasoning.
+        # resolve_section_layer() maps it to both layers, so a pending
+        # collision decision suppresses both the What and How cards.
+        _write_discovery_artifact(
+            self.repo_root,
+            content=(
+                f"# Context Layout Discovery - test-repo\n\n"
+                f"## {WHAT_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: CONFIRM: docs/reqs/   # CONFIRMED 2026-01-01\n\n"
+                f"## {HOW_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: CONFIRM: org/   # CONFIRMED 2026-01-01\n\n"
+                "## Cross-layer path collisions (S30)\n\n"
+                "    collision_decision: PENDING   # ACKNOWLEDGE | CUSTOM: <layer> -> <new path>\n"
+            ),
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertNotIn("What", stub_titles)
+        self.assertNotIn("How", stub_titles)
+
 
 class TestApiDecisions(WizardServerTestCase):
     def test_no_cookie_is_401(self):

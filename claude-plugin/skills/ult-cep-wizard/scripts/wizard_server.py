@@ -393,13 +393,21 @@ def _make_handler(ctx: _ServerContext):
             # read_decisions() itself already returns [] when no discovery
             # artifact exists yet, so no explicit no-artifact branch is needed
             # here (matches _handle_api_decisions's own un-wrapped call below).
+            #
+            # `f.layer` (from layout_decision_grammar.resolve_section_layer(),
+            # via wizard_layout_source.read_decisions()) replaces a prior
+            # `f.section_title.startswith("What"/"How")` check that missed two
+            # real cases: a re-issued "Re-discovery - <title> - <date>"
+            # section (starts with "Re-discovery", not "What"/"How"), and
+            # COLLISION_TITLE ("Cross-layer path collisions (S30)", which
+            # starts with neither and can affect either layer).
             what_pending = how_pending = False
             for f in source.read_decisions():
                 if f.state == "confirmed":
                     continue
-                if f.section_title.startswith("What"):
+                if "what" in f.layer:
                     what_pending = True
-                elif f.section_title.startswith("How"):
+                if "how" in f.layer:
                     how_pending = True
             what_card = wizard_stub_content.what_how_card(
                 "What",
@@ -414,7 +422,10 @@ def _make_handler(ctx: _ServerContext):
                 layer_decisions_pending=how_pending,
             )
             guidelines_card = wizard_stub_content.guidelines_card(
-                ctx.repo_root, view.guidelines.initialized, view.guidelines.default_path
+                ctx.repo_root,
+                view.guidelines.initialized,
+                view.guidelines.default_path,
+                layer_decisions_pending=what_pending or how_pending,
             )
             tripwire_card = wizard_stub_content.tripwire_card(
                 ctx.repo_root,
@@ -422,6 +433,7 @@ def _make_handler(ctx: _ServerContext):
                 initialized=view.tripwire.initialized,
                 entries=view.tripwire.entries,
                 ledger_path=view.tripwire.ledger_path,
+                layer_decisions_pending=what_pending or how_pending,
             )
             payload["stub_cards"] = [
                 asdict(card)

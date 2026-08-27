@@ -149,11 +149,29 @@ def what_how_card(
     )
 
 
-def guidelines_card(repo_root, initialized: bool, default_path: str) -> Optional[StubCard]:
+def guidelines_card(
+    repo_root,
+    initialized: bool,
+    default_path: str,
+    *,
+    layer_decisions_pending: bool = False,
+) -> Optional[StubCard]:
     """Guidelines' card is different in kind from What/How's (see module docstring):
     it points at running the `compiling-project-guidelines` skill, not a freeform
     prompt this module authors itself - that skill owns its own generation logic,
-    this module has no business paraphrasing it into a prompt block."""
+    this module has no business paraphrasing it into a prompt block.
+
+    `layer_decisions_pending` (default False, same "every pre-existing caller
+    keeps working unchanged" posture what_how_card's own parameter has):
+    the caller passes True whenever either the What or How layer's own
+    decision fields are not yet confirmed. Guidelines compilation reads
+    from whatever What/How currently resolve to, so pointing a user at it
+    while either is still mid-decision risks the same
+    prompt-content-becomes-stale-the-moment-Apply-runs problem
+    what_how_card's own docstring describes - suppress the card here for
+    the same reason, not a different one."""
+    if layer_decisions_pending:
+        return None
     if initialized:
         return None
     return StubCard(
@@ -175,6 +193,7 @@ def tripwire_card(
     initialized: bool,
     entries: int,
     ledger_path: Optional[str],
+    layer_decisions_pending: bool = False,
 ) -> Optional[StubCard]:
     """Trip-wire's card is different in kind from the other three (see module
     docstring): decision-ledger population isn't something a skill can safely
@@ -201,7 +220,16 @@ def tripwire_card(
     an initialized-but-0-entries ledger is exactly as much of an onboarding dead
     end as a missing one, so `entries == 0` gates this independently of
     `initialized`.
+
+    `layer_decisions_pending` (default False, same posture as
+    `guidelines_card`'s own parameter): decision-ledger entries are meant to
+    capture real institutional-memory context about this repo's actual
+    layout, and a still-pending What/How decision means that layout is
+    itself about to change - suppress the card until it settles, same
+    reasoning as `guidelines_card` and `what_how_card`.
     """
+    if layer_decisions_pending:
+        return None
     if not available:
         return None
     if initialized and entries > 0:
