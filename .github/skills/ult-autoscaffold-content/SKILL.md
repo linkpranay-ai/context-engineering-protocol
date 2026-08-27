@@ -150,8 +150,9 @@ about to make this a large-repo run, first check whether `ult-codegraph`'s
 output is available — follow
 `ult-codegraph/CONSUMING-CODE-GRAPH.md` steps 1 and 4 (presence check,
 staleness nudge against `graphify-out/GRAPH_REPORT.md`'s "Graph Freshness"
-section) rather than duplicating that procedure here. Then offer a
-three-state choice, never silently defaulted:
+section — not produced under `--no-cluster`, so its absence there is
+expected, not an error) rather than duplicating that procedure here. Then
+offer a three-state choice, never silently defaulted:
 
 1. **Use the existing graph** (present and not obviously stale).
 2. **Regenerate it** — point the user at `/ult-codegraph` (or run

@@ -111,12 +111,19 @@ graphify update . --no-cluster
 graphify cluster-only . --no-label
 ```
 
-This writes `graphify-out/{graph.json, GRAPH_REPORT.md, graph.html,
+Together, these write `graphify-out/{graph.json, GRAPH_REPORT.md, graph.html,
 manifest.json, cache/}` at the project root — `graphify`'s fixed working
 location. It has no `--output` flag; `graphify update`/`query`/`path`/`explain`
 all default-read from `graphify-out/` relative to the path you point them at,
 so this directory must stay where the tool expects it for incremental updates
 and queries to work.
+
+**`GRAPH_REPORT.md`/`graph.html` are produced by the `cluster-only` step, not
+by `graphify update . --no-cluster` alone.** If a consuming skill's flow only
+ran the first command (`--no-cluster` skips clustering by design), those two
+files won't exist yet — treat their absence as expected, not an error, and
+fall back to `graph.json` directly (or suggest running `graphify cluster-only`
+if a report is actually needed).
 
 ## No normalization step — consume `graphify-out/` directly
 
@@ -136,9 +143,11 @@ tool-maintained path, so copying it would only:
 - fight the tool's own incremental-update model, which depends on
   `graphify-out/` staying exactly where `graphify` put it.
 
-So: **consuming skills read `graphify-out/graph.json` and
+So: **consuming skills read `graphify-out/graph.json` and, when present,
 `graphify-out/GRAPH_REPORT.md` directly** — no copy, no second location.
-See `CONSUMING-CODE-GRAPH.md` in this folder for the consumption contract
+`GRAPH_REPORT.md` isn't produced under `--no-cluster` (the default
+invocation above); treat its absence as expected, not an error. See
+`CONSUMING-CODE-GRAPH.md` in this folder for the consumption contract
 (which also explains *how* to consume it: prefer scoped `graphify query`
 over reading the full files).
 
@@ -153,6 +162,9 @@ Re-run `graphify update .` (incremental — it only re-parses changed files).
 Nothing to re-copy: `graphify-out/graph.json` updates in place.
 `GRAPH_REPORT.md`'s "Graph Freshness" section records the commit the graph
 was built from; compare it against `git rev-parse HEAD` to spot staleness.
+If `GRAPH_REPORT.md` isn't present (`--no-cluster` was used without a
+follow-up `cluster-only` run), skip the staleness nudge rather than treating
+its absence as an error.
 
 ## Measuring impact (optional, run once)
 
