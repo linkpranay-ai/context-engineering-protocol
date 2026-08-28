@@ -328,6 +328,99 @@ class _InstallScriptTestBase:
                 "# hand-edited\n",
             )
 
+    def _owned_paths_after_run(self, target, args):
+        """Runs the installer and returns the manifest's owned_paths list."""
+        result = self._run(target, args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(
+            (target / ".cep-install.json").read_text(encoding="utf-8")
+        )
+        owned = data.get("owned_paths")
+        self.assertIsInstance(owned, list)
+        return owned
+
+    def test_reinstall_keeps_ownership_of_scaffolded_context_config(self):
+        # The manifest is rebuilt wholesale on every run, never merged with
+        # the prior one, and scaffold_context_config/New-ContextConfig only
+        # writes context-config.yaml when it is absent. So a second run finds
+        # the file the first run created, skips writing it, and - without the
+        # carry-forward check on that skip branch - would drop it from
+        # owned_paths even though CEP still owns that exact unedited file.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            first = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertIn("context-config.yaml", first)
+
+            generated = (target / "context-config.yaml").read_text(encoding="utf-8")
+            second = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertIn(
+                "context-config.yaml",
+                second,
+                "re-install dropped the ownership claim on a file CEP created",
+            )
+            # Nobody edited it between runs - ownership lapsed purely on the
+            # bookkeeping, which is exactly what must not happen.
+            self.assertEqual(
+                (target / "context-config.yaml").read_text(encoding="utf-8"),
+                generated,
+            )
+
+    def test_ownership_of_scaffolded_context_config_survives_three_runs(self):
+        # The carry-forward reads the prior run's manifest, so it has to keep
+        # working when that manifest was itself written by a carry-forward
+        # rather than by the run that created the file.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            for run_number in (1, 2, 3):
+                owned = self._owned_paths_after_run(target, [self.init_flag])
+                self.assertIn(
+                    "context-config.yaml",
+                    owned,
+                    f"ownership claim lost on run {run_number}",
+                )
+
+    def test_preexisting_context_config_is_never_claimed(self):
+        # Regression guard for the carry-forward above: ownership may only be
+        # carried forward from a genuine prior claim, never invented from the
+        # file merely being present. An adopter's own context-config.yaml
+        # placed before CEP's first install is unclaimed on run 1 (which
+        # itself takes the "skipped (exists)" branch, so no claim is ever
+        # recorded) and must stay unclaimed on every later run too.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            adopter_text = "# adopter-authored\n"
+            (target / "context-config.yaml").write_text(
+                adopter_text, encoding="utf-8"
+            )
+
+            first = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertNotIn("context-config.yaml", first)
+
+            second = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertNotIn(
+                "context-config.yaml",
+                second,
+                "re-install invented an ownership claim on an adopter's file",
+            )
+            self.assertEqual(
+                (target / "context-config.yaml").read_text(encoding="utf-8"),
+                adopter_text,
+            )
+
+    def test_unreadable_prior_manifest_does_not_break_reinstall(self):
+        # The carry-forward consults a file it did not write this run, so a
+        # corrupt or truncated leftover manifest must degrade to "no prior
+        # claim" rather than abort the install.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            self._owned_paths_after_run(target, [self.init_flag])
+            (target / ".cep-install.json").write_text(
+                "{ this is not json", encoding="utf-8"
+            )
+
+            owned = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertIn(".cep-install.json", owned)
+
     def test_dry_run_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
