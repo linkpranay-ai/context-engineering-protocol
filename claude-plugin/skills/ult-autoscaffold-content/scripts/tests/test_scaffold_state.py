@@ -586,22 +586,46 @@ class TierAssignmentTests(unittest.TestCase):
     def test_tier_for_graph_thresholds(self):
         # node_count > 0 in every non-empty case below -- a real module with
         # its own nodes, regardless of in-degree.
-        self.assertEqual(ss._tier_for_graph(10, False, 5), (1, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(9, False, 5), (2, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(1, False, 5), (2, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(10, False, 5, 5), (1, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(9, False, 5, 5), (2, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(1, False, 5, 5), (2, "graph:in-degree"))
         # in_degree 0 with node_count > 0 -- a real tier-3 leaf (has its own
         # nodes, nothing else just imports it), not empty.
-        self.assertEqual(ss._tier_for_graph(0, False, 5), (3, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(62, True, 5), (0, "generated"))
+        self.assertEqual(ss._tier_for_graph(0, False, 5, 5), (3, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(62, True, 5, 5), (0, "generated"))
 
-    def test_tier_for_graph_zero_nodes_is_empty_not_leaf(self):
-        # node_count == 0 -- graphify found nothing under this directory at
-        # all. Distinct from the in_degree==0-but-has-nodes leaf case above:
-        # this must never be offered as a selectable tier-3 module.
-        self.assertEqual(ss._tier_for_graph(0, False, 0), (None, "empty"))
+    def test_tier_for_graph_zero_nodes_and_zero_files_is_empty_not_leaf(self):
+        # node_count == 0 AND file_count == 0 -- nothing under this
+        # directory at all. Distinct from the in_degree==0-but-has-nodes
+        # leaf case above: this must never be offered as a selectable
+        # tier-3 module.
+        self.assertEqual(ss._tier_for_graph(0, False, 0, 0), (None, "empty"))
         # generated still takes priority over empty, same as it does over
         # every other tier.
-        self.assertEqual(ss._tier_for_graph(0, True, 0), (0, "generated"))
+        self.assertEqual(ss._tier_for_graph(0, True, 0, 0), (0, "generated"))
+
+    def test_tier_for_graph_zero_nodes_with_files_falls_back_to_file_count(self):
+        # Zero graph nodes but real files on disk -- a directory graphify
+        # never walked, or one holding assets it doesn't traverse. That's
+        # not empty: tier it off file_count exactly as heuristic mode
+        # would, but with a basis string that records the fallback so the
+        # state file never claims a graph signal it didn't have.
+        fallback = "heuristic:file-count (no graph nodes)"
+        self.assertEqual(ss._tier_for_graph(0, False, 0, 50), (1, fallback))
+        self.assertEqual(ss._tier_for_graph(0, False, 0, 49), (2, fallback))
+        self.assertEqual(ss._tier_for_graph(0, False, 0, 1), (2, fallback))
+        # in_degree is irrelevant on this branch -- there are no nodes for
+        # anything to point at, so the file-count tier stands either way.
+        self.assertEqual(ss._tier_for_graph(12, False, 0, 1), (2, fallback))
+        # generated still wins over the fallback, same as over empty.
+        self.assertEqual(ss._tier_for_graph(0, True, 0, 7), (0, "generated"))
+        # The tier must agree with what heuristic mode would have said --
+        # only the basis label differs.
+        for file_count in (1, 49, 50, 500):
+            self.assertEqual(
+                ss._tier_for_graph(0, False, 0, file_count)[0],
+                ss._tier_for_heuristic(file_count, False)[0],
+            )
 
     def test_tier_for_heuristic_thresholds(self):
         self.assertEqual(ss._tier_for_heuristic(50, False), (1, "heuristic:file-count"))
@@ -691,6 +715,38 @@ class ScanTests(unittest.TestCase):
                 m["id"] for m in graph_state["modules"] if m["status"] == "pending"
             }
             self.assertNotIn("trantor/", pending_ids_graph)
+
+    def test_scan_graph_mode_keeps_directory_with_files_but_no_graph_nodes(self):
+        # A directory with real files that graphify never indexed -- here a
+        # folder of non-code assets, the shape _fixture_graph() has no
+        # nodes for. Zero graph nodes on its own must NOT read as "empty":
+        # the directory has content, so it stays a normal, selectable
+        # module tiered off its file count, not a skipped one.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(root / "assets" / "logo.svg", "<svg/>")
+            _write(root / "assets" / "theme.css", "body{}")
+            _write(root / "assets" / "icons" / "check.svg", "<svg/>")
+
+            graph_path = Path(d) / "graph.json"
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)
+
+            by_id = {m["id"]: m for m in state["modules"]}
+            entry = by_id["assets/"]
+            self.assertIsNotNone(entry["tier"])
+            self.assertEqual(entry["tier"], 2)
+            self.assertEqual(entry["file_count"], 3)
+            self.assertEqual(entry["basis"], "heuristic:file-count (no graph nodes)")
+            self.assertEqual(entry["status"], "pending")
+            self.assertIsNone(entry["skip_reason"])
+            pending_ids = {m["id"] for m in state["modules"] if m["status"] == "pending"}
+            self.assertIn("assets/", pending_ids)
+            skipped_ids = {m["id"] for m in state["modules"] if m["status"] == "skipped"}
+            self.assertNotIn("assets/", skipped_ids)
 
     def test_scan_rejects_bad_graph_mode(self):
         with tempfile.TemporaryDirectory() as d:

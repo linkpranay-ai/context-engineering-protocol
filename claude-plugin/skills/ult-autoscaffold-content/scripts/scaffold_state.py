@@ -739,19 +739,31 @@ def _check_graph_cep_contamination(repo_root, graph):
 # Tier assignment                                                            #
 # --------------------------------------------------------------------------- #
 
-def _tier_for_graph(in_degree, generated, node_count):
+def _tier_for_graph(in_degree, generated, node_count, file_count):
     if generated:
         return 0, "generated"
-    # A module with zero graph nodes is not a real leaf (tier 3) -- it's
-    # empty: graphify found nothing under it to index at all (e.g. a
-    # directory graphify never walked, or one with no parseable files).
-    # in_degree alone can't tell these apart -- a genuine tier-3 leaf with
-    # plenty of its own nodes also has in_degree 0, since nothing else
-    # imports it. node_count is the distinguishing signal (see
-    # _graph_module_node_counts()). Checked before the thresholds below so
-    # it never gets miscounted as a normal, selectable tier-3 module.
+    # A module with zero graph nodes is not a real leaf (tier 3) -- graphify
+    # found nothing under it to index at all. in_degree alone can't tell the
+    # two apart: a genuine tier-3 leaf with plenty of its own nodes also has
+    # in_degree 0, since nothing else imports it. node_count is the
+    # distinguishing signal (see _graph_module_node_counts()). Checked
+    # before the thresholds below so it never gets miscounted as a normal,
+    # selectable tier-3 module.
+    #
+    # Zero graph nodes does NOT by itself mean the directory is empty,
+    # though -- a directory of non-code assets graphify doesn't traverse, or
+    # one graphify simply never walked, still has real files under it and is
+    # still a legitimate module candidate. Fall back to heuristic mode's own
+    # file_count signal there rather than dropping the module from the
+    # list entirely, tagged with its own basis string so the state file
+    # records that this tier came from a graph-mode fallback rather than
+    # from a real graphify signal or from a full heuristic-mode run. Only
+    # zero nodes AND zero files is genuinely empty.
     if node_count == 0:
-        return None, "empty"
+        if file_count == 0:
+            return None, "empty"
+        tier, _heuristic_basis = _tier_for_heuristic(file_count, generated)
+        return tier, "heuristic:file-count (no graph nodes)"
     if in_degree >= TIER1_MIN_IN_DEGREE:
         return 1, "graph:in-degree"
     if in_degree >= 1:
@@ -931,7 +943,7 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
         if graph_mode == "graphify":
             in_degree = in_degrees.get(name, 0)
             node_count = node_counts.get(name, 0)
-            tier, basis = _tier_for_graph(in_degree, generated, node_count)
+            tier, basis = _tier_for_graph(in_degree, generated, node_count, len(files))
         else:
             in_degree = None
             tier, basis = _tier_for_heuristic(len(files), generated)
@@ -943,7 +955,7 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
             # skipped" stays answerable at a glance -- generated/vendor and
             # empty are different reasons a module never became selectable.
             skip_reason = (
-                "empty directory (no graph nodes found under it)"
+                "empty directory (no files and no graph nodes found under it)"
                 if graph_mode == "graphify"
                 else "empty directory (no files found)"
             )
