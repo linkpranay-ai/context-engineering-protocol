@@ -223,6 +223,17 @@ class InventoryManifestExclusionTest(unittest.TestCase):
             unit_ids = {u["unit_id"] for u in result["units"]}
             self.assertEqual(unit_ids, {"widget-reviewer"})
             self.assertNotIn(".github/skills/installed-skill", result.get("unclaimed_dirs", []))
+            # Excluded, but not invisibly: the pruned container is reported
+            # so the calling skill can show a human what the scan left out.
+            self.assertIn(".github/skills", result["excluded_owned_paths"])
+
+    def test_excluded_owned_paths_is_empty_when_nothing_was_pruned(self):
+        # The key is always present, so a consumer can read it unconditionally
+        # -- empty on a scan where no manifest-owned path matched anything.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            result = cep_retrofit.inventory(tmp)
+            self.assertEqual(result["excluded_owned_paths"], [])
 
     def test_manifest_absent_leaves_behavior_unchanged(self):
         # No .cep-install.json in this fixture -- _read_cep_manifest must
@@ -268,6 +279,10 @@ class InventoryManifestExclusionTest(unittest.TestCase):
             unit_ids = {u["unit_id"] for u in result["units"]}
             self.assertNotIn("docs/cep-bundled-note.md", unit_ids)
             self.assertIn("docs/genuine-guide.md", unit_ids)
+            # Reported, like an owned container is, so a human reviewing the
+            # inventory can see which file the manifest claimed.
+            self.assertIn("docs/cep-bundled-note.md", result["excluded_owned_paths"])
+            self.assertNotIn("docs/genuine-guide.md", result["excluded_owned_paths"])
 
     def test_manifest_owned_param_overrides_autodetection(self):
         # Passing manifest_owned explicitly (e.g. manifest_owned=set())
@@ -310,6 +325,19 @@ class InventoryTieringTest(unittest.TestCase):
             for unit_id in ("docs/implement.md", "nested/docs/deploy.md"):
                 self.assertEqual(unit_ids[unit_id]["tier"], "supplementary")
                 self.assertNotEqual(unit_ids[unit_id]["note"], "")
+
+    def test_docs_ancestor_match_ignores_case(self):
+        # A library that capitalizes the directory ("Docs", "DOCS") gets the
+        # same weaker-signal note as a lowercase "docs" -- the note is about
+        # the directory's meaning, not its exact spelling.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "Docs" / "implement.md", "# Implement\n")
+            _write(Path(tmp) / "nested" / "DOCS" / "deploy.md", "# Deploy\n")
+            result = cep_retrofit.inventory(tmp)
+            units_by_id = {u["unit_id"]: u for u in result["units"]}
+            for unit_id in ("Docs/implement.md", "nested/DOCS/deploy.md"):
+                self.assertEqual(units_by_id[unit_id]["tier"], "supplementary")
+                self.assertNotEqual(units_by_id[unit_id]["note"], "")
 
     def test_tier_counts_summarizes_across_all_units(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -218,8 +218,9 @@ def inventory(root, excludes=None, manifest_owned=None):
     dedicated marker file -- high confidence this is a genuine skill unit)
     or "supplementary" for (c) units (a bare markdown file -- a weaker
     guess; it could just as easily be ordinary documentation). A
-    "supplementary" unit whose containing directory is literally named
-    "docs" (at any depth) additionally carries a non-empty "note" flagging
+    "supplementary" unit whose containing directory is named "docs" (at any
+    depth, matched case-insensitively, so `Docs/` and `DOCS/` count the same
+    as `docs/`) additionally carries a non-empty "note" flagging
     that weaker signal explicitly, rather than being dropped by a
     docs-specific denylist entry. Nothing is ever removed from the walk
     output on tier grounds alone -- tiering is a confidence label for the
@@ -237,7 +238,11 @@ def inventory(root, excludes=None, manifest_owned=None):
     never silently dropped just because it matches `owned_paths`. Pass
     `manifest_owned` explicitly to override auto-detection (mainly for
     tests); pass `manifest_owned=set()` to disable manifest-based exclusion
-    entirely.
+    entirely. Every path this exclusion actually prunes -- directory or
+    individual file -- is listed in the returned dict's
+    "excluded_owned_paths" (root-relative, same path convention as
+    "unclaimed_dirs"), so the calling skill can show a human what the scan
+    left out and why, instead of the exclusion being invisible.
     """
     excludes = DEFAULT_EXCLUDES if excludes is None else excludes
     root = Path(root)
@@ -248,6 +253,7 @@ def inventory(root, excludes=None, manifest_owned=None):
 
     units = []
     unclaimed_dirs = []
+    excluded_owned_paths = []
 
     def walk(dir_path, is_root, via_symlink, name=None):
         try:
@@ -293,7 +299,10 @@ def inventory(root, excludes=None, manifest_owned=None):
             # manifest-dir (the shape checks above already returned for
             # those) -- CEP's own supporting content, e.g. the .github/skills
             # container in a full install. Pruned like DEFAULT_EXCLUDES:
-            # not descended into, not reported as unclaimed either.
+            # not descended into, not reported as unclaimed either -- but
+            # recorded in "excluded_owned_paths" so the exclusion is visible
+            # to the calling skill rather than silent.
+            excluded_owned_paths.append(_rel(dir_path, root))
             return
 
         if not is_root and name in excludes:
@@ -317,10 +326,12 @@ def inventory(root, excludes=None, manifest_owned=None):
                     # This exact file is CEP's own installed content (an
                     # individually-listed owned_paths entry, not just a
                     # container directory already pruned above) -- excluded
-                    # like any other manifest-owned path, not reported.
+                    # like any other manifest-owned path, and recorded in
+                    # "excluded_owned_paths" so the exclusion stays visible.
+                    excluded_owned_paths.append(_rel(fpath, root))
                     continue
                 note = ""
-                if "docs" in Path(_rel(dir_path, root)).parts:
+                if "docs" in {p.lower() for p in Path(_rel(dir_path, root)).parts}:
                     note = (
                         'flat-file unit found under a directory named "docs" '
                         '(at this or an ancestor level) -- a weaker signal '
@@ -360,6 +371,7 @@ def inventory(root, excludes=None, manifest_owned=None):
     return {
         "units": units,
         "unclaimed_dirs": sorted(unclaimed_dirs),
+        "excluded_owned_paths": sorted(excluded_owned_paths),
         "tier_counts": tier_counts,
     }
 
