@@ -55,6 +55,26 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   artifact kinds. `compiling-project-guidelines` now auto-discovers this skill's How-L2 output
   and its `context-config.yaml`-resolved directory as additional guideline sources, and notes
   scaffold-generated drafts distinctly in its `Sources:` footer.
+- **`ult-autoscaffold-content`: a new non-fatal warning when the code graph has indexed
+  CEP's own installed files.** `scaffold_state.py`'s graph-mode scan already defended
+  against a `graph.json` built for a different repo entirely; it had no defense against a
+  thinner, easier-to-hit variant — `graphify` pointed at the right repo, but never scoped
+  away from CEP's own installed footprint. The graph still looks plausible in that case
+  (real module names, real in-degrees) while a slice of its nodes are CEP's own skills,
+  docs, and wizard scripts, quietly inflating the in-degree and tier numbers of whatever
+  real modules happen to sit near CEP's installed paths. The new
+  `_check_graph_cep_contamination()` resolves each node's `source_file` against the
+  target's own `.cep-install.json` `owned_paths` and returns a warning once the
+  contaminated fraction exceeds 5% (`GRAPH_CEP_CONTAMINATION_WARN_THRESHOLD`) —
+  deliberately far below the existing 50% module-overlap warn threshold, since CEP's own
+  footprint should be a thin sliver of any real target repo's graph, so even a small
+  fraction is meaningful signal. It is a distinct check from that overlap warning, and
+  shares its posture: never fatal, never silent — printed to stderr at scan time,
+  persisted to `TRIAGE-STATE.json`'s `repo_scan.graph_cep_contamination_warning`, and
+  echoed in `render-index`'s output. The warning text names the fix, and
+  `ult-codegraph/SKILL.md` Step 0 now carries a concrete, copy-pasteable recipe for both
+  shells that writes `.graphifyignore` straight from `owned_paths`, replacing its prior
+  "confirm the exact mechanism yourself" hedge.
 
 ### Fixed
 
@@ -346,6 +366,24 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   `starter_kit/project_guidelines` narrows to the single `.pointer.md` the installer
   actually writes there — the directory around it is an additive drop-zone whose other
   files belong to the adopter.
+- **A directory with nothing in it was offered as an ordinary module to write content
+  for.** `ult-autoscaffold-content`'s two tier functions folded a genuinely empty
+  directory into Tier 3 ("leaf") alongside real leaf modules that merely have no incoming
+  dependency edges, and `scan()` auto-skips only Tier 0 (generated/vendor) — so an empty
+  directory reached the user as an ordinary selectable module with nothing to actually
+  cover. `_tier_for_heuristic()` and `_tier_for_graph()` now both return a `None` tier
+  with basis `"empty"` for that case, checked after the generated-code check (which still
+  wins, unchanged) and before the real tier thresholds; `scan()` routes a `None` tier into
+  the same modules list with `status: "skipped"` and its own `skip_reason` wording,
+  distinct from Tier 0's, so "why was this skipped" stays answerable per module rather
+  than silent. Graph mode's emptiness test uses a new per-module node count
+  (`_graph_module_node_counts()`) rather than in-degree, since a real Tier-3 leaf can
+  legitimately have in-degree 0 while still holding plenty of its own graph nodes — see
+  the next entry for the follow-up that additionally requires a zero file count before
+  calling a graph-mode directory empty. `render_index()`/`summarize()` gained a fifth
+  bucket alongside Tiers 0-3, so an empty module is shown as auto-skipped in the rendered
+  index instead of becoming invisible once tiered, and `ult-autoscaffold-content/SKILL.md`
+  names the bucket in its tier-table walkthrough.
 - **`ult-autoscaffold-content` reported a directory with real files but no code-graph
   nodes as empty.** In graphify mode the tier lookup returned an empty verdict on a zero
   node count alone, so a directory of non-code assets graphify doesn't traverse, or one
@@ -387,6 +425,68 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   for the exact lowercase string, so a library spelling it `Docs` or `DOCS` got no note
   and its units read as ordinary supplementary files. The parts are lowercased before the
   membership test. Spelling only — no synonyms (`doc`, `documentation`, …) were added.
+- **A `.cep-install.json` manifest could leave How-L2 discovery worse off than no manifest
+  at all.** `discover_layers._manifest_extra_ignored()` matched an owned path only when it
+  was a *direct child* of the candidate directory — so a `--only` install, whose manifest
+  names each skill's own directory (`.github/skills/<name>`) rather than the
+  `.github/skills/` container, never matched at all. `discover_how_l2()` then compounded
+  it by *replacing* the hardcoded `.github/`-only noise-exclusion fallback with that
+  (empty) manifest result instead of adding to it, so the presence of a narrower manifest
+  produced a noisier candidate scan than having none. The matcher now resolves any
+  *descendant* of the candidate directory down to its immediate-child name, and
+  `discover_how_l2()` unions the manifest-derived names with the hardcoded fallback:
+  a manifest is treated as a positive, additive signal about paths CEP is certain it owns,
+  never as proof that nothing else needs excluding. Verified against a real external skills
+  repo — the old exact-match-and-replace logic left a manifest-owned candidate directory's
+  noise count at 2; the fix brings it to 0, matching the no-manifest baseline exactly.
+  `ult-cep-retrofit`'s inventory walk got the matching file-level fix in the same change:
+  an individually manifest-owned flat file is now excluded from the flat-file scan, where
+  previously only directory-level ownership was checked.
+- **`ult-cep-retrofit`'s inventory contradicted its own manifest-ownership exclusion
+  within a single scan**, in two ways. First, the ownership check ran *after* the
+  skill-dir and manifest-dir shape checks, both of which return early — and every
+  CEP-installed skill directory carries a `SKILL.md`, so an `--only` install (whose
+  manifest names skill directories directly rather than a container) had those very
+  directories reported as human-authored canonical units, while the same manifest's
+  sibling flat files were excluded in the same run. The ownership check now runs ahead of
+  both shape checks, so a manifest-owned path is excluded whatever shape it happens to
+  have — superseding the "checked after shape detection" ordering described in the
+  `.cep-install.json` manifest entry above, and the `--only`-install case it was meant to
+  protect. Second, the unclaimed-directory computation iterated the raw filename list,
+  including files the flat-file loop had just pruned as manifest-owned, so a directory
+  whose only qualifying file was CEP's own landed in `unclaimed_dirs` while that same file
+  sat in `excluded_owned_paths`. The pruned names are now tracked and discounted from that
+  computation; a directory holding any genuine non-owned qualifying file still lands in
+  `unclaimed_dirs` as before. `inventory()`'s docstring, which documented the old ordering
+  as intentional, is corrected, and both cases are covered by tests plus negative controls
+  for ordinary shape detection and for non-overcorrection.
+- **A repeat install silently dropped CEP's ownership claim on a `context-config.yaml` it
+  had created itself.** `install.sh`'s `scaffold_context_config` and `install.ps1`'s
+  `New-ContextConfig` appended the file to `owned_paths` only on the branch where the run
+  actually created it. That is right for a target where CEP never wrote the file — an
+  adopter-authored `context-config.yaml` of unknown provenance must never be silently
+  claimed — but wrong for the ordinary re-install: run 1 creates the file and records it,
+  run 2 finds it already present and takes the "skipped (exists)" branch, and because the
+  manifest is rebuilt wholesale on every run rather than merged with the prior one, run 2's
+  manifest dropped a path CEP genuinely still owned and nobody had edited. The test changes
+  from "did *this* run write it" to "does CEP still own it": both scripts consult the prior
+  run's `.cep-install.json`, still unmodified on disk at that point since both scaffold
+  before they write the manifest. Ownership is only ever carried forward from a genuine
+  prior claim, never invented from the file merely being present, so an adopter's own
+  pre-existing `context-config.yaml` — which run 1 itself skipped and never claimed — stays
+  unclaimed on every later run exactly as before. `install.sh` matches the prior manifest
+  as text, consistent with the by-hand single-line JSON it already writes and with its
+  standing no-`jq`/no-`python3` constraint; `install.ps1` parses it with `ConvertFrom-Json`
+  and treats a missing file, empty content, malformed JSON, or a non-array `owned_paths`
+  alike as "no prior claim", rather than letting a corrupt leftover manifest abort the
+  install. Deliberately narrow — only this one file, in this one function: the
+  project-guidelines pointer rewrites its own file unconditionally on every run, so its
+  claim is re-recorded every time and has no analogous gap. Covered by four
+  subprocess-driven cases that run against both installers: two consecutive inits keep the
+  claim with the file byte-identical across runs, three consecutive inits keep it (so the
+  carry-forward is exercised reading a manifest itself written by a carry-forward), an
+  adopter's pre-existing file stays unclaimed across runs, and a corrupt leftover manifest
+  still lets the next install complete and rewrite a valid one.
 
 ## [0.5.0]
 
