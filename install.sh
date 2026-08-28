@@ -285,7 +285,13 @@ merge_agents_md() {
     cp "$block_file" "$dst"
     log_action "created: AGENTS.md"
   fi
-  OWNED_PATHS+=("AGENTS.md")
+  # AGENTS.md is a merge target, not a file this installer owns outright: it
+  # only ever writes its own marked block into it, and everything outside
+  # that block is adopter-authored content this run must not claim. So it is
+  # recorded in MERGED_PATHS rather than OWNED_PATHS - a consumer that
+  # excludes owned_paths wholesale would otherwise silently drop the
+  # adopter's own content living in the rest of the file.
+  MERGED_PATHS+=("AGENTS.md")
 
   rm -f "$block_file"
 }
@@ -323,6 +329,11 @@ scaffold_context_config() {
     -e 's#<process standards root, e.g. org/process-standards/>#org/process-standards/#g' \
     "$src" > "$dst"
   log_action "created: context-config.yaml"
+  # Recorded as owned only on this branch - the run that actually created
+  # the file. An existing context-config.yaml is adopter-authored (the
+  # "skipped (exists)" early return above), so a later run must not start
+  # claiming it.
+  OWNED_PATHS+=("context-config.yaml")
 }
 
 # scaffold_pointer: (re)writes starter_kit/project_guidelines/.pointer.md.
@@ -364,6 +375,10 @@ POINTER_EOF
   else
     log_action "created: starter_kit/project_guidelines/.pointer.md"
   fi
+  # The pointer file, not the directory around it: project_guidelines is an
+  # additive drop-zone whose other files are adopter-owned, and this
+  # function only ever writes .pointer.md.
+  OWNED_PATHS+=("starter_kit/project_guidelines/.pointer.md")
 }
 
 # CEP_WIZARD_SKILL_NAME: the one skill whose install also bundles CEP's own
@@ -396,6 +411,12 @@ copy_cep_wizard_docs() {
 }
 
 OWNED_PATHS=()
+# MERGED_PATHS: paths this run wrote *into* without owning them outright -
+# today only AGENTS.md, where merge_agents_md writes a marked block and
+# leaves the rest of the file to the adopter. Kept separate from
+# OWNED_PATHS so a consumer that excludes owned_paths wholesale still sees
+# the write recorded without treating the whole file as CEP-generated.
+MERGED_PATHS=()
 
 # write_cep_install_manifest <mode>: writes .cep-install.json at the target
 # root - the one place any CEP-shipped script can ask "which paths did the
@@ -420,23 +441,43 @@ write_cep_install_manifest() {
   # itself wrote, same as everything else in OWNED_PATHS, and consumers
   # (discover_layers.py/cep_retrofit.py/scaffold_state.py's manifest
   # readers) should never treat it as project-authored content either.
-  local owned_json only_json runtime_json
+  local owned_json merged_json only_json runtime_json
   owned_json="$(printf '"%s",' "${OWNED_PATHS[@]}" ".cep-install.json")"
   owned_json="[${owned_json%,}]"
+  # merged_paths is always present, and is an empty array on any run that
+  # never merged AGENTS.md (e.g. --runtime claude or --runtime copilot), so
+  # readers can index it unconditionally. Guarded on the count because an
+  # empty array expansion is an error under `set -u` on older bash builds.
+  if [ "${#MERGED_PATHS[@]}" -gt 0 ]; then
+    merged_json="$(printf '"%s",' "${MERGED_PATHS[@]}")"
+    merged_json="[${merged_json%,}]"
+  else
+    merged_json="[]"
+  fi
   if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
     only_json="$(printf '"%s",' "${ONLY_NAMES[@]}")"
     only_json="[${only_json%,}]"
   else
     only_json="null"
   fi
-  # runtime_json: "both" means literally both tools got their trees copied,
-  # so it expands to both names; "claude"/"copilot" alone record just the
-  # one value this run actually scoped itself to.
-  if [ "$RUNTIME" = "both" ]; then
-    runtime_json='["claude", "copilot"]'
-  else
-    runtime_json="[\"$RUNTIME\"]"
+  # runtime_json: derived from the same include_* flags that gated the real
+  # copy/merge work above, so the manifest records the tools this run
+  # actually installed for instead of restating the --runtime string. Every
+  # value copies .github/skills/, so "claude" is always present; the other
+  # three names ride along with the tree each one needs.
+  local runtime_names
+  runtime_names=("claude")
+  if [ "$include_prompts" -eq 1 ]; then
+    runtime_names+=("copilot")
   fi
+  if [ "$include_cursor_rules" -eq 1 ]; then
+    runtime_names+=("cursor")
+  fi
+  if [ "$include_agents_md" -eq 1 ]; then
+    runtime_names+=("codex")
+  fi
+  runtime_json="$(printf '"%s", ' "${runtime_names[@]}")"
+  runtime_json="[${runtime_json%, }]"
 
   cat > "$dst" <<EOF
 {
@@ -445,6 +486,7 @@ write_cep_install_manifest() {
   "mode": "$mode",
   "only_skills": $only_json,
   "owned_paths": $owned_json,
+  "merged_paths": $merged_json,
   "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -518,7 +560,6 @@ fi
 if [ "$INIT_PROJECT" -eq 1 ]; then
   scaffold_context_config
   scaffold_pointer
-  OWNED_PATHS+=("context-config.yaml" "starter_kit/project_guidelines")
 fi
 
 if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then

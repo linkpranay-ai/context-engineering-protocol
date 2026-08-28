@@ -256,7 +256,14 @@ function Merge-AgentsMd {
         Set-Content -LiteralPath $dst -Value "$block`n" -NoNewline
         Write-InstallAction "created: AGENTS.md"
     }
-    $script:OwnedPaths += "AGENTS.md"
+    # AGENTS.md is a merge target, not a file this installer owns outright:
+    # it only ever writes its own marked block into it, and everything
+    # outside that block is adopter-authored content this run must not
+    # claim. So it is recorded in $script:MergedPaths rather than
+    # $script:OwnedPaths - a consumer that excludes owned_paths wholesale
+    # would otherwise silently drop the adopter's own content living in the
+    # rest of the file.
+    $script:MergedPaths += "AGENTS.md"
 }
 
 # New-ContextConfig: creates context-config.yaml from the template with the
@@ -289,6 +296,11 @@ function New-ContextConfig {
 
     Set-Content -LiteralPath $dst -Value $content -NoNewline
     Write-InstallAction "created: context-config.yaml"
+    # Recorded as owned only on this branch - the run that actually created
+    # the file. An existing context-config.yaml is adopter-authored (the
+    # "skipped (exists)" early return above), so a later run must not start
+    # claiming it.
+    $script:OwnedPaths += "context-config.yaml"
 }
 
 # New-ProjectGuidelinesPointer: (re)writes
@@ -328,6 +340,10 @@ your own files alongside it; they are never touched.
 
     if ($existed) { Write-InstallAction "overwrote: starter_kit/project_guidelines/.pointer.md" }
     else { Write-InstallAction "created: starter_kit/project_guidelines/.pointer.md" }
+    # The pointer file, not the directory around it: project_guidelines is
+    # an additive drop-zone whose other files are adopter-owned, and this
+    # function only ever writes .pointer.md.
+    $script:OwnedPaths += "starter_kit/project_guidelines/.pointer.md"
 }
 
 # CepWizardSkillName: the one skill whose install also bundles CEP's own
@@ -372,6 +388,7 @@ function Copy-CepWizardDocs {
 function New-CepInstallManifest {
     param(
         [string[]]$OwnedPaths,
+        [string[]]$MergedPaths,
         [string]$Mode,
         [string[]]$OnlySkills
     )
@@ -387,14 +404,17 @@ function New-CepInstallManifest {
     # (discover_layers.py/cep_retrofit.py/scaffold_state.py's manifest
     # readers) should never treat it as project-authored content either.
     $OwnedPaths += ".cep-install.json"
-    # RuntimeList: the -Runtime selection expressed as the manifest's own
-    # `runtime` array — "both" means literally both tools got their trees
-    # copied, so it expands to both names; "claude"/"copilot" alone record
-    # just the one value this run actually scoped itself to. This is itself
-    # an if/else-expression assignment, so the same single-element-array
-    # collapse described below applies here too — the else branch needs its
-    # own unary-comma guard, not just the one on $manifest.only_skills.
-    $RuntimeList = if ($Runtime -eq "both") { @("claude", "copilot") } else { ,@($Runtime) }
+    # RuntimeList: derived from the same $Include* flags that gated the real
+    # copy/merge work below, so the manifest records the tools this run
+    # actually installed for instead of restating the -Runtime string. Every
+    # -Runtime value copies .github/skills/, so "claude" is always present;
+    # the other three names ride along with the tree each one needs. Built
+    # by += onto a plain array rather than an if/else expression, so the
+    # single-element-array collapse described below never applies to it.
+    $RuntimeList = @("claude")
+    if ($IncludePrompts) { $RuntimeList += "copilot" }
+    if ($IncludeCursorRules) { $RuntimeList += "cursor" }
+    if ($IncludeAgentsMd) { $RuntimeList += "codex" }
     # ConvertTo-Json gotcha: an `if (...) { $arr } else { $null }` expression
     # captured as a hashtable value silently collapses a *single-element*
     # array to a bare scalar (verified: a 2+-element array is unaffected,
@@ -402,17 +422,23 @@ function New-CepInstallManifest {
     # unaffected — only this if/else-expression shape triggers it). The
     # unary comma operator (,$OnlySkills) forces array-ness through the
     # if-branch regardless of element count, so `--only <one-skill>` still
-    # round-trips as a JSON array instead of a bare string. runtime below
-    # uses the same direct `key = $arr` assignment shape as owned_paths
-    # (not the if/else-expression shape), so it isn't subject to the
-    # collapse and needs no comma guard even when -Runtime is "claude" or
-    # "copilot" alone (a single-element $RuntimeList).
+    # round-trips as a JSON array instead of a bare string. runtime and
+    # merged_paths below use the same direct `key = $arr` assignment shape
+    # as owned_paths (not the if/else-expression shape), so neither is
+    # subject to the collapse and neither needs a comma guard - verified for
+    # the single-element $RuntimeList (-Runtime claude) and for an empty
+    # $MergedPaths, both of which still serialize as JSON arrays.
+    #
+    # merged_paths is always present, and is an empty array on any run that
+    # never merged AGENTS.md (e.g. -Runtime claude or copilot), so readers
+    # can index it unconditionally.
     $manifest = [ordered]@{
         schema_version = 1
         runtime        = $RuntimeList
         mode           = $Mode
         only_skills    = if ($OnlySkills.Count -gt 0) { ,$OnlySkills } else { $null }
         owned_paths    = $OwnedPaths
+        merged_paths   = $MergedPaths
         installed_at   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     }
     $json = $manifest | ConvertTo-Json -Depth 5
@@ -431,6 +457,13 @@ $IncludeCursorRules = @("cursor", "both") -contains $Runtime
 $IncludeAgentsMd = @("codex", "both") -contains $Runtime
 
 $OwnedPaths = @()
+# MergedPaths: paths this run wrote *into* without owning them outright -
+# today only AGENTS.md, where Merge-AgentsMd writes a marked block and
+# leaves the rest of the file to the adopter. Kept separate from
+# $OwnedPaths so a consumer that excludes owned_paths wholesale still sees
+# the write recorded without treating the whole file as CEP-generated.
+# Script-scoped because Merge-AgentsMd appends to it from inside a function.
+$script:MergedPaths = @()
 if ($OnlyNames.Count -gt 0) {
     foreach ($name in $OnlyNames) {
         Copy-LibraryTree ".github/skills/$name" ".github/skills/$name"
@@ -470,12 +503,10 @@ if ($IncludeAgentsMd) {
 if ($InitProject) {
     New-ContextConfig
     New-ProjectGuidelinesPointer
-    $OwnedPaths += "context-config.yaml"
-    $OwnedPaths += "starter_kit/project_guidelines"
 }
 
 $CepInstallMode = if ($OnlyNames.Count -gt 0) { "only" } else { "full" }
-New-CepInstallManifest -OwnedPaths $OwnedPaths -Mode $CepInstallMode -OnlySkills $OnlyNames
+New-CepInstallManifest -OwnedPaths $OwnedPaths -MergedPaths $MergedPaths -Mode $CepInstallMode -OnlySkills $OnlyNames
 
 Write-Host ""
 if ($DryRun) {
