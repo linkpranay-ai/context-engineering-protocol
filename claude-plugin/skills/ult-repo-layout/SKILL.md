@@ -331,7 +331,11 @@ use if the human opted in above):
 1. **Refuse if already initialized** — if `context-config.yaml` has
    `project_layout.initialized: true`, stop and say so; point at `reconcile`
    or offer a diff view instead. Re-running `init` must never silently
-   reset a customized layout back to defaults.
+   reset a customized layout back to defaults. One exception: `init
+   --ci-hook` on an already-initialized repo scaffolds the opt-in
+   pre-commit hook (see "CI / pre-commit hook" below) and stops there,
+   leaving `project_layout` untouched — otherwise the hook would be
+   unreachable to anyone who ran `init` once without it.
 2. Otherwise, for each registered slot (see the slot registry table above —
    all eleven) whose owning skill is installed (partial-install gate, §15.8):
    - Resolve its **resolved default** (§16.2): `{workspace_root}/<leaf>`
@@ -724,7 +728,8 @@ check. Unit tests in `scripts/tests/test_validate_layout.py`.
 
 | Condition | Action |
 |---|---|
-| `init` run when `project_layout.initialized: true` | Refuse — "Already initialized. Run `/ult-repo-layout reconcile` to update the index, or `discover` to re-confirm slot locations." |
+| `init` run when `project_layout.initialized: true` | Refuse — "Already initialized. Run `/ult-repo-layout reconcile` to update the index, or `discover` to re-confirm slot locations." Add that re-running with `--ci-hook` scaffolds the opt-in pre-commit hook alone, without re-initializing |
+| `init --ci-hook` run when `project_layout.initialized: true` | Not an error — scaffold the pre-commit hook only (never overwriting an existing one) and leave `project_layout` as it stands |
 | A registered slot has zero markers (`reconcile`) | Ask the human where it moved or whether it was removed — never guess by name similarity |
 | A registered slot has multiple markers (any mode) | Bijectivity violation — surface as a conflict; do not auto-resolve |
 | Resolved slot path doesn't exist, read context | Warn-and-continue: "proceeding as if `<slot>` has no content for this run" |

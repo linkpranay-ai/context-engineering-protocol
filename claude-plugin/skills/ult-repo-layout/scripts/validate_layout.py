@@ -1155,8 +1155,15 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
     agent's job: the same split every other ult-* skill in this repo
     already draws between SKILL.md-driven agent behavior and a
     deterministic script (confirm_layers.py's own "agent/human produces the
-    decisions, the script applies them atomically" precedent). Returns
-    (exit_code, messages) - 0/[...] on success, 1/[...] on refusal."""
+    decisions, the script applies them atomically" precedent).
+
+    An already-initialized repo is refused (project_layout is never
+    rewritten) with one exception: `ci_hook=True` on a repeat call
+    scaffolds the pre-commit hook alone and succeeds, since the hook is
+    opt-in and would otherwise be unreachable after the first `init`.
+
+    Returns (exit_code, messages) - 0/[...] on success, 1/[...] on
+    refusal."""
     repo_root = Path(repo_root).resolve()
     config_path = repo_root / "context-config.yaml"
     if not config_path.exists():
@@ -1171,9 +1178,25 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
     config = load_yaml_file(config_path) or {}
     existing_project_layout = config.get("project_layout")
     if isinstance(existing_project_layout, dict) and existing_project_layout.get("initialized"):
+        if ci_hook:
+            # The pre-commit hook is opt-in, so an adopter who ran `init`
+            # without --ci-hook and later wants the hook has no other way
+            # to ask for it. Refusing here made --ci-hook unreachable
+            # after the first run. _scaffold_pre_commit_hook is
+            # self-contained and never overwrites an existing hook, so
+            # honouring just that half of init is safe: nothing else in
+            # this function runs, and project_layout is left exactly as
+            # the first init wrote it.
+            return 0, [
+                "Already initialized - left project_layout untouched.",
+                _scaffold_pre_commit_hook(repo_root),
+            ]
         return 1, [
             "Already initialized. Run /ult-repo-layout reconcile to update "
-            "the index, or discover to re-confirm slot locations.",
+            "the index, or discover to re-confirm slot locations. To add "
+            "the opt-in pre-commit hook to an already-initialized repo "
+            "without re-initializing, re-run this with --ci-hook - that "
+            "scaffolds the hook alone and touches nothing else.",
         ]
 
     existing_wr = _normalize_workspace_root(config)

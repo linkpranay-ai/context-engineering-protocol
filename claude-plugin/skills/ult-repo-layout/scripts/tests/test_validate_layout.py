@@ -1336,6 +1336,57 @@ class TestRunInit(unittest.TestCase):
             code, messages = vl.run_init(root)
             self.assertEqual(code, 1)
             self.assertTrue(any("Already initialized" in m for m in messages))
+            # The refusal has to point at the one thing a repeat call can
+            # still do, or --ci-hook looks unreachable after the first init.
+            self.assertTrue(any("--ci-hook" in m for m in messages))
+
+    def test_repeat_init_with_ci_hook_scaffolds_hook_on_initialized_repo(self):
+        # The pre-commit hook is opt-in, so an adopter who ran init once
+        # without it has no other way to ask for it later. A repeat
+        # --init --ci-hook must scaffold the hook and succeed rather than
+        # refuse outright - and must leave project_layout exactly as the
+        # first init wrote it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / ".git" / "hooks").mkdir(parents=True)
+
+            first_code, _first_messages = vl.run_init(root)
+            self.assertEqual(first_code, 0)
+            hook = root / ".git" / "hooks" / "pre-commit"
+            self.assertFalse(hook.exists())
+            after_first_init = (root / "context-config.yaml").read_text(encoding="utf-8")
+
+            code, messages = vl.run_init(root, ci_hook=True)
+            self.assertEqual(code, 0, messages)
+            self.assertTrue(hook.exists())
+            self.assertIn("validate_layout.py --validate", hook.read_text(encoding="utf-8"))
+            self.assertTrue(any("Already initialized" in m for m in messages))
+            self.assertTrue(any("Scaffolded pre-commit hook" in m for m in messages))
+            self.assertEqual(
+                (root / "context-config.yaml").read_text(encoding="utf-8"),
+                after_first_init,
+            )
+
+    def test_repeat_init_with_ci_hook_never_overwrites_existing_hook(self):
+        # The already-initialized branch calls the same scaffolding helper
+        # a fresh init does, so its never-overwrite rule has to hold here
+        # too - and a skipped hook is still a success, not a refusal.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            hooks_dir = root / ".git" / "hooks"
+            hooks_dir.mkdir(parents=True)
+
+            self.assertEqual(vl.run_init(root)[0], 0)
+            write(hooks_dir / "pre-commit", "#!/bin/sh\necho custom hook\n")
+
+            code, messages = vl.run_init(root, ci_hook=True)
+            self.assertEqual(code, 0, messages)
+            self.assertIn("custom hook", (hooks_dir / "pre-commit").read_text(encoding="utf-8"))
+            self.assertTrue(any("already exists" in m for m in messages))
 
     def test_zero_installed_skills_refuses(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1752,6 +1803,27 @@ class TestMain(unittest.TestCase):
                 rc = vl.main(["--init", str(root)])
             self.assertEqual(rc, 1)
             self.assertIn("Already initialized", buf.getvalue())
+
+    def test_init_flag_with_ci_hook_succeeds_when_already_initialized(self):
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "skills" / "ult-context-generate").mkdir(parents=True)
+            (root / ".git" / "hooks").mkdir(parents=True)
+            write(
+                root / "context-config.yaml",
+                "project_layout:\n  version: 1\n  initialized: true\n",
+            )
+
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = vl.main(["--init", "--ci-hook", str(root)])
+            self.assertEqual(rc, 0, buf.getvalue())
+            self.assertTrue((root / ".git" / "hooks" / "pre-commit").exists())
+            self.assertIn("Already initialized", buf.getvalue())
+            self.assertIn("Scaffolded pre-commit hook", buf.getvalue())
 
 
 if __name__ == "__main__":
