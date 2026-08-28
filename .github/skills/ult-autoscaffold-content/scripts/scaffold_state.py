@@ -161,9 +161,16 @@ _STATUSES = ("pending", "generated", "skipped")
 # Content-identical to ult-repo-layout/discover_layers.py's own
 # SCAN_IGNORED_DIR_NAMES (plus that module's separate CEP_BUCKET_DIR_NAMES,
 # also mirrored below) -- a small local duplicate, not a shared import
-# (house convention: see module docstring). Keep the two sets equal; both
-# skills' test suites assert this so a future edit to one that forgets the
-# other fails loudly instead of silently diverging again.
+# (house convention: see module docstring). Keep the two sets equal.
+#
+# The equality is asserted from both sides: each skill's own test suite
+# imports the sibling skill's module off sys.path and compares the two sets
+# (test_scaffold_state.py's TestScanIgnoredDirNamesParity here,
+# test_discover_layers.py's counterpart there), so an edit made from either
+# side fails loudly in that side's own suite instead of silently diverging
+# again. Either suite skips its own check when the sibling skill's
+# directory isn't installed -- a partial checkout is not this test's
+# failure to report.
 #
 # "graphify-out" is ult-codegraph's own fixed, always-gitignored tool
 # output location (SKILL.md: "graphify-out/ should be gitignored in the

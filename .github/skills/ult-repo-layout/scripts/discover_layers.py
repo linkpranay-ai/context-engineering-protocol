@@ -102,9 +102,17 @@ HOW_L2_GITHUB_CANDIDATE_EXCLUDE = {"skills", "prompts"}
 # CEP_BUCKET_DIR_NAMES. Mirrored by ult-autoscaffold-content/scaffold_state.py's
 # own SCAN_IGNORED_DIR_NAMES -- a small local duplicate, not a shared import
 # (house convention: see that module's own comment on this pair). Keep the
-# two sets content-identical; test_scaffold_state.py and this skill's own
-# test suite both assert the two are equal so a future edit to one that
-# forgets the other fails loudly instead of silently diverging again.
+# two sets content-identical.
+#
+# The equality is asserted from both sides: each skill's own test suite
+# imports the sibling skill's module off sys.path and compares the two sets
+# (test_discover_layers.py's TestScanIgnoredDirNamesParity here,
+# test_scaffold_state.py's mirror of it there). Only test_discover_layers.py
+# used to carry that check, so an edit made from the autoscaffold side had
+# to be run through this skill's suite before anything caught the drift;
+# the mirrored direction closes that hole. Either suite skips its own check
+# when the sibling skill's directory isn't installed -- a partial checkout
+# is not this test's failure to report.
 # "graphify-out" is ult-codegraph's own fixed, always-gitignored tool output
 # location; "third_party"/"starter_kit"/"output_docs"/"extern"/"external"/
 # "deps"/"submodules" are vendor/CEP-bucket names no first-party application

@@ -759,6 +759,8 @@ class TestScanIgnoredDirNamesParity(unittest.TestCase):
     either module's own comment on the pair). A cross-suite equality check
     is the only thing that catches the two silently drifting apart again,
     since neither skill's own suite can see the other's module on its own.
+    test_scaffold_state.py carries the mirror of this check, so an edit made
+    from either side fails in that side's own suite.
     """
 
     def test_scan_ignored_dir_names_match_ult_autoscaffold_content(self):
@@ -767,10 +769,13 @@ class TestScanIgnoredDirNamesParity(unittest.TestCase):
             / "ult-autoscaffold-content"
             / "scripts"
         )
-        self.assertTrue(
-            autoscaffold_scripts.is_dir(),
-            f"expected sibling skill scripts dir at {autoscaffold_scripts}",
-        )
+        if not autoscaffold_scripts.is_dir():
+            # A partial checkout / install without the sibling skill has
+            # nothing to compare against. That is not this test's own
+            # failure to report - skip rather than fail.
+            self.skipTest(
+                f"sibling skill scripts dir not present at {autoscaffold_scripts}"
+            )
         sys.path.insert(0, str(autoscaffold_scripts))
         try:
             import scaffold_state as ss  # noqa: E402

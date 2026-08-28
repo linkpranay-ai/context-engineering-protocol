@@ -1198,5 +1198,44 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(summary["interfaces"], {"total": 1, "generated": 0, "pending": 1, "deferred": 0})
 
 
+class TestScanIgnoredDirNamesParity(unittest.TestCase):
+    """scaffold_state.SCAN_IGNORED_DIR_NAMES and ult-repo-layout's
+    discover_layers.SCAN_IGNORED_DIR_NAMES are deliberately kept as two
+    small local duplicates rather than a shared import (house convention -
+    see either module's own comment on the pair). This is the mirror of
+    test_discover_layers.py's own parity check: without it, an edit made
+    from this side only failed once somebody happened to run the other
+    skill's suite.
+    """
+
+    def test_scan_ignored_dir_names_match_ult_repo_layout(self):
+        repo_layout_scripts = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "ult-repo-layout"
+            / "scripts"
+        )
+        if not repo_layout_scripts.is_dir():
+            # A partial checkout / install without the sibling skill has
+            # nothing to compare against. That is not this test's own
+            # failure to report - skip rather than fail.
+            self.skipTest(
+                f"sibling skill scripts dir not present at {repo_layout_scripts}"
+            )
+        sys.path.insert(0, str(repo_layout_scripts))
+        try:
+            import discover_layers as dl  # noqa: E402
+        finally:
+            sys.path.remove(str(repo_layout_scripts))
+
+        self.assertEqual(
+            ss.SCAN_IGNORED_DIR_NAMES,
+            dl.SCAN_IGNORED_DIR_NAMES,
+            "scaffold_state.SCAN_IGNORED_DIR_NAMES and "
+            "discover_layers.SCAN_IGNORED_DIR_NAMES have drifted apart - "
+            "keep the two sets content-identical (see either module's "
+            "comment on this pair).",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
