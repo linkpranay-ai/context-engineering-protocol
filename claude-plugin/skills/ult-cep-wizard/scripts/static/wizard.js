@@ -1485,6 +1485,18 @@
       );
     });
 
+    // Same shape as the unclaimed list above, for the other half of what the
+    // scan didn't turn into rows: paths the target's own .cep-install.json
+    // manifest claims, which cep_retrofit.inventory() prunes. Listing them
+    // keeps the exclusion reviewable instead of invisible.
+    var excludedList = document.getElementById("retrofit-excluded-owned-paths");
+    excludedList.innerHTML = "";
+    (result.excluded_owned_paths || []).forEach(function (path) {
+      excludedList.appendChild(
+        el("li", { class: "retrofit-unclaimed-item", text: "Excluded (CEP-owned): " + path })
+      );
+    });
+
     var unitsList = document.getElementById("retrofit-units-list");
     unitsList.innerHTML = "";
     // Every existing row is about to be discarded - drop the stale handles

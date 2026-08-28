@@ -15,6 +15,7 @@ is always a fabricated placeholder library ("widget-reviewer", "second-widget")
 never a real skill name, matching ult-cep-retrofit's own zero-hardcoded-knowledge
 rule and this repo's established test-fixture naming.
 """
+import json
 import sys
 import tempfile
 import unittest
@@ -128,6 +129,9 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         result = wri.build_inventory(str(self.root), ".")
         self.assertEqual(result.target_rel_path, ".")
         self.assertEqual(result.unclaimed_dirs, ["orphan-notes"])
+        # No .cep-install.json in this fixture, so nothing was pruned - the
+        # field is still present and empty, never absent.
+        self.assertEqual(result.excluded_owned_paths, [])
 
         by_id = {u.unit_id: u for u in result.units}
         self.assertEqual(set(by_id), {"widget-reviewer", "second-widget.md"})
@@ -154,6 +158,30 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         self.assertTrue(flat_file.task_related)
         self.assertIn("plans", flat_file.matched_task_terms)
         self.assertEqual(flat_file.primary_file, "second-widget.md")
+
+    def test_manifest_owned_paths_are_passed_through_as_excluded(self):
+        # A target with its own .cep-install.json has those paths pruned by
+        # cep_retrofit.inventory(). build_inventory() must carry that list
+        # through to the frontend, target-relative and unrewritten, the same
+        # way unclaimed_dirs is - otherwise the wizard shows an inventory
+        # with a silent hole in it.
+        _write(
+            self.root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude", "copilot"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": [".github/skills"],
+                "merged_paths": [],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        result = wri.build_inventory(str(self.root), ".")
+        self.assertIn(".github/skills", result.excluded_owned_paths)
+        unit_ids = {u.unit_id for u in result.units}
+        self.assertFalse(any(u.startswith(".github/skills") for u in unit_ids))
+        self.assertIn(".github/skills", wri.to_json_dict(result)["excluded_owned_paths"])
 
     def test_to_json_dict_round_trips_as_plain_dict(self):
         result = wri.build_inventory(str(self.root), ".")

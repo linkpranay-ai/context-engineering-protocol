@@ -88,6 +88,11 @@ class RetrofitInventoryResult:
     target_rel_path: str  # retrofit target, relative to ctx.repo_root, POSIX-style
     units: List[RetrofitUnit] = field(default_factory=list)
     unclaimed_dirs: List[str] = field(default_factory=list)
+    # Paths cep_retrofit.inventory() pruned because the target's
+    # .cep-install.json manifest claims them - surfaced so the human sees what
+    # the scan left out. Target-relative, same as unclaimed_dirs (see the
+    # _repo_rel() note in build_inventory()).
+    excluded_owned_paths: List[str] = field(default_factory=list)
     tier_counts: dict = field(default_factory=dict)  # {"canonical": N, "supplementary": M}
 
 
@@ -249,6 +254,10 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
         target_rel_path=target_rel,
         units=units,
         unclaimed_dirs=raw["unclaimed_dirs"],
+        # Passed through target-relative, exactly like unclaimed_dirs above -
+        # only per-unit path/primary_file get the _repo_rel() rewrite, because
+        # only those are consumed downstream as repo-root paths.
+        excluded_owned_paths=raw["excluded_owned_paths"],
         tier_counts=tier_counts,
     )
 

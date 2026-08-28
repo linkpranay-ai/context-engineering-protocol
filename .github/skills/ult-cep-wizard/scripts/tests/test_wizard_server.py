@@ -1096,16 +1096,45 @@ class TestApiRetrofitInventory(WizardServerTestCase):
         self.assertEqual(flat["tier"], "supplementary")
         self.assertIn("duplicates widget-reviewer", flat["note"])
 
+    def test_manifest_owned_paths_reach_the_frontend_as_excluded_not_silence(self):
+        # A target carrying its own .cep-install.json has those owned paths
+        # pruned from the walk. The pruned paths must still reach the
+        # frontend, so the human reviewing the inventory can tell "CEP
+        # already owns this" apart from "the scan found nothing there".
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD
+        )
+        _write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude", "copilot"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": [".github/skills"],
+                "merged_paths": [],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/retrofit/inventory", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertIn(".github/skills", payload["excluded_owned_paths"])
+        unit_ids = {u["unit_id"] for u in payload["units"]}
+        self.assertIn("widget-reviewer", unit_ids)
+        self.assertFalse(any(u.startswith(".github/skills") for u in unit_ids))
+
 
 class TestRetrofitInventoryReviewGateMarkup(WizardServerTestCase):
     """A lightweight static-source presence check, not a full DOM
     render - this wizard's retrofit-inventory rendering is entirely
     client-side JS (see renderRetrofitUnitRow/renderRetrofitInventory in
     wizard.js), so there is no server-rendered markup a Python test could
-    inspect directly. What this can and does check: the tier badge and
-    review-gate checkbox the plan calls for are actually present in the
-    static sources the browser receives, not just described in a commit
-    message."""
+    inspect directly. What this can and does check: the retrofit-inventory
+    affordances this wizard promises - the tier badge, the review-gate
+    checkbox, the excluded-paths list - are actually present in the static
+    sources the browser receives, not just described in a commit message."""
 
     def test_index_html_has_the_review_gate_checkbox(self):
         # index.html is only ever served templated through the session-gated
@@ -1126,6 +1155,16 @@ class TestRetrofitInventoryReviewGateMarkup(WizardServerTestCase):
         self.assertIn("retrofit-tier-badge", body)
         self.assertIn("retrofit-inventory-reviewed", body)
         self.assertIn("applyRetrofitReviewGate", body)
+
+    def test_excluded_owned_paths_have_a_list_element_and_a_renderer(self):
+        # The endpoint-level coverage above proves excluded_owned_paths
+        # reaches the browser; this proves something in the browser reads it.
+        cookie = self._authenticated_cookie()
+        index = self._get("/", cookie=cookie).read().decode("utf-8")
+        self.assertIn('id="retrofit-excluded-owned-paths"', index)
+        js = self._get("/static/wizard.js").read().decode("utf-8")
+        self.assertIn("retrofit-excluded-owned-paths", js)
+        self.assertIn("excluded_owned_paths", js)
 
 
 class TestApiRetrofitState(WizardServerTestCase):
