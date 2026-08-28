@@ -296,6 +296,24 @@ merge_agents_md() {
   rm -f "$block_file"
 }
 
+# prior_manifest_owns_context_config: true iff the *prior* run's
+# .cep-install.json - still on disk unmodified at this point, since
+# scaffold_context_config runs before write_cep_install_manifest overwrites
+# it - already lists context-config.yaml in its owned_paths array.
+# Text-matched rather than parsed: this script builds that JSON by hand (see
+# write_cep_install_manifest below) and takes no jq/python3 dependency
+# anywhere, and owned_paths is always emitted as a single-line array literal,
+# so the whole array sits on the one line its key is on. The quotes on both
+# sides of the pattern keep it an exact element match - a hypothetical
+# "sub/dir/context-config.yaml" entry has a "/" where the pattern needs the
+# opening quote, so it cannot match. A missing manifest is simply "no prior
+# claim" (non-zero return), never an error.
+prior_manifest_owns_context_config() {
+  local manifest="$TARGET/.cep-install.json"
+  [ -f "$manifest" ] || return 1
+  grep -q '"owned_paths":.*"context-config\.yaml"' "$manifest"
+}
+
 # scaffold_context_config: creates context-config.yaml from the template
 # with the 5-row mechanical substitution, only if not already present.
 scaffold_context_config() {
@@ -309,6 +327,19 @@ scaffold_context_config() {
 
   if [ -f "$dst" ]; then
     log_action "skipped (exists): context-config.yaml"
+    # Carry a genuine prior ownership claim forward. A re-install must not
+    # let a CEP-owned file lapse into unclaimed status just because this
+    # particular run happened to skip writing it: run 1 creates the file and
+    # records it, run 2 finds it already there and lands here, and the
+    # manifest is always rebuilt wholesale (never merged with the prior
+    # one), so without this the claim would silently disappear even though
+    # CEP still owns that exact file and nobody edited it. Ownership is only
+    # ever carried forward, never invented - an existing file the prior
+    # manifest does not claim (or one with no prior manifest at all) is of
+    # adopter/unknown provenance and stays unclaimed, exactly as before.
+    if prior_manifest_owns_context_config; then
+      OWNED_PATHS+=("context-config.yaml")
+    fi
     return
   fi
 
@@ -329,10 +360,11 @@ scaffold_context_config() {
     -e 's#<process standards root, e.g. org/process-standards/>#org/process-standards/#g' \
     "$src" > "$dst"
   log_action "created: context-config.yaml"
-  # Recorded as owned only on this branch - the run that actually created
-  # the file. An existing context-config.yaml is adopter-authored (the
-  # "skipped (exists)" early return above), so a later run must not start
-  # claiming it.
+  # The run that actually created the file claims it outright. The only
+  # other way this path enters OWNED_PATHS is the "skipped (exists)" branch
+  # above carrying a prior run's claim forward; an existing
+  # context-config.yaml with no such claim is adopter-authored and is never
+  # claimed by any later run.
   OWNED_PATHS+=("context-config.yaml")
 }
 

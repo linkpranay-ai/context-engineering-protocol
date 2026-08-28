@@ -266,6 +266,36 @@ function Merge-AgentsMd {
     $script:MergedPaths += "AGENTS.md"
 }
 
+# Test-PriorManifestOwnsContextConfig: true iff the *prior* run's
+# .cep-install.json - still on disk unmodified at this point, since
+# New-ContextConfig runs before New-CepInstallManifest overwrites it -
+# already lists context-config.yaml in its owned_paths array. Parsed with
+# ConvertFrom-Json (the read-side counterpart of the ConvertTo-Json this
+# script already writes the manifest with) rather than text-matched. A
+# missing file, unreadable content, malformed JSON, or an owned_paths that
+# isn't an array of strings all mean the same thing here - "no prior claim" -
+# and none of them may abort the install, hence the catch and the $null
+# guards rather than letting $ErrorActionPreference = "Stop" propagate.
+function Test-PriorManifestOwnsContextConfig {
+    $manifest = Join-Path $TargetPath ".cep-install.json"
+    if (-not (Test-Path -LiteralPath $manifest)) { return $false }
+    try {
+        $raw = Get-Content -LiteralPath $manifest -Raw
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
+        $data = $raw | ConvertFrom-Json
+    }
+    catch {
+        return $false
+    }
+    if ($null -eq $data) { return $false }
+    $owned = $data.owned_paths
+    if ($null -eq $owned) { return $false }
+    # @(...) normalizes both a single-element array that round-tripped as a
+    # bare scalar and any non-collection value into something -contains can
+    # be asked about without throwing.
+    return (@($owned) -contains "context-config.yaml")
+}
+
 # New-ContextConfig: creates context-config.yaml from the template with the
 # 5-row mechanical substitution, only if not already present.
 function New-ContextConfig {
@@ -279,6 +309,20 @@ function New-ContextConfig {
 
     if (Test-Path -LiteralPath $dst) {
         Write-InstallAction "skipped (exists): context-config.yaml"
+        # Carry a genuine prior ownership claim forward. A re-install must
+        # not let a CEP-owned file lapse into unclaimed status just because
+        # this particular run happened to skip writing it: run 1 creates the
+        # file and records it, run 2 finds it already there and lands here,
+        # and the manifest is always rebuilt wholesale (never merged with
+        # the prior one), so without this the claim would silently disappear
+        # even though CEP still owns that exact file and nobody edited it.
+        # Ownership is only ever carried forward, never invented - an
+        # existing file the prior manifest does not claim (or one with no
+        # prior manifest at all) is of adopter/unknown provenance and stays
+        # unclaimed, exactly as before.
+        if (Test-PriorManifestOwnsContextConfig) {
+            $script:OwnedPaths += "context-config.yaml"
+        }
         return
     }
 
@@ -296,10 +340,11 @@ function New-ContextConfig {
 
     Set-Content -LiteralPath $dst -Value $content -NoNewline
     Write-InstallAction "created: context-config.yaml"
-    # Recorded as owned only on this branch - the run that actually created
-    # the file. An existing context-config.yaml is adopter-authored (the
-    # "skipped (exists)" early return above), so a later run must not start
-    # claiming it.
+    # The run that actually created the file claims it outright. The only
+    # other way this path enters $script:OwnedPaths is the "skipped
+    # (exists)" branch above carrying a prior run's claim forward; an
+    # existing context-config.yaml with no such claim is adopter-authored
+    # and is never claimed by any later run.
     $script:OwnedPaths += "context-config.yaml"
 }
 
