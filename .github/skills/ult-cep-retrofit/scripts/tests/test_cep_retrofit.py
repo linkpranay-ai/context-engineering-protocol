@@ -247,14 +247,16 @@ class InventoryManifestExclusionTest(unittest.TestCase):
             unit_ids = {u["unit_id"] for u in result["units"]}
             self.assertIn(".github/skills/installed-skill", unit_ids)
 
-    def test_only_mode_manifest_naming_a_skill_dir_directly_is_still_inventoried(self):
-        # Shape-aware precedence: an -Only install's manifest can name a
-        # skill-dir *directly* as owned_paths (rather than a container). The
-        # shape check (heuristic a) must still win -- this is a legitimate,
-        # CEP-installed unit, correctly inventoried, never silently dropped
-        # just because it matches owned_paths.
+    def test_only_mode_manifest_naming_a_skill_dir_directly_is_excluded(self):
+        # An -Only install's manifest names skill-dirs *directly* as
+        # owned_paths (rather than a container), and every such directory
+        # also carries a SKILL.md. Manifest ownership is checked before the
+        # shape checks, so the directory is excluded like any other owned
+        # path -- not reported as a human-authored candidate on the strength
+        # of a shape that CEP's own installed content always has.
         with tempfile.TemporaryDirectory() as tmp:
             _write(Path(tmp) / ".github" / "skills" / "example-skill" / "SKILL.md", "# Example\n")
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
             self._write_manifest(
                 tmp,
                 [".github/skills/example-skill"],
@@ -263,7 +265,43 @@ class InventoryManifestExclusionTest(unittest.TestCase):
             )
             result = cep_retrofit.inventory(tmp)
             unit_ids = {u["unit_id"] for u in result["units"]}
-            self.assertIn(".github/skills/example-skill", unit_ids)
+            self.assertNotIn(".github/skills/example-skill", unit_ids)
+            # The target's own content is untouched by the exclusion.
+            self.assertEqual(unit_ids, {"widget-reviewer"})
+            self.assertNotIn(".github/skills/example-skill", result["unclaimed_dirs"])
+            self.assertIn(".github/skills/example-skill", result["excluded_owned_paths"])
+
+    def test_manifest_owned_dir_with_manifest_file_shape_is_excluded(self):
+        # Same ordering gap from the other shape's side: an owned directory
+        # holding exactly one recognizable manifest file would match
+        # heuristic (b). Ownership still wins.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "installed" / "example-skill" / "skill.yaml", "name: example\n")
+            self._write_manifest(
+                tmp,
+                ["installed/example-skill"],
+                mode="only",
+                only_skills=["example-skill"],
+            )
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertNotIn("installed/example-skill", unit_ids)
+            self.assertEqual(result["units"], [])
+            self.assertIn("installed/example-skill", result["excluded_owned_paths"])
+
+    def test_ordinary_skill_dir_and_manifest_dir_detection_unaffected_by_a_manifest(self):
+        # Negative control for the two tests above: with a manifest present
+        # that owns something else entirely, ordinary shape detection still
+        # produces canonical skill-dir/manifest-dir units exactly as before.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            _write(Path(tmp) / "second-widget" / "skill.yaml", "name: second-widget\n")
+            self._write_manifest(tmp, [".github/skills"])
+            result = cep_retrofit.inventory(tmp)
+            by_id = {u["unit_id"]: u for u in result["units"]}
+            self.assertEqual(set(by_id), {"widget-reviewer", "second-widget"})
+            self.assertEqual(by_id["widget-reviewer"]["type"], "skill-dir")
+            self.assertEqual(by_id["second-widget"]["type"], "manifest-dir")
 
     def test_manifest_owned_individual_file_excluded_from_flat_file_units(self):
         # owned_paths can name an individual file, not just a container
@@ -283,6 +321,34 @@ class InventoryManifestExclusionTest(unittest.TestCase):
             # inventory can see which file the manifest claimed.
             self.assertIn("docs/cep-bundled-note.md", result["excluded_owned_paths"])
             self.assertNotIn("docs/genuine-guide.md", result["excluded_owned_paths"])
+
+    def test_dir_whose_only_candidate_file_is_manifest_owned_is_not_unclaimed(self):
+        # unclaimed_dirs means "human-authored content the heuristics
+        # couldn't classify -- look at this". A directory whose only
+        # qualifying file was just pruned as manifest-owned has no such
+        # content left, and reporting it would directly contradict this
+        # same payload's excluded_owned_paths entry for that file.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "docs" / "cep-bundled-note.md", "# CEP note\n")
+            self._write_manifest(tmp, ["docs/cep-bundled-note.md"])
+            result = cep_retrofit.inventory(tmp)
+            self.assertNotIn("docs", result["unclaimed_dirs"])
+            self.assertEqual(result["units"], [])
+            # Still visible as an exclusion, just not double-reported as
+            # unclaimed content.
+            self.assertIn("docs/cep-bundled-note.md", result["excluded_owned_paths"])
+
+    def test_dir_with_one_owned_and_one_genuine_candidate_file_is_still_unclaimed(self):
+        # Sibling of the test above, guarding against overcorrection: the
+        # prune only discounts the owned file. One genuine non-owned
+        # qualifying file is still enough candidate content on its own.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "docs" / "cep-bundled-note.md", "# CEP note\n")
+            _write(Path(tmp) / "docs" / "genuine-guide.md", "# Genuine guide\n")
+            self._write_manifest(tmp, ["docs/cep-bundled-note.md"])
+            result = cep_retrofit.inventory(tmp)
+            self.assertIn("docs", result["unclaimed_dirs"])
+            self.assertIn("docs/cep-bundled-note.md", result["excluded_owned_paths"])
 
     def test_manifest_owned_param_overrides_autodetection(self):
         # Passing manifest_owned explicitly (e.g. manifest_owned=set())

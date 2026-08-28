@@ -230,12 +230,13 @@ def inventory(root, excludes=None, manifest_owned=None):
 
     If `root` has a `.cep-install.json` manifest (written by install.ps1/
     install.sh -- see _read_cep_manifest), its `owned_paths` are excluded on
-    top of DEFAULT_EXCLUDES, checked *after* the (a)/(b) shape checks above
-    -- so CEP's own installed skills are never surfaced as candidate units
-    for retrofitting (the common case: `owned_paths` names a container like
-    `.github/skills`), but an `-Only`-install manifest that names a
-    skill-dir directly is still a legitimate unit, correctly inventoried,
-    never silently dropped just because it matches `owned_paths`. Pass
+    top of DEFAULT_EXCLUDES, checked *before* the (a)/(b) shape checks above
+    -- so CEP's own installed content is never surfaced as a candidate unit
+    for retrofitting, whether `owned_paths` names a container like
+    `.github/skills` (the full-install case) or the individual skill
+    directories themselves (the `-Only`-install case, where every owned
+    directory also carries a SKILL.md and would match shape check (a) if
+    ownership were tested second). Pass
     `manifest_owned` explicitly to override auto-detection (mainly for
     tests); pass `manifest_owned=set()` to disable manifest-based exclusion
     entirely. Every path this exclusion actually prunes -- directory or
@@ -263,6 +264,23 @@ def inventory(root, excludes=None, manifest_owned=None):
 
         filenames = [e.name for e in entries if e.is_file(follow_symlinks=True)]
         subdirs = [e for e in entries if e.is_dir(follow_symlinks=True)]
+
+        if not is_root and Path(dir_path).resolve() in manifest_owned:
+            # Manifest ownership is checked *first*, ahead of the shape
+            # checks below: a directory the target's own .cep-install.json
+            # names in owned_paths is CEP's own installed content whatever
+            # it happens to look like. Ordering matters because CEP's
+            # installed skill directories always carry a SKILL.md, so an
+            # -Only install (whose manifest names skill-dirs directly rather
+            # than a container) would otherwise match the skill-dir shape
+            # and be reported as a human-authored candidate -- while that
+            # same manifest's sibling flat files were being excluded in the
+            # same scan. Pruned like DEFAULT_EXCLUDES: not descended into,
+            # not reported as unclaimed either -- but recorded in
+            # "excluded_owned_paths" so the exclusion is visible to the
+            # calling skill rather than silent.
+            excluded_owned_paths.append(_rel(dir_path, root))
+            return
 
         skill_file = next((f for f in filenames if f in _SKILL_FILENAMES), None)
         if skill_file is not None and not is_root:
@@ -294,17 +312,6 @@ def inventory(root, excludes=None, manifest_owned=None):
             })
             return
 
-        if not is_root and Path(dir_path).resolve() in manifest_owned:
-            # A manifest owned_paths entry that isn't itself a skill-dir/
-            # manifest-dir (the shape checks above already returned for
-            # those) -- CEP's own supporting content, e.g. the .github/skills
-            # container in a full install. Pruned like DEFAULT_EXCLUDES:
-            # not descended into, not reported as unclaimed either -- but
-            # recorded in "excluded_owned_paths" so the exclusion is visible
-            # to the calling skill rather than silent.
-            excluded_owned_paths.append(_rel(dir_path, root))
-            return
-
         if not is_root and name in excludes:
             # Name-based exclusion is strictly weaker than the shape checks
             # above: this directory didn't match SKILL.md/manifest-file
@@ -319,6 +326,7 @@ def inventory(root, excludes=None, manifest_owned=None):
             # as unclaimed.
             return
 
+        owned_filenames = set()
         for f in filenames:
             if _is_flat_skill_file(f, is_root):
                 fpath = os.path.join(dir_path, f)
@@ -328,7 +336,10 @@ def inventory(root, excludes=None, manifest_owned=None):
                     # container directory already pruned above) -- excluded
                     # like any other manifest-owned path, and recorded in
                     # "excluded_owned_paths" so the exclusion stays visible.
+                    # Its bare name is remembered so the unclaimed-dirs check
+                    # below doesn't count content this scan just excluded.
                     excluded_owned_paths.append(_rel(fpath, root))
+                    owned_filenames.add(f)
                     continue
                 note = ""
                 if "docs" in {p.lower() for p in Path(_rel(dir_path, root)).parts}:
@@ -351,9 +362,16 @@ def inventory(root, excludes=None, manifest_owned=None):
                 })
 
         if not is_root:
+            # Files the flat-file loop above just pruned as manifest-owned
+            # don't count as candidate content: a directory whose only
+            # qualifying file is CEP's own installed content isn't
+            # human-authored material needing a retrofit decision, and
+            # reporting it as unclaimed would contradict the same scan's
+            # own "excluded_owned_paths" entry for that file.
             has_candidate_content = any(
                 _is_flat_skill_file(f, is_root) or f.lower().endswith((".yaml", ".yml", ".json"))
                 for f in filenames
+                if f not in owned_filenames
             )
             if has_candidate_content and skill_file is None and len(manifest_matches) != 1:
                 unclaimed_dirs.append(_rel(dir_path, root))
