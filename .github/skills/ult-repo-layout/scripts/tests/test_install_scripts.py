@@ -55,6 +55,16 @@ LIBRARY_DIRS = [
     ".cursor/rules",
 ]
 
+# The manifest's `runtime` array is derived from the include_* flags that
+# actually gate each tree's copy/merge, not from the --runtime/-Runtime
+# string, so every value expands to the full set of tools the run installed
+# for. "claude" is in all of them: .github/skills/ is copied unconditionally.
+RUNTIME_CLAUDE = ["claude"]
+RUNTIME_COPILOT = ["claude", "copilot"]
+RUNTIME_CURSOR = ["claude", "copilot", "cursor"]
+RUNTIME_CODEX = ["claude", "codex"]
+RUNTIME_BOTH = ["claude", "copilot", "cursor", "codex"]
+
 # See Copy-CepWizardDocs (install.ps1) / copy_cep_wizard_docs (install.sh):
 # both installers bundle CEP's own repo-root docs into this path, sibling to
 # the ult-cep-wizard skill itself, so wizard_docs.py has something to serve
@@ -147,14 +157,17 @@ def _assert_cep_wizard_docs_bundle(test, target: Path):
 def _assert_cep_install_manifest(test, target: Path, mode: str, only_skills=None, runtime=None):
     """Asserts .cep-install.json's shape (see New-CepInstallManifest in
     install.ps1 / write_cep_install_manifest in install.sh). `runtime`
-    defaults to the "both" value's expansion (["claude", "copilot"]) — pass
-    the expected list explicitly for a --runtime/-Runtime claude-only or
-    copilot-only run."""
+    defaults to the "both" value's expansion (every tool name) — pass the
+    expected list explicitly for any narrower --runtime/-Runtime run.
+
+    merged_paths is derived from `runtime` rather than passed separately:
+    AGENTS.md is merged by exactly the runtimes that include "codex", so
+    the expectation is already fully determined by the runtime list."""
     manifest_path = target / ".cep-install.json"
     test.assertTrue(manifest_path.is_file(), f"missing manifest: {manifest_path}")
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     test.assertEqual(data.get("schema_version"), 1)
-    expected_runtime = ["claude", "copilot"] if runtime is None else runtime
+    expected_runtime = RUNTIME_BOTH if runtime is None else runtime
     test.assertEqual(sorted(data.get("runtime") or []), sorted(expected_runtime))
     test.assertEqual(data.get("mode"), mode)
     if only_skills:
@@ -164,6 +177,17 @@ def _assert_cep_install_manifest(test, target: Path, mode: str, only_skills=None
     owned = data.get("owned_paths")
     test.assertIsInstance(owned, list)
     test.assertTrue(owned, "owned_paths must not be empty")
+    # AGENTS.md is the installer's one merge target - a marked block written
+    # into a file whose remaining content belongs to the adopter - so it is
+    # recorded in merged_paths, never owned_paths. The key is always
+    # present, empty on runtimes that never merge.
+    merged = data.get("merged_paths")
+    test.assertIsInstance(merged, list)
+    test.assertNotIn("AGENTS.md", owned)
+    if "codex" in expected_runtime:
+        test.assertIn("AGENTS.md", merged)
+    else:
+        test.assertEqual(merged, [])
     test.assertIn("installed_at", data)
     return data
 
@@ -431,7 +455,7 @@ class _InstallScriptTestBase:
             # The bundled ult-cep-wizard docs live under .github/skills/, so
             # they're still copied even though prompts/rules are skipped.
             _assert_cep_wizard_docs_bundle(self, target)
-            _assert_cep_install_manifest(self, target, mode="full", runtime=["claude"])
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_CLAUDE)
 
     def test_runtime_copilot_installs_prompts_but_not_cursor_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -443,7 +467,7 @@ class _InstallScriptTestBase:
                 _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
             self.assertFalse((target / ".cursor/rules").exists())
             self.assertFalse((target / "AGENTS.md").exists())
-            _assert_cep_install_manifest(self, target, mode="full", runtime=["copilot"])
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_COPILOT)
 
     def test_runtime_cursor_installs_skills_prompts_and_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -454,7 +478,7 @@ class _InstallScriptTestBase:
                 ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
                 _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
             self.assertFalse((target / "AGENTS.md").exists())
-            _assert_cep_install_manifest(self, target, mode="full", runtime=["cursor"])
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_CURSOR)
 
     def test_runtime_codex_installs_skills_and_agents_md_only(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -468,7 +492,7 @@ class _InstallScriptTestBase:
             self.assertIn(BEGIN_MARKER, agents)
             self.assertIn(END_MARKER, agents)
             _assert_cep_wizard_docs_bundle(self, target)
-            _assert_cep_install_manifest(self, target, mode="full", runtime=["codex"])
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_CODEX)
 
     def test_runtime_both_matches_default_behavior(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -480,7 +504,7 @@ class _InstallScriptTestBase:
                 _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
             agents = (target / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn(BEGIN_MARKER, agents)
-            _assert_cep_install_manifest(self, target, mode="full", runtime=["claude", "copilot"])
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_BOTH)
 
     def test_runtime_claude_with_only_flag_skips_prompts_and_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -498,7 +522,7 @@ class _InstallScriptTestBase:
                 target,
                 mode="only",
                 only_skills=["demo-consume-context"],
-                runtime=["claude"],
+                runtime=RUNTIME_CLAUDE,
             )
 
     def test_runtime_copilot_dry_run_excludes_cursor_and_agents_md(self):
@@ -521,9 +545,17 @@ class _InstallScriptTestBase:
         """Runs a dry-run and a real install with the same `args` in two
         separate temp dirs, then asserts every path the dry-run transcript
         reports writing is covered (see _owned_path_covers) by the real
-        install's .cep-install.json owned_paths. Catches the exact defect
-        class this manifest exists to prevent: a write site the installer
-        performs but forgets to record as CEP-owned."""
+        install's .cep-install.json. Catches the exact defect class this
+        manifest exists to prevent: a write site the installer performs but
+        forgets to record at all.
+
+        Checked against owned_paths + merged_paths together, not owned_paths
+        alone: what this completeness check is really asserting is "every
+        write the installer performs leaves some record in the manifest",
+        and a "would append/update block" write to AGENTS.md is legitimately
+        recorded in merged_paths (partial ownership) rather than
+        owned_paths. Which of the two lists a path belongs in is asserted by
+        _assert_cep_install_manifest instead."""
         with tempfile.TemporaryDirectory() as dry_tmp, tempfile.TemporaryDirectory() as real_tmp:
             dry_target = Path(dry_tmp)
             dry_result = self._run(dry_target, [*args, self.dry_run_flag])
@@ -535,6 +567,7 @@ class _InstallScriptTestBase:
             real_result = self._run(real_target, args)
             self.assertEqual(real_result.returncode, 0, real_result.stderr)
             data = _assert_cep_install_manifest(self, real_target, mode=mode, **manifest_kwargs)
+            recorded_paths = data.get("owned_paths", []) + data.get("merged_paths", [])
             owned_paths = data["owned_paths"]
 
             for rel in created:
@@ -548,9 +581,9 @@ class _InstallScriptTestBase:
                     self.assertIn(".cep-install.json", owned_paths)
                     continue
                 self.assertTrue(
-                    _owned_path_covers(rel, owned_paths),
-                    f"dry-run reported writing {rel!r} but no owned_paths entry covers it: "
-                    f"{owned_paths!r}",
+                    _owned_path_covers(rel, recorded_paths),
+                    f"dry-run reported writing {rel!r} but no manifest entry covers it: "
+                    f"{recorded_paths!r}",
                 )
 
     def test_full_install_owned_paths_cover_everything_the_dry_run_reports(self):
