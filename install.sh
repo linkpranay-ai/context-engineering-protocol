@@ -302,16 +302,26 @@ merge_agents_md() {
 # it - already lists context-config.yaml in its owned_paths array.
 # Text-matched rather than parsed: this script builds that JSON by hand (see
 # write_cep_install_manifest below) and takes no jq/python3 dependency
-# anywhere, and owned_paths is always emitted as a single-line array literal,
-# so the whole array sits on the one line its key is on. The quotes on both
-# sides of the pattern keep it an exact element match - a hypothetical
-# "sub/dir/context-config.yaml" entry has a "/" where the pattern needs the
-# opening quote, so it cannot match. A missing manifest is simply "no prior
-# claim" (non-zero return), never an error.
+# anywhere. The match must stay agnostic about how the manifest was
+# formatted, because the prior run was not necessarily this script:
+# install.ps1 writes the same manifest with ConvertTo-Json, which
+# pretty-prints owned_paths across several lines (one element per line),
+# while this script always emits it as a single-line array literal. Matching
+# line-by-line would therefore succeed after a prior install.sh run and
+# silently fail after a prior install.ps1 one, so the newlines are stripped
+# first and the whole manifest is matched as a single line. "[^]]*" then
+# bounds the match to the owned_paths array itself: it can span any run of
+# characters except a literal "]", so it stops at that array's closing
+# bracket and can never reach an element of merged_paths or of any other key
+# emitted after it. The quotes on both sides of the pattern keep it an exact
+# element match - a hypothetical "sub/dir/context-config.yaml" entry has a
+# "/" where the pattern needs the opening quote, so it cannot match. A
+# missing manifest is simply "no prior claim" (non-zero return), never an
+# error.
 prior_manifest_owns_context_config() {
   local manifest="$TARGET/.cep-install.json"
   [ -f "$manifest" ] || return 1
-  grep -q '"owned_paths":.*"context-config\.yaml"' "$manifest"
+  tr -d '\n' < "$manifest" | grep -q '"owned_paths"[^]]*"context-config\.yaml"'
 }
 
 # scaffold_context_config: creates context-config.yaml from the template

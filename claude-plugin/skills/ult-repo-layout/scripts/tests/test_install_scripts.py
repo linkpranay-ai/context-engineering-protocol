@@ -707,6 +707,25 @@ def _to_git_bash_path(win_path) -> str:
     return p.replace("\\", "/")
 
 
+def _run_install_sh(target, args):
+    """Module-level so the cross-installer tests below can invoke install.sh
+    without going through a TestInstallSh instance - one definition of how
+    each installer is called, shared by its own test class and by the
+    mixed-installer ones."""
+    return subprocess.run(
+        [
+            "bash",
+            _to_git_bash_path(INSTALL_SH),
+            "--target",
+            _to_git_bash_path(target),
+            *args,
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
+
+
 @unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
 class TestInstallSh(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "--init-project"
@@ -715,22 +734,22 @@ class TestInstallSh(_InstallScriptTestBase, unittest.TestCase):
     runtime_flag = "--runtime"
 
     def _run(self, target, args):
-        return subprocess.run(
-            [
-                "bash",
-                _to_git_bash_path(INSTALL_SH),
-                "--target",
-                _to_git_bash_path(target),
-                *args,
-            ],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-        )
+        return _run_install_sh(target, args)
 
 
 def _powershell_executable():
     return shutil.which("pwsh") or shutil.which("powershell")
+
+
+def _run_install_ps1(target, args):
+    """See _run_install_sh - same rationale, PowerShell side."""
+    exe = _powershell_executable()
+    return subprocess.run(
+        [exe, "-NoProfile", "-File", str(INSTALL_PS1), "-TargetPath", str(target), *args],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
 
 
 @unittest.skipUnless(_powershell_executable(), "neither pwsh nor powershell on PATH")
@@ -741,13 +760,101 @@ class TestInstallPs1(_InstallScriptTestBase, unittest.TestCase):
     runtime_flag = "-Runtime"
 
     def _run(self, target, args):
-        exe = _powershell_executable()
-        return subprocess.run(
-            [exe, "-NoProfile", "-File", str(INSTALL_PS1), "-TargetPath", str(target), *args],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
+        return _run_install_ps1(target, args)
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
+@unittest.skipUnless(_powershell_executable(), "neither pwsh nor powershell on PATH")
+class TestCrossInstallerOwnershipCarryForward(unittest.TestCase):
+    """context-config.yaml ownership must survive a re-install by the *other*
+    installer, not just by the same one.
+
+    The two installers are interchangeable on a given target - nothing stops
+    an adopter running install.ps1 on Windows and install.sh from Git Bash or
+    WSL against the same checkout - and each rebuilds .cep-install.json
+    wholesale, reading the prior run's manifest to decide whether a
+    already-present context-config.yaml is one CEP itself created. That read
+    crosses installers, so the two of them have to agree on the manifest
+    format in both directions: install.sh emits single-line JSON arrays by
+    hand, while install.ps1's ConvertTo-Json pretty-prints them across
+    several lines. The same-installer tests in _InstallScriptTestBase cannot
+    see this - each of those classes only ever runs one installer against
+    itself, so each only ever reads back a manifest in the format it just
+    wrote. Both orderings are covered here rather than only the one that
+    happened to break, so neither reader can regress unnoticed."""
+
+    def _owned_paths(self, target):
+        data = json.loads((target / ".cep-install.json").read_text(encoding="utf-8"))
+        owned = data.get("owned_paths")
+        self.assertIsInstance(owned, list)
+        return owned
+
+    def _assert_claim_survives(self, first, second, first_args, second_args):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+
+            result = first(target, first_args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "context-config.yaml",
+                self._owned_paths(target),
+                "the creating installer did not claim the file it scaffolded",
+            )
+            generated = (target / "context-config.yaml").read_text(encoding="utf-8")
+
+            result = second(target, second_args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "context-config.yaml",
+                self._owned_paths(target),
+                "the other installer dropped a still-valid ownership claim - "
+                "most likely it cannot read the manifest format its "
+                "counterpart writes",
+            )
+            # Nothing edited the file between the two runs, so the claim
+            # lapsed purely on bookkeeping if it lapsed at all.
+            self.assertEqual(
+                (target / "context-config.yaml").read_text(encoding="utf-8"),
+                generated,
+            )
+
+    def test_ps1_created_ownership_survives_reinstall_by_sh(self):
+        self._assert_claim_survives(
+            _run_install_ps1,
+            _run_install_sh,
+            ["-InitProject"],
+            ["--init-project"],
         )
+
+    def test_sh_created_ownership_survives_reinstall_by_ps1(self):
+        self._assert_claim_survives(
+            _run_install_sh,
+            _run_install_ps1,
+            ["--init-project"],
+            ["-InitProject"],
+        )
+
+    def test_adopter_context_config_is_never_claimed_across_installers(self):
+        # The mirror of the two above: carrying a claim across installers must
+        # not slide into inventing one. An adopter's own file, present before
+        # either installer ran, stays unclaimed no matter which installer
+        # follows which.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            adopter_text = "# adopter-authored\n"
+            (target / "context-config.yaml").write_text(adopter_text, encoding="utf-8")
+
+            for runner, args in (
+                (_run_install_ps1, ["-InitProject"]),
+                (_run_install_sh, ["--init-project"]),
+            ):
+                result = runner(target, args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("context-config.yaml", self._owned_paths(target))
+            self.assertEqual(
+                (target / "context-config.yaml").read_text(encoding="utf-8"),
+                adopter_text,
+            )
 
 
 if __name__ == "__main__":
