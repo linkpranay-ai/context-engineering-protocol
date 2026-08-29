@@ -83,16 +83,19 @@ CEP_BUCKET_DIR_NAMES = {"contexts", "inputs", "cache"}
 # validate_layout.py's own `_owning_skill_installed` convention of treating
 # `.github/skills/` as CEP's install marker.
 #
-# This is now only the *fallback* used when the target repo has no
-# `.cep-install.json` manifest (see _read_cep_manifest below) - an
-# unmanifested repo (CEP installed by an older installer, or copied in by
-# hand) still gets exactly this hardcoded pair excluded from the `.github/`
-# candidate scan, same as before. When a manifest is present,
-# _manifest_extra_ignored replaces this hardcoded pair with whatever the
-# manifest's own `owned_paths` actually says CEP put under the candidate -
-# correct for any HOW_L2_CANDIDATE_DIRS entry, not just `.github/`, and
-# correct even if a future install adds paths this constant doesn't know
-# about. Used only as `extra_ignored` for the relevant candidate's own scan
+# This pair is always applied to the `.github/` candidate scan, whether or
+# not the target repo has a `.cep-install.json` manifest (see
+# _read_cep_manifest below) - an unmanifested repo (CEP installed by an
+# older installer, or copied in by hand) gets exactly this hardcoded pair
+# excluded and nothing more, same as before. When a manifest is present,
+# _manifest_extra_ignored contributes whatever the manifest's own
+# `owned_paths` actually says CEP put under the candidate, and
+# discover_how_l2 unions that with this hardcoded pair rather than replacing
+# it - so a narrower or older manifest never excludes less than an
+# unmanifested repo would, and the manifest-derived half stays correct for
+# any HOW_L2_CANDIDATE_DIRS entry, not just `.github/`, and correct even if
+# a future install adds paths this constant doesn't know about.
+# Used only as `extra_ignored` for the relevant candidate's own scan
 # in discover_how_l2 below - it never touches any other directory's scan,
 # including a legitimately-named `skills/` or `prompts/` directory
 # elsewhere in the repo.
