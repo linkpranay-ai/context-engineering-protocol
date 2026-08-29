@@ -312,12 +312,14 @@ merge_agents_md() {
 # first and the whole manifest is matched as a single line. "[^]]*" then
 # bounds the match to the owned_paths array itself: it can span any run of
 # characters except a literal "]", so it stops at that array's closing
-# bracket and can never reach an element of merged_paths or of any other key
-# emitted after it. The quotes on both sides of the pattern keep it an exact
-# element match - a hypothetical "sub/dir/context-config.yaml" entry has a
-# "/" where the pattern needs the opening quote, so it cannot match. A
-# missing manifest is simply "no prior claim" (non-zero return), never an
-# error.
+# bracket and cannot reach an element of merged_paths or of any other key
+# emitted after it - for any manifest either installer writes, since both
+# always emit owned_paths as a bracketed array, never as a bare scalar with
+# no "]" for the bound to stop at. The quotes on both sides of the pattern
+# keep it an exact element match - a hypothetical
+# "sub/dir/context-config.yaml" entry has a "/" where the pattern needs the
+# opening quote, so it cannot match. A missing manifest is simply "no prior
+# claim" (non-zero return), never an error.
 prior_manifest_owns_context_config() {
   local manifest="$TARGET/.cep-install.json"
   [ -f "$manifest" ] || return 1

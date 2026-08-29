@@ -475,8 +475,11 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   prior claim, never invented from the file merely being present, so an adopter's own
   pre-existing `context-config.yaml` — which run 1 itself skipped and never claimed — stays
   unclaimed on every later run exactly as before. `install.sh` matches the prior manifest
-  as text, consistent with the by-hand single-line JSON it already writes and with its
-  standing no-`jq`/no-`python3` constraint; `install.ps1` parses it with `ConvertFrom-Json`
+  as text, keeping its standing no-`jq`/no-`python3` constraint, but the match is agnostic
+  about which installer wrote that manifest: it strips newlines before matching, because
+  the prior run may have been `install.ps1`, whose `ConvertTo-Json` output pretty-prints
+  `owned_paths` across several lines rather than as the single-line array `install.sh`
+  itself writes by hand; `install.ps1` parses it with `ConvertFrom-Json`
   and treats a missing file, empty content, malformed JSON, or a non-array `owned_paths`
   alike as "no prior claim", rather than letting a corrupt leftover manifest abort the
   install. Deliberately narrow — only this one file, in this one function: the
@@ -486,7 +489,11 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   claim with the file byte-identical across runs, three consecutive inits keep it (so the
   carry-forward is exercised reading a manifest itself written by a carry-forward), an
   adopter's pre-existing file stays unclaimed across runs, and a corrupt leftover manifest
-  still lets the next install complete and rewrite a valid one.
+  still lets the next install complete and rewrite a valid one. A fifth, cross-installer
+  case covers the re-install being done by the *other* script, in both directions —
+  `install.ps1` then `install.sh` and `install.sh` then `install.ps1` — keeping the claim
+  across the handover, and keeping an adopter's pre-existing file unclaimed across that
+  same crossing.
 
 ## [0.5.0]
 
