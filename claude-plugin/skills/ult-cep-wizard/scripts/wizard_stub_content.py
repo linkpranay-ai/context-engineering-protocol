@@ -38,10 +38,19 @@ in sync with that skill's own `SKILL.md` by hand. Guidelines points at
 user asks an agent to freehand). What/How point at `ult-autoscaffold-content`, once
 it existed to point at - `_what_how_prompt()` used to author the What/How prompt
 text inline; that's superseded outright as of Phase D, no fallback kept, per the
-same two-sources-of-truth reasoning that already governed Guidelines. Trip-wire has
-no card at all - it's a derived/regenerable log populated by `decision_ledger.py` as
-things happen, not authored content (same reasoning `wizard_tripwire.py`'s own
-docstring gives for treating it as read-only-derived).
+same two-sources-of-truth reasoning that already governed Guidelines. Trip-wire's
+card (added later than the other three - see `tripwire_card()` below) is
+different in kind from all of them: `decision_ledger.py` populates the ledger as a
+derived/regenerable log of real events, so this module has no business generating
+ledger *content* the way it points What/How/Guidelines at generating file content.
+What it can still do is point the user at *starting* that human-in-the-loop process
+- `ult-institutional-memory-distill` needs a human to choose and confirm real
+source streams before it writes anything, and per that skill's own contract no
+entry may ever be synthesized without evidence. `tripwire_card()` takes plain
+scalars rather than importing `wizard_tripwire.TripwireSummary`, keeping this
+module decoupled from that one's read path (same reasoning wizard_containment.py/
+wizard_tripwire.py's own docstrings give for duplicating standalone helpers rather
+than sharing a type across module boundaries).
 """
 
 from __future__ import annotations
@@ -96,13 +105,32 @@ def _what_how_prompt(box_title: str, expected_path: str) -> str:
     )
 
 
-def what_how_card(box_title: str, repo_root, resolved_paths: List[str]) -> Optional[StubCard]:
+def what_how_card(
+    box_title: str,
+    repo_root,
+    resolved_paths: List[str],
+    *,
+    layer_decisions_pending: bool = False,
+) -> Optional[StubCard]:
     """Returns a card iff every one of the box's resolved paths is currently empty
     (per `_has_content`) - a box with *any* real content is not the empty case
     §18.10 scopes this to, even if other resolved paths under it are still bare.
     Returns None for a box with no resolved paths at all (shouldn't happen for
     What-L2/How-L2, which always resolve to something - see module docstring - but
-    handled defensively rather than assumed)."""
+    handled defensively rather than assumed).
+
+    `layer_decisions_pending` (default False, so every pre-existing caller and
+    test that never dealt with D23 decisions keeps working unchanged): the
+    caller passes True whenever any of this box's own What/How decision
+    fields (L2 and/or its opt-in L1) is not yet `confirmed` - still `pending`
+    or `staged` - in context-layout-discovery.md. Suppress the card in that
+    case rather than build one: the box's *resolved* path right now is
+    whatever was last confirmed (or the pre-Discover baseline default), and a
+    still-pending decision means Apply may be about to change that path out
+    from under the very instruction this card just handed the user - sending
+    them to scaffold content at a path Discover already proposed replacing."""
+    if layer_decisions_pending:
+        return None
     if not resolved_paths:
         return None
     repo_root = Path(repo_root).resolve()
@@ -121,11 +149,29 @@ def what_how_card(box_title: str, repo_root, resolved_paths: List[str]) -> Optio
     )
 
 
-def guidelines_card(repo_root, initialized: bool, default_path: str) -> Optional[StubCard]:
+def guidelines_card(
+    repo_root,
+    initialized: bool,
+    default_path: str,
+    *,
+    layer_decisions_pending: bool = False,
+) -> Optional[StubCard]:
     """Guidelines' card is different in kind from What/How's (see module docstring):
     it points at running the `compiling-project-guidelines` skill, not a freeform
     prompt this module authors itself - that skill owns its own generation logic,
-    this module has no business paraphrasing it into a prompt block."""
+    this module has no business paraphrasing it into a prompt block.
+
+    `layer_decisions_pending` (default False, same "every pre-existing caller
+    keeps working unchanged" posture what_how_card's own parameter has):
+    the caller passes True whenever either the What or How layer's own
+    decision fields are not yet confirmed. Guidelines compilation reads
+    from whatever What/How currently resolve to, so pointing a user at it
+    while either is still mid-decision risks the same
+    prompt-content-becomes-stale-the-moment-Apply-runs problem
+    what_how_card's own docstring describes - suppress the card here for
+    the same reason, not a different one."""
+    if layer_decisions_pending:
+        return None
     if initialized:
         return None
     return StubCard(
@@ -137,4 +183,77 @@ def guidelines_card(repo_root, initialized: bool, default_path: str) -> Optional
             f"separate prompt to write."
         ),
         expect_description=f"A new, non-empty file at `{default_path}`.",
+    )
+
+
+def tripwire_card(
+    repo_root,
+    *,
+    available: bool,
+    initialized: bool,
+    entries: int,
+    ledger_path: Optional[str],
+    layer_decisions_pending: bool = False,
+) -> Optional[StubCard]:
+    """Trip-wire's card is different in kind from the other three (see module
+    docstring): decision-ledger population isn't something a skill can safely
+    finish unattended. Unlike What/How/Guidelines' "run it, no separate prompt to
+    write" framing, `ult-institutional-memory-distill` needs a human to choose and
+    confirm which project-specific source streams (PR history, design docs,
+    postmortems, ...) are actually trustworthy for this repo before it writes
+    anything, and must never synthesize an entry without real evidence behind it.
+    The card below is procedural guidance for starting that human-in-the-loop
+    process, not an "it writes the file itself, unattended" promise - still the
+    same `mode="agent-writes-in-place"` as the other three (the coding agent runs
+    the skill and relays the human's choices; nothing here needs a new mode value),
+    deliberately different prompt content.
+
+    `repo_root` is accepted but unused, matching `guidelines_card()`'s own
+    signature (kept for a consistent call shape across all four card builders at
+    the wizard_server.py call site) - see that function for the same choice.
+
+    Returns None when Trip-wire is unavailable (its owning skill isn't installed -
+    the frontend's own `describeTripwire`/"not available" messaging already covers
+    that case; a stub card here would just repeat it, and naming a skill the user
+    can't act on through this card anyway) or already has real entries. Fires for
+    both the "never initialized" and the "initialized but still empty" ledger case:
+    an initialized-but-0-entries ledger is exactly as much of an onboarding dead
+    end as a missing one, so `entries == 0` gates this independently of
+    `initialized`.
+
+    `layer_decisions_pending` (default False, same posture as
+    `guidelines_card`'s own parameter): decision-ledger entries are meant to
+    capture real institutional-memory context about this repo's actual
+    layout, and a still-pending What/How decision means that layout is
+    itself about to change - suppress the card until it settles, same
+    reasoning as `guidelines_card` and `what_how_card`.
+    """
+    if layer_decisions_pending:
+        return None
+    if not available:
+        return None
+    if initialized and entries > 0:
+        return None
+    if not ledger_path:
+        # Shouldn't happen - wizard_tripwire.read_summary() always sets ledger_path
+        # when available=True - but handled defensively rather than assumed, same
+        # posture what_how_card takes for an empty resolved_paths list above.
+        return None
+    return StubCard(
+        box_title="Trip-wire",
+        expected_path=ledger_path,
+        prompt_text=(
+            "Run the `ult-institutional-memory-distill` skill against this repo. "
+            "Unlike the other boxes, this is not a \"run it and it writes the "
+            "file for you\" step: you must choose and confirm which "
+            "project-specific source streams (PR history, design docs, "
+            "postmortems, ...) the skill should read before it writes anything "
+            f"to `{ledger_path}`. No decision-ledger entry should ever be "
+            "synthesized without real evidence behind it."
+        ),
+        expect_description=(
+            f"A decision ledger at `{ledger_path}` with real entries, populated "
+            "only from source streams you reviewed and confirmed - not "
+            "auto-generated."
+        ),
     )

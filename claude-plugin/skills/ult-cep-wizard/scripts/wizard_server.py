@@ -61,7 +61,7 @@ UI design pass adds two more read-only, session-gated routes for the top-bar
 docs viewer: `GET /api/docs` (the closed set of CEP's own docs available to
 render, `wizard_docs.list_docs`) and `GET /api/docs/<id>` (one doc rendered to
 HTML on request, `wizard_docs.find_doc` + `wizard_markdown.render`) - both
-resolve against `wizard_docs.install_root()`, not `ctx.repo_root`, since these
+resolve against `wizard_docs.docs_root()`, not `ctx.repo_root`, since these
 docs describe the CEP protocol itself, not whatever repo is being onboarded.
 `_handle_api_status` also now wires in
 `wizard_stub_content`'s previously-orphaned preview cards alongside the existing box
@@ -383,18 +383,61 @@ def _make_handler(ctx: _ServerContext):
             # wizard_stub_content preview cards in alongside the existing box view
             # model, rather than a new route - its inputs are exactly what
             # build_boxes already computed above.
+            #
+            # A card must not point a user at scaffolding content while its own
+            # What/How decision is still awaiting Apply - see
+            # wizard_stub_content.what_how_card's layer_decisions_pending
+            # docstring. Reading decisions here (rather than only from
+            # /api/decisions) costs one extra read_decisions() call on this
+            # route, same source object, no extra containment/validate work.
+            # read_decisions() itself already returns [] when no discovery
+            # artifact exists yet, so no explicit no-artifact branch is needed
+            # here (matches _handle_api_decisions's own un-wrapped call below).
+            #
+            # `f.layer` (from layout_decision_grammar.resolve_section_layer(),
+            # via wizard_layout_source.read_decisions()) replaces a prior
+            # `f.section_title.startswith("What"/"How")` check that missed two
+            # real cases: a re-issued "Re-discovery - <title> - <date>"
+            # section (starts with "Re-discovery", not "What"/"How"), and
+            # COLLISION_TITLE ("Cross-layer path collisions (S30)", which
+            # starts with neither and can affect either layer).
+            what_pending = how_pending = False
+            for f in source.read_decisions():
+                if f.state == "confirmed":
+                    continue
+                if "what" in f.layer:
+                    what_pending = True
+                if "how" in f.layer:
+                    how_pending = True
             what_card = wizard_stub_content.what_how_card(
-                "What", ctx.repo_root, [p.path for p in view.what.paths]
+                "What",
+                ctx.repo_root,
+                [p.path for p in view.what.paths],
+                layer_decisions_pending=what_pending,
             )
             how_card = wizard_stub_content.what_how_card(
-                "How", ctx.repo_root, [p.path for p in view.how.paths]
+                "How",
+                ctx.repo_root,
+                [p.path for p in view.how.paths],
+                layer_decisions_pending=how_pending,
             )
             guidelines_card = wizard_stub_content.guidelines_card(
-                ctx.repo_root, view.guidelines.initialized, view.guidelines.default_path
+                ctx.repo_root,
+                view.guidelines.initialized,
+                view.guidelines.default_path,
+                layer_decisions_pending=what_pending or how_pending,
+            )
+            tripwire_card = wizard_stub_content.tripwire_card(
+                ctx.repo_root,
+                available=view.tripwire.available,
+                initialized=view.tripwire.initialized,
+                entries=view.tripwire.entries,
+                ledger_path=view.tripwire.ledger_path,
+                layer_decisions_pending=what_pending or how_pending,
             )
             payload["stub_cards"] = [
                 asdict(card)
-                for card in (what_card, how_card, guidelines_card)
+                for card in (what_card, how_card, guidelines_card, tripwire_card)
                 if card is not None
             ]
             self._send_json(HTTPStatus.OK, payload)
@@ -758,7 +801,7 @@ def _make_handler(ctx: _ServerContext):
         def _handle_api_docs(self) -> None:
             """UI design pass: the closed set of CEP's own docs available to the
             in-app viewer (PROTOCOL.md, README.md, every case study). Resolved
-            against wizard_docs.install_root() - this skill's own install
+            against wizard_docs.docs_root() - this skill's own docs
             location - never ctx.repo_root, since these describe the CEP
             protocol itself, not whatever repo the wizard happens to be
             onboarding right now (see wizard_docs.py's module docstring)."""
@@ -788,12 +831,15 @@ def _make_handler(ctx: _ServerContext):
                     HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}
                 )
                 return
-            # entry.path lives under install_root() (see wizard_docs.py); its
+            # entry.path lives under docs_root() (see wizard_docs.py); its
             # own directory, relative to that root, is where any relative
             # image src in the doc's own Markdown/HTML is meant to resolve
             # against - "." (the root itself, for PROTOCOL.md/README.md)
-            # collapses to the bare prefix rather than a literal "./".
-            doc_dir_rel = entry.path.parent.relative_to(wizard_docs.install_root()).as_posix()
+            # collapses to the bare prefix rather than a literal "./". Not
+            # None here: entry came from find_doc(), which only ever returns
+            # a hit by scanning list_docs(), which itself already required a
+            # verified docs_root() to produce anything at all.
+            doc_dir_rel = entry.path.parent.relative_to(wizard_docs.docs_root()).as_posix()
             asset_prefix = (
                 "/api/docs-assets/"
                 if doc_dir_rel == "."
@@ -810,7 +856,7 @@ def _make_handler(ctx: _ServerContext):
             # this corpus) falls through to wizard_markdown's GitHub-link
             # fallback instead - never a filesystem lookup on client input.
             link_resolver_map = {
-                d.path.relative_to(wizard_docs.install_root()).as_posix(): d.doc_id
+                d.path.relative_to(wizard_docs.docs_root()).as_posix(): d.doc_id
                 for d in wizard_docs.list_docs()
             }
             self._send_json(
@@ -834,14 +880,20 @@ def _make_handler(ctx: _ServerContext):
             for it. wizard_containment.check_containment is therefore the real
             boundary here (same posture as wizard_picker.py's rel_path), not a
             closed-set dict lookup - see that module's docstring for why the
-            two doc-serving routes need different trust models."""
+            two doc-serving routes need different trust models. Gated on
+            wizard_docs.docs_root() being non-None first - the same trust
+            `_handle_api_docs`/`list_docs()` require - so this route can never
+            serve a file out of an unverified root that `/api/docs` itself
+            would have refused to enumerate."""
             if self._require_session() is None:
+                return
+            docs_root = wizard_docs.docs_root()
+            if docs_root is None:
+                self._reject(HTTPStatus.NOT_FOUND, "Not found.")
                 return
             decoded = unquote(rel_path)
             try:
-                target = wizard_containment.check_containment(
-                    wizard_docs.install_root(), decoded
-                )
+                target = wizard_containment.check_containment(docs_root, decoded)
             except wizard_containment.ContainmentError:
                 self._reject(HTTPStatus.NOT_FOUND, "Not found.")
                 return

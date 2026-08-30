@@ -9,7 +9,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,skill2>]
+Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,skill2>] [--runtime claude|copilot|cursor|codex|both]
 
   --target <dir>    Required. Path to an existing target project directory.
   --init-project    Also scaffold context-config.yaml (if absent) and
@@ -21,6 +21,20 @@ Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,sk
                      .github/prompts/<name>.prompt.md, and
                      .cursor/rules/<name>.mdc, and trims AGENTS.md's merged
                      block down to only those skills' rows.
+  --runtime <v>     Which tool the install targets. .github/skills/ is
+                     always copied (every value reads it natively via
+                     the CEP skill format). What else comes along:
+                       claude   - skills only.
+                       copilot  - skills + .github/prompts/ (each prompt
+                                  file is a thin pointer back into
+                                  .github/skills/).
+                       cursor   - skills + .github/prompts/ + .cursor/rules/.
+                       codex    - skills + AGENTS.md merge (codex reads
+                                  project instructions from AGENTS.md,
+                                  not a prompts/rules tree).
+                       both     - everything above, unconditionally
+                                  (default; unchanged behavior when this
+                                  flag is omitted).
   --dry-run         Print what would be done without writing anything.
   -h, --help        Show this help.
 EOF
@@ -30,6 +44,7 @@ TARGET=""
 INIT_PROJECT=0
 DRY_RUN=0
 ONLY=""
+RUNTIME="both"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,6 +58,10 @@ while [ $# -gt 0 ]; do
       ;;
     --only)
       ONLY="${2:-}"
+      shift 2
+      ;;
+    --runtime)
+      RUNTIME="${2:-}"
       shift 2
       ;;
     --dry-run)
@@ -66,6 +85,14 @@ if [ -z "$TARGET" ]; then
   usage >&2
   exit 1
 fi
+
+case "$RUNTIME" in
+  claude|copilot|cursor|codex|both) ;;
+  *)
+    echo "Error: --runtime must be one of: claude, copilot, cursor, codex, both (got: $RUNTIME)" >&2
+    exit 1
+    ;;
+esac
 
 if [ ! -d "$TARGET" ]; then
   echo "Error: target directory does not exist: $TARGET" >&2
@@ -146,9 +173,12 @@ copy_tree() {
 
   # Strip gitignored local build artifacts (__pycache__, .pytest_cache) that
   # may exist in the source clone's working tree if tests were ever run
-  # there — these must never leak into an installed target project.
+  # there — these must never leak into an installed target project. Also
+  # strip tests/ itself: no consumer runs CEP's own unit tests once
+  # installed (measured on a full install: 7 tests/ dirs, 51 files, 755K —
+  # shipping into every target for no reason any installed skill needs).
   if [ -d "$dst" ]; then
-    find "$dst" -depth -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -exec rm -rf {} +
+    find "$dst" -depth -type d \( -name '__pycache__' -o -name '.pytest_cache' -o -name 'tests' \) -exec rm -rf {} +
   fi
 
   if [ "$existed" -eq 1 ]; then
@@ -255,8 +285,45 @@ merge_agents_md() {
     cp "$block_file" "$dst"
     log_action "created: AGENTS.md"
   fi
+  # AGENTS.md is a merge target, not a file this installer owns outright: it
+  # only ever writes its own marked block into it, and everything outside
+  # that block is adopter-authored content this run must not claim. So it is
+  # recorded in MERGED_PATHS rather than OWNED_PATHS - a consumer that
+  # excludes owned_paths wholesale would otherwise silently drop the
+  # adopter's own content living in the rest of the file.
+  MERGED_PATHS+=("AGENTS.md")
 
   rm -f "$block_file"
+}
+
+# prior_manifest_owns_context_config: true iff the *prior* run's
+# .cep-install.json - still on disk unmodified at this point, since
+# scaffold_context_config runs before write_cep_install_manifest overwrites
+# it - already lists context-config.yaml in its owned_paths array.
+# Text-matched rather than parsed: this script builds that JSON by hand (see
+# write_cep_install_manifest below) and takes no jq/python3 dependency
+# anywhere. The match must stay agnostic about how the manifest was
+# formatted, because the prior run was not necessarily this script:
+# install.ps1 writes the same manifest with ConvertTo-Json, which
+# pretty-prints owned_paths across several lines (one element per line),
+# while this script always emits it as a single-line array literal. Matching
+# line-by-line would therefore succeed after a prior install.sh run and
+# silently fail after a prior install.ps1 one, so the newlines are stripped
+# first and the whole manifest is matched as a single line. "[^]]*" then
+# bounds the match to the owned_paths array itself: it can span any run of
+# characters except a literal "]", so it stops at that array's closing
+# bracket and cannot reach an element of merged_paths or of any other key
+# emitted after it - for any manifest either installer writes, since both
+# always emit owned_paths as a bracketed array, never as a bare scalar with
+# no "]" for the bound to stop at. The quotes on both sides of the pattern
+# keep it an exact element match - a hypothetical
+# "sub/dir/context-config.yaml" entry has a "/" where the pattern needs the
+# opening quote, so it cannot match. A missing manifest is simply "no prior
+# claim" (non-zero return), never an error.
+prior_manifest_owns_context_config() {
+  local manifest="$TARGET/.cep-install.json"
+  [ -f "$manifest" ] || return 1
+  tr -d '\n' < "$manifest" | grep -q '"owned_paths"[^]]*"context-config\.yaml"'
 }
 
 # scaffold_context_config: creates context-config.yaml from the template
@@ -272,6 +339,19 @@ scaffold_context_config() {
 
   if [ -f "$dst" ]; then
     log_action "skipped (exists): context-config.yaml"
+    # Carry a genuine prior ownership claim forward. A re-install must not
+    # let a CEP-owned file lapse into unclaimed status just because this
+    # particular run happened to skip writing it: run 1 creates the file and
+    # records it, run 2 finds it already there and lands here, and the
+    # manifest is always rebuilt wholesale (never merged with the prior
+    # one), so without this the claim would silently disappear even though
+    # CEP still owns that exact file and nobody edited it. Ownership is only
+    # ever carried forward, never invented - an existing file the prior
+    # manifest does not claim (or one with no prior manifest at all) is of
+    # adopter/unknown provenance and stays unclaimed, exactly as before.
+    if prior_manifest_owns_context_config; then
+      OWNED_PATHS+=("context-config.yaml")
+    fi
     return
   fi
 
@@ -292,6 +372,12 @@ scaffold_context_config() {
     -e 's#<process standards root, e.g. org/process-standards/>#org/process-standards/#g' \
     "$src" > "$dst"
   log_action "created: context-config.yaml"
+  # The run that actually created the file claims it outright. The only
+  # other way this path enters OWNED_PATHS is the "skipped (exists)" branch
+  # above carrying a prior run's claim forward; an existing
+  # context-config.yaml with no such claim is adopter-authored and is never
+  # claimed by any later run.
+  OWNED_PATHS+=("context-config.yaml")
 }
 
 # scaffold_pointer: (re)writes starter_kit/project_guidelines/.pointer.md.
@@ -333,24 +419,197 @@ POINTER_EOF
   else
     log_action "created: starter_kit/project_guidelines/.pointer.md"
   fi
+  # The pointer file, not the directory around it: project_guidelines is an
+  # additive drop-zone whose other files are adopter-owned, and this
+  # function only ever writes .pointer.md.
+  OWNED_PATHS+=("starter_kit/project_guidelines/.pointer.md")
 }
+
+# CEP_WIZARD_SKILL_NAME: the one skill whose install also bundles CEP's own
+# project docs alongside it (see copy_cep_wizard_docs below) - named once
+# here rather than repeated as a literal at each call site.
+CEP_WIZARD_SKILL_NAME="ult-cep-wizard"
+
+# copy_cep_wizard_docs: bundles CEP's own project docs (CONCEPT.md,
+# PROTOCOL.md, README.md, FAQ.md) into the installed ult-cep-wizard skill's
+# own docs/ subdirectory, so its in-app docs viewer (wizard_docs.py) has
+# real CEP content to serve in every install that includes this skill.
+# Previously this script only ever copied .github/skills/, .github/prompts/,
+# and .cursor/rules/, so wizard_docs.py's docs viewer had nothing to find in
+# any real install regardless of its own root-detection logic - see
+# wizard_docs.py's module docstring for the reader side of this fix.
+# Callers below only invoke this when the wizard skill itself is actually
+# being installed.
+#
+# Deliberately does NOT bundle case-studies/ - measured on a full install:
+# 83 files, 8.6M, the single largest thing this function ever copied,
+# almost none of it needed for the wizard's own onboarding flow (the 4 docs
+# above cover that). wizard_docs.py's list_docs() already treats a missing
+# case-studies/ as "not available" and degrades cleanly - no reader-side
+# change needed for this.
+copy_cep_wizard_docs() {
+  copy_tree "CONCEPT.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/CONCEPT.md"
+  copy_tree "PROTOCOL.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/PROTOCOL.md"
+  copy_tree "README.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/README.md"
+  copy_tree "FAQ.md" ".github/skills/$CEP_WIZARD_SKILL_NAME/docs/FAQ.md"
+}
+
+OWNED_PATHS=()
+# MERGED_PATHS: paths this run wrote *into* without owning them outright -
+# today only AGENTS.md, where merge_agents_md writes a marked block and
+# leaves the rest of the file to the adopter. Kept separate from
+# OWNED_PATHS so a consumer that excludes owned_paths wholesale still sees
+# the write recorded without treating the whole file as CEP-generated.
+MERGED_PATHS=()
+
+# write_cep_install_manifest <mode>: writes .cep-install.json at the target
+# root - the one place any CEP-shipped script can ask "which paths did the
+# installer itself put here", instead of each guessing independently via its
+# own hardcoded exclusion list. OWNED_PATHS is exactly the set of top-level
+# relative paths this run actually wrote, built up alongside each
+# copy_tree/scaffold_pointer call below rather than hardcoded here, so the
+# manifest can never drift out of sync with what the run actually did.
+# Always overwrites - same "library-owned files always mirror the source"
+# rule copy_tree follows - so re-running the installer keeps the manifest in
+# sync with whatever the run just did.
+write_cep_install_manifest() {
+  local mode="$1"
+  local dst="$TARGET/.cep-install.json"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log_action "would write: .cep-install.json"
+    return
+  fi
+
+  # .cep-install.json records its own path too - it's a file this run
+  # itself wrote, same as everything else in OWNED_PATHS, and consumers
+  # (discover_layers.py/cep_retrofit.py/scaffold_state.py's manifest
+  # readers) should never treat it as project-authored content either.
+  local owned_json merged_json only_json runtime_json
+  owned_json="$(printf '"%s",' "${OWNED_PATHS[@]}" ".cep-install.json")"
+  owned_json="[${owned_json%,}]"
+  # merged_paths is always present, and is an empty array on any run that
+  # never merged AGENTS.md (e.g. --runtime claude or --runtime copilot), so
+  # readers can index it unconditionally. Guarded on the count because an
+  # empty array expansion is an error under `set -u` on older bash builds.
+  if [ "${#MERGED_PATHS[@]}" -gt 0 ]; then
+    merged_json="$(printf '"%s",' "${MERGED_PATHS[@]}")"
+    merged_json="[${merged_json%,}]"
+  else
+    merged_json="[]"
+  fi
+  if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
+    only_json="$(printf '"%s",' "${ONLY_NAMES[@]}")"
+    only_json="[${only_json%,}]"
+  else
+    only_json="null"
+  fi
+  # runtime_json: derived from the same include_* flags that gated the real
+  # copy/merge work above, so the manifest records the tools this run
+  # actually installed for instead of restating the --runtime string. Every
+  # value copies .github/skills/, so "claude" is always present; the other
+  # three names ride along with the tree each one needs.
+  local runtime_names
+  runtime_names=("claude")
+  if [ "$include_prompts" -eq 1 ]; then
+    runtime_names+=("copilot")
+  fi
+  if [ "$include_cursor_rules" -eq 1 ]; then
+    runtime_names+=("cursor")
+  fi
+  if [ "$include_agents_md" -eq 1 ]; then
+    runtime_names+=("codex")
+  fi
+  runtime_json="$(printf '"%s", ' "${runtime_names[@]}")"
+  runtime_json="[${runtime_json%, }]"
+
+  cat > "$dst" <<EOF
+{
+  "schema_version": 1,
+  "runtime": $runtime_json,
+  "mode": "$mode",
+  "only_skills": $only_json,
+  "owned_paths": $owned_json,
+  "merged_paths": $merged_json,
+  "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+  log_action "wrote: .cep-install.json"
+}
+
+# include_prompts / include_cursor_rules / include_agents_md: .github/skills/
+# is always copied (every --runtime value reads it natively via the CEP
+# skill format); which of the other three trees comes along is scoped
+# per-value instead of one flag conflating all of them - see usage()'s
+# --runtime entry for the full per-value mapping. "both" is today's
+# unconditional copy of everything, unchanged when --runtime is omitted.
+include_prompts=0
+include_cursor_rules=0
+include_agents_md=0
+case "$RUNTIME" in
+  claude)
+    ;;
+  copilot)
+    include_prompts=1
+    ;;
+  cursor)
+    include_prompts=1
+    include_cursor_rules=1
+    ;;
+  codex)
+    include_agents_md=1
+    ;;
+  both)
+    include_prompts=1
+    include_cursor_rules=1
+    include_agents_md=1
+    ;;
+esac
 
 if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
   for _name in "${ONLY_NAMES[@]}"; do
     copy_tree ".github/skills/$_name" ".github/skills/$_name"
-    copy_tree ".github/prompts/${_name}.prompt.md" ".github/prompts/${_name}.prompt.md"
-    copy_tree ".cursor/rules/${_name}.mdc" ".cursor/rules/${_name}.mdc"
+    OWNED_PATHS+=(".github/skills/$_name")
+    if [ "$include_prompts" -eq 1 ]; then
+      copy_tree ".github/prompts/${_name}.prompt.md" ".github/prompts/${_name}.prompt.md"
+      OWNED_PATHS+=(".github/prompts/${_name}.prompt.md")
+    fi
+    if [ "$include_cursor_rules" -eq 1 ]; then
+      copy_tree ".cursor/rules/${_name}.mdc" ".cursor/rules/${_name}.mdc"
+      OWNED_PATHS+=(".cursor/rules/${_name}.mdc")
+    fi
+    if [ "$_name" = "$CEP_WIZARD_SKILL_NAME" ]; then
+      copy_cep_wizard_docs
+      OWNED_PATHS+=(".github/skills/$CEP_WIZARD_SKILL_NAME/docs")
+    fi
   done
 else
   copy_tree ".github/skills" ".github/skills"
-  copy_tree ".github/prompts" ".github/prompts"
-  copy_tree ".cursor/rules" ".cursor/rules"
+  OWNED_PATHS+=(".github/skills")
+  if [ "$include_prompts" -eq 1 ]; then
+    copy_tree ".github/prompts" ".github/prompts"
+    OWNED_PATHS+=(".github/prompts")
+  fi
+  if [ "$include_cursor_rules" -eq 1 ]; then
+    copy_tree ".cursor/rules" ".cursor/rules"
+    OWNED_PATHS+=(".cursor/rules")
+  fi
+  copy_cep_wizard_docs
+  OWNED_PATHS+=(".github/skills/$CEP_WIZARD_SKILL_NAME/docs")
 fi
-merge_agents_md
+if [ "$include_agents_md" -eq 1 ]; then
+  merge_agents_md
+fi
 
 if [ "$INIT_PROJECT" -eq 1 ]; then
   scaffold_context_config
   scaffold_pointer
+fi
+
+if [ "${#ONLY_NAMES[@]}" -gt 0 ]; then
+  write_cep_install_manifest "only"
+else
+  write_cep_install_manifest "full"
 fi
 
 echo ""

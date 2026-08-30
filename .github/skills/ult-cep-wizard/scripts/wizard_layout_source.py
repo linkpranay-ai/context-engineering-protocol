@@ -93,6 +93,13 @@ class DecisionField:
     state: str  # "pending" | "staged" | "confirmed"
     allowed_verbs: List[str]  # [] once state == "confirmed" (nothing left to
     # offer); the verbs parse_comment_clauses finds in `comment` otherwise.
+    layer: frozenset = field(default_factory=frozenset)  # {"what"}, {"how"},
+    # {"what", "how"} (COLLISION_TITLE and any re-discovery of it), or an
+    # empty frozenset for a section_title layout_decision_grammar.
+    # resolve_section_layer() doesn't recognize - from
+    # layout_decision_grammar.resolve_section_layer(section_title), not a
+    # `section_title.startswith(...)` guess (see that function's docstring
+    # for exactly which false negatives that guess had).
 
 
 @dataclass
@@ -269,6 +276,7 @@ class LayoutSource:
         if not artifact_path.exists():
             return []
         cl = self._confirm_layers
+        gr = self._layout_decision_grammar
         _lines, fields = cl.parse_artifact(artifact_path.read_text(encoding="utf-8"))
 
         result: List[DecisionField] = []
@@ -288,6 +296,7 @@ class LayoutSource:
                     comment=f.comment,
                     state=state,
                     allowed_verbs=allowed,
+                    layer=gr.resolve_section_layer(f.section_title),
                 )
             )
         return result

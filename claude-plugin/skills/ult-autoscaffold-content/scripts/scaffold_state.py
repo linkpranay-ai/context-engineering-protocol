@@ -50,6 +50,15 @@ Subcommands:
     state, and echoed in render-index's output, so it surfaces wherever an
     operator looks, not just in a scrollback line.
 
+    A separate, thinner check runs alongside this one: even when the graph
+    points at the right repo, it may never have had CEP's own installed
+    footprint excluded from the scan (see
+    _check_graph_cep_contamination()). Same non-fatal, never-silent
+    posture -- stderr, repo_scan.graph_cep_contamination_warning, and
+    render-index -- just a different footgun and a much lower trigger
+    threshold, since CEP's own footprint should be a thin sliver of any
+    real target repo's graph.
+
     Assigns each module a tier:
       Tier 0 (skip)  -- generated/vendor directory name or file-suffix
                         majority match. Auto-marked "skipped" immediately --
@@ -149,17 +158,42 @@ SCHEMA_VERSION = 1
 
 _STATUSES = ("pending", "generated", "skipped")
 
-# Mirrors ult-repo-layout/discover_layers.py's SCAN_IGNORED_DIR_NAMES +
-# CEP_BUCKET_DIR_NAMES -- a small local duplicate, not an import (house
-# convention: see module docstring). Adds "graphify-out" on top of that
-# base set: it's ult-codegraph's own fixed, always-gitignored tool output
-# location (SKILL.md: "graphify-out/ should be gitignored in the consuming
-# project"), never a real module candidate -- without this exclusion a
-# repo that has already run ult-codegraph would see its own graph output
-# enumerated and tiered as if it were application code.
+# Content-identical to ult-repo-layout/discover_layers.py's own
+# SCAN_IGNORED_DIR_NAMES (plus that module's separate CEP_BUCKET_DIR_NAMES,
+# also mirrored below) -- a small local duplicate, not a shared import
+# (house convention: see module docstring). Keep the two sets equal.
+#
+# The equality is asserted from both sides: each skill's own test suite
+# imports the sibling skill's module off sys.path and compares the two sets
+# (test_scaffold_state.py's TestScanIgnoredDirNamesParity here,
+# test_discover_layers.py's counterpart there), so an edit made from either
+# side fails loudly in that side's own suite instead of silently diverging
+# again. Either suite skips its own check when the sibling skill's
+# directory isn't installed -- a partial checkout is not this test's
+# failure to report.
+#
+# "graphify-out" is ult-codegraph's own fixed, always-gitignored tool
+# output location (SKILL.md: "graphify-out/ should be gitignored in the
+# consuming project"), never a real module candidate -- without this
+# exclusion a repo that has already run ult-codegraph would see its own
+# graph output enumerated and tiered as if it were application code.
+#
+# The second line below is a name-based stopgap, deliberately kept even
+# though _top_level_candidate_dirs also drops manifest `owned_paths` (see
+# _manifest_owned_top_level_names): the manifest only knows about paths
+# CEP itself installed, and "starter_kit"/"output_docs" are exactly that,
+# so a manifest-unaware repo (manually installed, or predating the
+# manifest) still needs a name-based fallback for them. "third_party",
+# "extern", "external", "deps", and "submodules" are a different, wider
+# problem the manifest can never solve either way -- a project's own
+# vendored/third-party code, conventionally named one of these, is not
+# CEP's to know about at all. None of these seven is a name a real
+# first-party application module is likely to use.
 SCAN_IGNORED_DIR_NAMES = {
     ".git", "node_modules", "vendor", "dist", "build", "target",
     ".venv", "__pycache__", "graphify-out",
+    "third_party", "starter_kit", "output_docs", "extern", "external",
+    "deps", "submodules",
 }
 CEP_BUCKET_DIR_NAMES = {"contexts", "inputs", "cache"}
 
@@ -195,6 +229,17 @@ TIER1_MIN_FILE_COUNT = 50
 # _check_graph_repo_root_alignment()). Flagged implementation default, same
 # posture as the tier thresholds above -- no cited design-doc number.
 GRAPH_MODULE_OVERLAP_WARN_THRESHOLD = 0.5
+
+# Above this fraction of graph.json's own nodes living under a path this
+# repo's .cep-install.json manifest marks as CEP-owned, --graph-mode
+# graphify emits a non-fatal WARNING (see _check_graph_cep_contamination()).
+# Deliberately much lower than GRAPH_MODULE_OVERLAP_WARN_THRESHOLD above --
+# CEP's own installed footprint should be a thin sliver of any real target
+# repo's graph, so even a small fraction is a meaningful signal that
+# graphify walked CEP's own installed skills/docs rather than being scoped
+# away from them. Flagged implementation default, same posture as the tier
+# thresholds above -- no cited design-doc number.
+GRAPH_CEP_CONTAMINATION_WARN_THRESHOLD = 0.05
 
 # SKILL.md Step 4's small/large repo-size gate -- flagged implementation
 # defaults, same posture as the tier thresholds above (no design-doc-cited
@@ -264,14 +309,64 @@ def _iter_files(dirpath):
             yield Path(root) / fn
 
 
+def _read_cep_manifest(repo_root):
+    """Reads `.cep-install.json` at `repo_root` (written by install.ps1/
+    install.sh) and returns its `owned_paths` as a set of resolved absolute
+    Paths, or None if no manifest exists or it can't be parsed. Deliberately
+    duplicated per-consumer rather than factored into a shared module (house
+    convention: see this module's own docstring). Callers must treat None as
+    "no signal available" and fall back to pre-manifest behavior -- never an
+    error for an unmanifested repo."""
+    manifest_path = Path(repo_root) / ".cep-install.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    owned = data.get("owned_paths")
+    if not isinstance(owned, list):
+        return None
+    result = set()
+    for item in owned:
+        if isinstance(item, str) and item:
+            result.add((Path(repo_root) / item).resolve())
+    return result
+
+
+def _manifest_owned_top_level_names(repo_root, manifest_owned):
+    """Top-level (direct child of repo_root) names that are themselves a
+    manifest `owned_paths` entry, or contain one as a descendant -- e.g.
+    "starter_kit" when `starter_kit/project_guidelines` is CEP-owned. Most
+    of CEP's own trees (.github/, .cursor/) are already dropped by the
+    dot-prefix rule in _prune_ignored, but starter_kit/ has no dot prefix,
+    so without this it would otherwise be walked and tiered like a real
+    application module -- the exact false-positive this closes."""
+    if not manifest_owned:
+        return set()
+    repo_root = Path(repo_root).resolve()
+    names = set()
+    for owned in manifest_owned:
+        try:
+            rel = owned.relative_to(repo_root)
+        except ValueError:
+            continue
+        if rel.parts:
+            names.add(rel.parts[0])
+    return names
+
+
 def _top_level_candidate_dirs(repo_root):
     """Immediate subdirectories of repo_root, pruned of
-    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES/dot-dirs. Each becomes one
-    candidate module. Returns sorted names (not full paths)."""
+    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES/dot-dirs, plus any manifest
+    `owned_paths` top-level name (see _manifest_owned_top_level_names).
+    Each surviving name becomes one candidate module. Returns sorted names
+    (not full paths)."""
     repo_root = Path(repo_root)
     if not repo_root.is_dir():
         return []
+    manifest_owned = _read_cep_manifest(repo_root)
+    manifest_names = _manifest_owned_top_level_names(repo_root, manifest_owned)
     names = _prune_ignored([p.name for p in repo_root.iterdir() if p.is_dir()])
+    names = [n for n in names if n not in manifest_names]
     return sorted(names)
 
 
@@ -388,6 +483,22 @@ def _graph_in_degrees(graph):
         senders.setdefault(dst_module, set()).add(src_module)
 
     return {module: len(s) for module, s in senders.items()}
+
+
+def _graph_module_node_counts(graph):
+    """{module_name: node_count} for every graph node whose source_file maps
+    to a module (see _module_of()). Distinct from _graph_in_degrees(): a
+    module can legitimately have in_degree 0 (a real leaf, tier 3 -- other
+    code just never imports it) while still containing plenty of its own
+    nodes. This counts total nodes per module instead, so a module with
+    ZERO nodes -- graphify found nothing to index there at all -- can be
+    told apart from a real leaf. Used by _tier_for_graph()'s empty-module
+    check."""
+    node_module = _node_module_map(graph)
+    counts = {}
+    for module in node_module.values():
+        counts[module] = counts.get(module, 0) + 1
+    return counts
 
 
 def _interface_id(module_a, module_b):
@@ -567,13 +678,99 @@ def _check_graph_repo_root_alignment(graph_modules, module_names, graph_path):
     return None
 
 
+def _check_graph_cep_contamination(repo_root, graph):
+    """Defend against a different graphify footgun than
+    _check_graph_repo_root_alignment() above: instead of pointing at the
+    wrong repo entirely, graphify walked the RIGHT repo but never had CEP's
+    own installed footprint (skills/, docs, wizard scripts -- everything
+    this repo's own .cep-install.json manifest lists under `owned_paths`)
+    excluded from the scan. The graph still looks plausible -- real module
+    names, real in-degrees -- but a meaningful slice of its nodes are CEP's
+    own internal wiring, not the target repo's code, which quietly inflates
+    in-degree/tier numbers for whatever modules happen to sit near CEP's
+    installed paths.
+
+    Returns None if there's nothing to check (no manifest, or the manifest
+    has no owned_paths -- _read_cep_manifest()'s own "no signal available"
+    convention) or if the graph is empty. Returns a warning string (never
+    raises -- this is a much thinner signal than the repo-root mismatch
+    above, so it stays advisory) once the contaminated fraction exceeds
+    GRAPH_CEP_CONTAMINATION_WARN_THRESHOLD.
+    """
+    manifest_owned = _read_cep_manifest(repo_root)
+    if not manifest_owned:
+        return None
+
+    repo_root = Path(repo_root)
+    total = 0
+    contaminated = 0
+    for node in graph.get("nodes", []):
+        source_file = node.get("source_file")
+        if not source_file:
+            continue
+        total += 1
+        node_path = (repo_root / source_file.replace("\\", "/")).resolve()
+        for owned in manifest_owned:
+            try:
+                node_path.relative_to(owned)
+            except ValueError:
+                continue
+            contaminated += 1
+            break
+
+    if total == 0:
+        return None
+
+    ratio = contaminated / total
+    if ratio <= GRAPH_CEP_CONTAMINATION_WARN_THRESHOLD:
+        return None
+
+    return (
+        "{pct:.0f}% of graph.json's nodes ({contaminated_n}/{total_n}) live "
+        "under paths this repo's own .cep-install.json manifest marks as "
+        "CEP-owned -- graphify most likely walked CEP's own installed "
+        "skills/docs rather than being scoped away from them, which "
+        "inflates in-degree/tier numbers with CEP's own internal wiring "
+        "instead of the target repo's real code. Fix: generate a "
+        ".graphifyignore from .cep-install.json's owned_paths (see "
+        "ult-codegraph/SKILL.md Step 0), then re-run `graphify update` and "
+        "this scan.".format(
+            pct=ratio * 100,
+            contaminated_n=contaminated,
+            total_n=total,
+        )
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Tier assignment                                                            #
 # --------------------------------------------------------------------------- #
 
-def _tier_for_graph(in_degree, generated):
+def _tier_for_graph(in_degree, generated, node_count, file_count):
     if generated:
         return 0, "generated"
+    # A module with zero graph nodes is not a real leaf (tier 3) -- graphify
+    # found nothing under it to index at all. in_degree alone can't tell the
+    # two apart: a genuine tier-3 leaf with plenty of its own nodes also has
+    # in_degree 0, since nothing else imports it. node_count is the
+    # distinguishing signal (see _graph_module_node_counts()). Checked
+    # before the thresholds below so it never gets miscounted as a normal,
+    # selectable tier-3 module.
+    #
+    # Zero graph nodes does NOT by itself mean the directory is empty,
+    # though -- a directory of non-code assets graphify doesn't traverse, or
+    # one graphify simply never walked, still has real files under it and is
+    # still a legitimate module candidate. Fall back to heuristic mode's own
+    # file_count signal there rather than dropping the module from the
+    # list entirely, tagged with its own basis string so the state file
+    # records that this tier came from a graph-mode fallback rather than
+    # from a real graphify signal or from a full heuristic-mode run. Only
+    # zero nodes AND zero files is genuinely empty.
+    if node_count == 0:
+        if file_count == 0:
+            return None, "empty"
+        tier, _heuristic_basis = _tier_for_heuristic(file_count, generated)
+        return tier, "heuristic:file-count (no graph nodes)"
     if in_degree >= TIER1_MIN_IN_DEGREE:
         return 1, "graph:in-degree"
     if in_degree >= 1:
@@ -584,6 +781,11 @@ def _tier_for_graph(in_degree, generated):
 def _tier_for_heuristic(file_count, generated):
     if generated:
         return 0, "generated"
+    # Same empty-vs-leaf distinction as _tier_for_graph()'s node_count
+    # check, but heuristic mode's own existing signal (file_count) already
+    # carries it directly -- no separate lookup needed.
+    if file_count == 0:
+        return None, "empty"
     if file_count >= TIER1_MIN_FILE_COUNT:
         return 1, "heuristic:file-count"
     if file_count >= 1:
@@ -698,7 +900,9 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
     module_names = _top_level_candidate_dirs(repo_root)
 
     in_degrees = {}
+    node_counts = {}
     alignment_warning = None
+    contamination_warning = None
     if graph_mode == "graphify":
         graph = _load_graph(graph_path)
         # Cross-check BEFORE tiering, and before any state mutation below --
@@ -707,7 +911,12 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
         alignment_warning = _check_graph_repo_root_alignment(
             _graph_module_names(graph), module_names, graph_path
         )
+        # A different, thinner signal than the alignment check above -- this
+        # one stays advisory even at its own trigger threshold, so it's a
+        # plain warning lookup rather than something that can abort the scan.
+        contamination_warning = _check_graph_cep_contamination(repo_root, graph)
         in_degrees = _graph_in_degrees(graph)
+        node_counts = _graph_module_node_counts(graph)
         # Same one-time graph load, same access pattern as in_degrees above
         # -- see _graph_crossing_edges()'s docstring for why this is the
         # pair, not the direction.
@@ -740,10 +949,25 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
 
         if graph_mode == "graphify":
             in_degree = in_degrees.get(name, 0)
-            tier, basis = _tier_for_graph(in_degree, generated)
+            node_count = node_counts.get(name, 0)
+            tier, basis = _tier_for_graph(in_degree, generated, node_count, len(files))
         else:
             in_degree = None
             tier, basis = _tier_for_heuristic(len(files), generated)
+
+        if tier == 0:
+            skip_reason = "generated/vendor code (auto-detected)"
+        elif tier is None:
+            # Distinct wording from the tier-0 case above so "why was this
+            # skipped" stays answerable at a glance -- generated/vendor and
+            # empty are different reasons a module never became selectable.
+            skip_reason = (
+                "empty directory (no files and no graph nodes found under it)"
+                if graph_mode == "graphify"
+                else "empty directory (no files found)"
+            )
+        else:
+            skip_reason = None
 
         entry = {
             "id": module_id,
@@ -751,10 +975,10 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
             "in_degree": in_degree,
             "file_count": len(files),
             "basis": basis,
-            "status": "skipped" if tier == 0 else "pending",
+            "status": "pending" if tier not in (0, None) else "skipped",
             "generated_at": None,
             "output_path": None,
-            "skip_reason": "generated/vendor code (auto-detected)" if tier == 0 else None,
+            "skip_reason": skip_reason,
         }
         new_modules.append(entry)
 
@@ -774,6 +998,11 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
         # (not just printed) so `show` and `render-index` still surface it
         # after the run that produced it has scrolled out of the terminal.
         "graph_module_overlap_warning": alignment_warning,
+        # Non-fatal CEP-own-footprint contamination warning, if any -- None
+        # when clean, when there's no manifest to check against, or when
+        # graph_mode == "heuristic". Same "persist it, don't just print it"
+        # reasoning as graph_module_overlap_warning above.
+        "graph_cep_contamination_warning": contamination_warning,
     }
     return state
 
@@ -886,12 +1115,13 @@ _TIER_TITLES = {
     2: "## Tier 2 -- ordinary modules",
     3: "## Tier 3 -- leaf modules (no other module depends on these)",
     0: "## Tier 0 -- generated/vendor (auto-skipped)",
+    None: "## Empty (auto-skipped, no files/nodes found)",
 }
 
 
 def render_index(state, repo_name):
     modules = state.get("modules", [])
-    by_tier = {0: [], 1: [], 2: [], 3: []}
+    by_tier = {0: [], 1: [], 2: [], 3: [], None: []}
     for m in modules:
         by_tier.setdefault(m["tier"], []).append(m)
 
@@ -915,9 +1145,15 @@ def render_index(state, repo_name):
     if overlap_warning:
         lines.append("")
         lines.append("**WARNING:** {}".format(overlap_warning))
+    contamination_warning = (state.get("repo_scan") or {}).get(
+        "graph_cep_contamination_warning"
+    )
+    if contamination_warning:
+        lines.append("")
+        lines.append("**WARNING:** {}".format(contamination_warning))
     lines.append("")
 
-    for tier in (1, 2, 3, 0):
+    for tier in (1, 2, 3, 0, None):
         entries = by_tier.get(tier, [])
         lines.append(_TIER_TITLES[tier])
         lines.append("")
@@ -926,7 +1162,12 @@ def render_index(state, repo_name):
             lines.append("")
             continue
         for m in sorted(entries, key=lambda e: e["id"]):
-            if m.get("in_degree") is not None:
+            if tier is None:
+                # Empty modules: file_count is always 0 here, and in_degree
+                # (graph mode) is trivially 0 too -- neither is informative,
+                # so skip the usual in-degree/file-count detail entirely.
+                detail = "empty"
+            elif m.get("in_degree") is not None:
                 detail = "in-degree {}".format(m["in_degree"])
             else:
                 detail = "{} files".format(m.get("file_count"))
@@ -1044,6 +1285,13 @@ def _cmd_scan(args):
         # Non-fatal partial-overlap degradation -- printed immediately so
         # it's seen at scan time, not only later via `show`/render-index.
         print("WARNING: {}".format(overlap_warning), file=sys.stderr)
+    contamination_warning = (state.get("repo_scan") or {}).get(
+        "graph_cep_contamination_warning"
+    )
+    if contamination_warning:
+        # Same "printed immediately, not just persisted" posture as the
+        # overlap warning above.
+        print("WARNING: {}".format(contamination_warning), file=sys.stderr)
     save_state(args.state, state)
     print(json.dumps(summarize(state), indent=2))
     return 0

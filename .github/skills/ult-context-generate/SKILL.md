@@ -413,7 +413,9 @@ stale — built from `<old-commit>`, current is `<head>`; consider re-running
 `/ult-codegraph` for an up-to-date What-L3 layer" — and continue with the existing
 graph anyway; don't block context generation on it. This mirrors
 `ult-codegraph/CONSUMING-CODE-GRAPH.md` step 4, applied here so a stale graph doesn't
-silently feed a context package without the user knowing.
+silently feed a context package without the user knowing. `GRAPH_REPORT.md` isn't
+produced under `--no-cluster` (the default `ult-codegraph` invocation); if it's
+absent, skip this nudge rather than treating it as an error.
 
 The code graph is already indexed in `graphify-out/`. Run targeted queries to surface
 the implementation reality of the feature, **once per aspect in `ASPECTS`**:

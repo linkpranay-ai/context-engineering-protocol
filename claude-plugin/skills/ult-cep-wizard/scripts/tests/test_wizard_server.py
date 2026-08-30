@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import wizard_auth  # noqa: E402
+import wizard_docs  # noqa: E402
 import wizard_preflight  # noqa: E402
 import wizard_server as ws  # noqa: E402
 
@@ -361,9 +362,12 @@ class TestApiStatusMinimalRepo(WizardServerTestCase):
         # Phase 2 (§18.14 Section C): docs/requirements/ resolves but is empty in
         # this fixture, and Guidelines isn't installed at all here (available=False,
         # so guidelines_card's own initialized=False path never even applies) - the
-        # What box's stub card is the one that should surface.
+        # What box's stub card is the one that should surface. Trip-wire is also
+        # unavailable here (owning skill not installed), so tripwire_card's own
+        # available=False branch must suppress its card the same way.
         stub_titles = [c["box_title"] for c in payload["stub_cards"]]
         self.assertIn("What", stub_titles)
+        self.assertNotIn("Trip-wire", stub_titles)
 
 
 class TestApiStatusWithOptionalSkillsInstalled(WizardServerTestCase):
@@ -393,6 +397,17 @@ class TestApiStatusWithOptionalSkillsInstalled(WizardServerTestCase):
         self.assertFalse(payload["tripwire"]["initialized"])
         self.assertEqual(payload["tripwire"]["entries"], 0)
 
+        # Regression test for the report finding this fixes (Trip-wire onboarding
+        # dead end): available + uninitialized + 0 entries must surface a stub
+        # card naming ult-institutional-memory-distill, same as Guidelines'
+        # uninitialized case does for compiling-project-guidelines.
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertIn("Trip-wire", stub_titles)
+        tripwire_stub = next(
+            c for c in payload["stub_cards"] if c["box_title"] == "Trip-wire"
+        )
+        self.assertIn("ult-institutional-memory-distill", tripwire_stub["prompt_text"])
+
 
 class TestApiPicker(WizardServerTestCase):
     def test_no_cookie_is_401(self):
@@ -415,6 +430,65 @@ class TestApiPicker(WizardServerTestCase):
         self.assertEqual(resp.status, 400)
         payload = json.loads(resp.read().decode("utf-8"))
         self.assertIn("error", payload)
+
+
+class TestApiDocAsset(WizardServerTestCase):
+    """Regression tests proving _handle_api_doc_asset is gated on the exact
+    same wizard_docs.docs_root() trust check list_docs()/_handle_api_docs
+    already require - not a second, independently-maintained check that could
+    silently drift looser than the first and let this route serve a file out
+    of a root the docs list itself would have refused to trust. docs_root()
+    is about this *skill's own* install location, not the target repo under
+    test, so these monkeypatch wizard_docs._docs_dir/_self_test_root exactly
+    the way TestDocsRoot in test_wizard_docs.py already does for the function
+    directly - here the same fixture is driven through the real HTTP route."""
+
+    def setUp(self):
+        super().setUp()
+        self._orig_docs_dir = wizard_docs._docs_dir
+        self._orig_self_test_root = wizard_docs._self_test_root
+
+    def tearDown(self):
+        wizard_docs._docs_dir = self._orig_docs_dir
+        wizard_docs._self_test_root = self._orig_self_test_root
+        super().tearDown()
+
+    def test_no_cookie_is_401(self):
+        resp = self._get("/api/docs-assets/hero.png")
+        self.assertEqual(resp.status, 401)
+
+    def test_asset_refused_when_docs_root_unverified(self):
+        # Neither location verifies: the bundled docs/ sibling doesn't exist
+        # and the fallback root has no CONCEPT.md+PROTOCOL.md pair - the same
+        # "not this skill's own CEP bundle" case TestBundleVerification in
+        # test_wizard_docs.py covers for list_docs() directly. A real file
+        # sits right where the route would look, to prove the 404 comes from
+        # the trust gate and not merely from the file being absent.
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_bundle = Path(tmp) / "docs"
+            unrelated = Path(tmp) / "unrelated"
+            unrelated.mkdir()
+            (unrelated / "hero.png").write_bytes(b"not actually verified")
+            wizard_docs._docs_dir = lambda: missing_bundle
+            wizard_docs._self_test_root = lambda: unrelated
+            cookie = self._authenticated_cookie()
+            resp = self._get("/api/docs-assets/hero.png", cookie=cookie)
+            self.assertEqual(resp.status, 404)
+
+    def test_asset_served_when_docs_root_verified(self):
+        # The permit path: once docs_root() verifies (a bundled docs/ sibling
+        # is trusted outright, same as list_docs()'s own resolution order), a
+        # real asset under it is served - proving the gate above is a real
+        # trust check, not an always-404 regression hiding behind it.
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = Path(tmp) / "docs"
+            bundled.mkdir()
+            (bundled / "hero.png").write_bytes(b"fake-png-bytes")
+            wizard_docs._docs_dir = lambda: bundled
+            cookie = self._authenticated_cookie()
+            resp = self._get("/api/docs-assets/hero.png", cookie=cookie)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.read(), b"fake-png-bytes")
 
 
 class TestStaticAssets(WizardServerTestCase):
@@ -465,6 +539,105 @@ def _write_discovery_artifact(root: Path, content: str = SINGLE_DECISION_ARTIFAC
     path = root / "context-layout-discovery.md"
     path.write_text(content, encoding="utf-8")
     return path
+
+
+class TestApiStatusWithPendingDecisions(WizardServerTestCase):
+    """Regression test: a What/How stub card must not tell the user to
+    scaffold content at a resolved path that a not-yet-Applied decision
+    might be about to move out from under them. Same base fixture as
+    TestApiStatusMinimalRepo
+    (docs/requirements/ resolves but is empty on disk, so absent the gate
+    the What card would surface exactly as it does there) - the only
+    difference is a discovery artifact with a still-PENDING What-L2 field."""
+
+    def test_what_card_suppressed_while_its_decision_is_pending(self):
+        _write_discovery_artifact(self.repo_root, content=SINGLE_DECISION_ARTIFACT)
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertNotIn("What", stub_titles)
+
+    def test_gate_is_per_box_not_whole_artifact(self):
+        # What-L2 confirmed, How-L2 still PENDING - proves the gate is
+        # per-box, not an all-or-nothing artifact-exists check: What's card
+        # may return once its own decision lands even while How's stays
+        # suppressed.
+        _write_discovery_artifact(
+            self.repo_root,
+            content=(
+                f"# Context Layout Discovery - test-repo\n\n"
+                f"## {WHAT_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: CONFIRM: docs/reqs/   # CONFIRMED 2026-01-01\n\n"
+                f"## {HOW_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: PENDING   # CONFIRM: org/ | CUSTOM: <path> | SKIP\n"
+            ),
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertIn("What", stub_titles)
+        self.assertNotIn("How", stub_titles)
+
+    def test_rediscovery_section_title_still_marks_its_layer_pending(self):
+        # Regression test: the old `section_title.startswith("What"/"How")`
+        # check missed a re-issued section, since discover_layers.py titles
+        # those "Re-discovery - <canonical title> - <date>", which starts
+        # with "Re-discovery", not "What"/"How". resolve_section_layer()
+        # must still resolve this to the "what" layer so the What card stays
+        # suppressed while the re-discovered decision is unresolved.
+        _write_discovery_artifact(
+            self.repo_root,
+            content=(
+                f"# Context Layout Discovery - test-repo\n\n"
+                f"## Re-discovery - {WHAT_L2_TITLE} - 2026-01-01\n"
+                "**Status:** enabled by default.\n\n"
+                "    decision: PENDING   # CONFIRM: docs/reqs/ | CUSTOM: <path> | SKIP\n\n"
+                f"## {HOW_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: CONFIRM: org/   # CONFIRMED 2026-01-01\n"
+            ),
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertNotIn("What", stub_titles)
+        self.assertIn("How", stub_titles)
+
+    def test_collision_section_title_marks_both_layers_pending(self):
+        # Regression test: COLLISION_TITLE ("Cross-layer path collisions
+        # (S30)") starts with neither "What" nor "How", so the old check
+        # treated a still-unresolved collision as pending for *neither*
+        # layer - a false-negative gap the review found by reasoning.
+        # resolve_section_layer() maps it to both layers, so a pending
+        # collision decision suppresses both the What and How cards.
+        _write_discovery_artifact(
+            self.repo_root,
+            content=(
+                f"# Context Layout Discovery - test-repo\n\n"
+                f"## {WHAT_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: CONFIRM: docs/reqs/   # CONFIRMED 2026-01-01\n\n"
+                f"## {HOW_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: CONFIRM: org/   # CONFIRMED 2026-01-01\n\n"
+                "## Cross-layer path collisions (S30)\n\n"
+                "    collision_decision: PENDING   # ACKNOWLEDGE | CUSTOM: <layer> -> <new path>\n"
+            ),
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        stub_titles = [c["box_title"] for c in payload["stub_cards"]]
+        self.assertNotIn("What", stub_titles)
+        self.assertNotIn("How", stub_titles)
 
 
 class TestApiDecisions(WizardServerTestCase):
@@ -899,6 +1072,99 @@ class TestApiRetrofitInventory(WizardServerTestCase):
         self.assertEqual(resp.status, 400)
         payload = json.loads(resp.read().decode("utf-8"))
         self.assertIn("error", payload)
+
+    def test_tier_counts_are_present_and_non_empty_for_a_mixed_target(self):
+        # tier_counts must actually reach the frontend non-empty for a
+        # target that has both a canonical and a supplementary unit - the
+        # data the wizard.js header line / per-unit badges read from. The
+        # base fixture (_make_valid_target_repo plus this class's own
+        # EXTRA_SKILLS) already contributes its own canonical units, so this
+        # only asserts on what widget-reviewer/widget-reviewer.md add, not
+        # on the repo-root inventory's total.
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD
+        )
+        _write(self.repo_root / "widget-reviewer.md", "Stray duplicate doc.")
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/retrofit/inventory", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        tier_counts = payload["tier_counts"]
+        self.assertGreaterEqual(tier_counts.get("canonical", 0), 1)
+        self.assertEqual(tier_counts.get("supplementary", 0), 1)
+        flat = next(u for u in payload["units"] if u["unit_id"] == "widget-reviewer.md")
+        self.assertEqual(flat["tier"], "supplementary")
+        self.assertIn("duplicates widget-reviewer", flat["note"])
+
+    def test_manifest_owned_paths_reach_the_frontend_as_excluded_not_silence(self):
+        # A target carrying its own .cep-install.json has those owned paths
+        # pruned from the walk. The pruned paths must still reach the
+        # frontend, so the human reviewing the inventory can tell "CEP
+        # already owns this" apart from "the scan found nothing there".
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD
+        )
+        _write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude", "copilot"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": [".github/skills"],
+                "merged_paths": [],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/retrofit/inventory", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertIn(".github/skills", payload["excluded_owned_paths"])
+        unit_ids = {u["unit_id"] for u in payload["units"]}
+        self.assertIn("widget-reviewer", unit_ids)
+        self.assertFalse(any(u.startswith(".github/skills") for u in unit_ids))
+
+
+class TestRetrofitInventoryReviewGateMarkup(WizardServerTestCase):
+    """A lightweight static-source presence check, not a full DOM
+    render - this wizard's retrofit-inventory rendering is entirely
+    client-side JS (see renderRetrofitUnitRow/renderRetrofitInventory in
+    wizard.js), so there is no server-rendered markup a Python test could
+    inspect directly. What this can and does check: the retrofit-inventory
+    affordances this wizard promises - the tier badge, the review-gate
+    checkbox, the excluded-paths list - are actually present in the static
+    sources the browser receives, not just described in a commit message."""
+
+    def test_index_html_has_the_review_gate_checkbox(self):
+        # index.html is only ever served templated through the session-gated
+        # "/" route (_handle_index), never under /static/ - STATIC_ASSETS is
+        # a closed set that deliberately excludes it (see wizard_server.py's
+        # own comment on that dict).
+        cookie = self._authenticated_cookie()
+        resp = self._get("/", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        body = resp.read().decode("utf-8")
+        self.assertIn('id="retrofit-inventory-reviewed"', body)
+        self.assertIn('id="retrofit-tier-summary"', body)
+
+    def test_wizard_js_renders_the_tier_badge_and_enforces_the_review_gate(self):
+        resp = self._get("/static/wizard.js")
+        self.assertEqual(resp.status, 200)
+        body = resp.read().decode("utf-8")
+        self.assertIn("retrofit-tier-badge", body)
+        self.assertIn("retrofit-inventory-reviewed", body)
+        self.assertIn("applyRetrofitReviewGate", body)
+
+    def test_excluded_owned_paths_have_a_list_element_and_a_renderer(self):
+        # The endpoint-level coverage above proves excluded_owned_paths
+        # reaches the browser; this proves something in the browser reads it.
+        cookie = self._authenticated_cookie()
+        index = self._get("/", cookie=cookie).read().decode("utf-8")
+        self.assertIn('id="retrofit-excluded-owned-paths"', index)
+        js = self._get("/static/wizard.js").read().decode("utf-8")
+        self.assertIn("retrofit-excluded-owned-paths", js)
+        self.assertIn("excluded_owned_paths", js)
 
 
 class TestApiRetrofitState(WizardServerTestCase):

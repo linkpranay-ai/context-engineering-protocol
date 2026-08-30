@@ -22,6 +22,19 @@
     .github/prompts/<name>.prompt.md, and .cursor/rules/<name>.mdc, and trims
     AGENTS.md's merged block down to only those skills' rows.
 
+.PARAMETER Runtime
+    Which tool the install targets. .github/skills/ is always copied (every
+    value reads it natively via the CEP skill format). What else comes
+    along:
+      claude   - skills only.
+      copilot  - skills + .github/prompts/ (each prompt file is a thin
+                 pointer back into .github/skills/).
+      cursor   - skills + .github/prompts/ + .cursor/rules/.
+      codex    - skills + AGENTS.md merge (codex reads project instructions
+                 from AGENTS.md, not a prompts/rules tree).
+      both     - everything above, unconditionally (default; unchanged
+                 behavior when this parameter is omitted).
+
 .PARAMETER DryRun
     Print what would be done without writing anything.
 #>
@@ -30,6 +43,8 @@ param(
     [string]$TargetPath = "",
     [switch]$InitProject,
     [string]$Only = "",
+    [ValidateSet("claude", "copilot", "cursor", "codex", "both")]
+    [string]$Runtime = "both",
     [switch]$DryRun
 )
 
@@ -114,8 +129,11 @@ function Copy-LibraryTree([string]$RelSrc, [string]$RelDst) {
         # /XD excludes gitignored local build artifacts (__pycache__,
         # .pytest_cache) that may exist in the source clone's working tree
         # if tests were ever run there — these must never leak into an
-        # installed target project.
-        $null = robocopy $src $dst /MIR /XD __pycache__ .pytest_cache /NFL /NDL /NJH /NJS /NC /NS /NP
+        # installed target project. Also excludes tests/ itself: no
+        # consumer runs CEP's own unit tests once installed (measured on a
+        # full install: 7 tests/ dirs, 51 files, 755K — shipping into
+        # every target for no reason any installed skill needs).
+        $null = robocopy $src $dst /MIR /XD __pycache__ .pytest_cache tests /NFL /NDL /NJH /NJS /NC /NS /NP
         if ($LASTEXITCODE -ge 8) {
             Write-Error "robocopy failed copying $src to $dst (exit code $LASTEXITCODE)"
             exit 1
@@ -145,11 +163,11 @@ function Copy-LibraryTree([string]$RelSrc, [string]$RelDst) {
         Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
 
         # No robocopy /XD equivalent here, so strip gitignored local build
-        # artifacts (__pycache__, .pytest_cache) post-copy instead — same
-        # reasoning as the Windows branch above.
+        # artifacts (__pycache__, .pytest_cache) and tests/ itself
+        # post-copy instead — same reasoning as the Windows branch above.
         if ((Get-Item -LiteralPath $dst).PSIsContainer) {
             Get-ChildItem -LiteralPath $dst -Recurse -Force -Directory |
-                Where-Object { $_.Name -eq "__pycache__" -or $_.Name -eq ".pytest_cache" } |
+                Where-Object { $_.Name -eq "__pycache__" -or $_.Name -eq ".pytest_cache" -or $_.Name -eq "tests" } |
                 Remove-Item -Recurse -Force
         }
     }
@@ -238,6 +256,44 @@ function Merge-AgentsMd {
         Set-Content -LiteralPath $dst -Value "$block`n" -NoNewline
         Write-InstallAction "created: AGENTS.md"
     }
+    # AGENTS.md is a merge target, not a file this installer owns outright:
+    # it only ever writes its own marked block into it, and everything
+    # outside that block is adopter-authored content this run must not
+    # claim. So it is recorded in $script:MergedPaths rather than
+    # $script:OwnedPaths - a consumer that excludes owned_paths wholesale
+    # would otherwise silently drop the adopter's own content living in the
+    # rest of the file.
+    $script:MergedPaths += "AGENTS.md"
+}
+
+# Test-PriorManifestOwnsContextConfig: true iff the *prior* run's
+# .cep-install.json - still on disk unmodified at this point, since
+# New-ContextConfig runs before New-CepInstallManifest overwrites it -
+# already lists context-config.yaml in its owned_paths array. Parsed with
+# ConvertFrom-Json (the read-side counterpart of the ConvertTo-Json this
+# script already writes the manifest with) rather than text-matched. A
+# missing file, unreadable content, malformed JSON, or an owned_paths that
+# isn't an array of strings all mean the same thing here - "no prior claim" -
+# and none of them may abort the install, hence the catch and the $null
+# guards rather than letting $ErrorActionPreference = "Stop" propagate.
+function Test-PriorManifestOwnsContextConfig {
+    $manifest = Join-Path $TargetPath ".cep-install.json"
+    if (-not (Test-Path -LiteralPath $manifest)) { return $false }
+    try {
+        $raw = Get-Content -LiteralPath $manifest -Raw
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
+        $data = $raw | ConvertFrom-Json
+    }
+    catch {
+        return $false
+    }
+    if ($null -eq $data) { return $false }
+    $owned = $data.owned_paths
+    if ($null -eq $owned) { return $false }
+    # @(...) normalizes both a single-element array that round-tripped as a
+    # bare scalar and any non-collection value into something -contains can
+    # be asked about without throwing.
+    return (@($owned) -contains "context-config.yaml")
 }
 
 # New-ContextConfig: creates context-config.yaml from the template with the
@@ -253,6 +309,20 @@ function New-ContextConfig {
 
     if (Test-Path -LiteralPath $dst) {
         Write-InstallAction "skipped (exists): context-config.yaml"
+        # Carry a genuine prior ownership claim forward. A re-install must
+        # not let a CEP-owned file lapse into unclaimed status just because
+        # this particular run happened to skip writing it: run 1 creates the
+        # file and records it, run 2 finds it already there and lands here,
+        # and the manifest is always rebuilt wholesale (never merged with
+        # the prior one), so without this the claim would silently disappear
+        # even though CEP still owns that exact file and nobody edited it.
+        # Ownership is only ever carried forward, never invented - an
+        # existing file the prior manifest does not claim (or one with no
+        # prior manifest at all) is of adopter/unknown provenance and stays
+        # unclaimed, exactly as before.
+        if (Test-PriorManifestOwnsContextConfig) {
+            $script:OwnedPaths += "context-config.yaml"
+        }
         return
     }
 
@@ -270,6 +340,12 @@ function New-ContextConfig {
 
     Set-Content -LiteralPath $dst -Value $content -NoNewline
     Write-InstallAction "created: context-config.yaml"
+    # The run that actually created the file claims it outright. The only
+    # other way this path enters $script:OwnedPaths is the "skipped
+    # (exists)" branch above carrying a prior run's claim forward; an
+    # existing context-config.yaml with no such claim is adopter-authored
+    # and is never claimed by any later run.
+    $script:OwnedPaths += "context-config.yaml"
 }
 
 # New-ProjectGuidelinesPointer: (re)writes
@@ -309,26 +385,173 @@ your own files alongside it; they are never touched.
 
     if ($existed) { Write-InstallAction "overwrote: starter_kit/project_guidelines/.pointer.md" }
     else { Write-InstallAction "created: starter_kit/project_guidelines/.pointer.md" }
+    # The pointer file, not the directory around it: project_guidelines is
+    # an additive drop-zone whose other files are adopter-owned, and this
+    # function only ever writes .pointer.md.
+    $script:OwnedPaths += "starter_kit/project_guidelines/.pointer.md"
 }
 
+# CepWizardSkillName: the one skill whose install also bundles CEP's own
+# project docs alongside it (see Copy-CepWizardDocs below) - named once here
+# rather than repeated as a literal at each call site.
+$CepWizardSkillName = "ult-cep-wizard"
+
+# Copy-CepWizardDocs: bundles CEP's own project docs (CONCEPT.md, PROTOCOL.md,
+# README.md, FAQ.md) into the installed ult-cep-wizard skill's own docs/
+# subdirectory, so its in-app docs viewer (wizard_docs.py) has real CEP
+# content to serve in every install that includes this skill. Previously
+# this script only ever copied .github/skills/, .github/prompts/, and
+# .cursor/rules/, so wizard_docs.py's docs viewer had nothing to find in any
+# real install regardless of its own root-detection logic — see
+# wizard_docs.py's module docstring for the reader side of this fix. Callers
+# below only invoke this when the wizard skill itself is actually being
+# installed.
+#
+# Deliberately does NOT bundle case-studies/ - measured on a full install:
+# 83 files, 8.6M, the single largest thing this function ever copied, almost
+# none of it needed for the wizard's own onboarding flow (the 4 docs above
+# cover that). wizard_docs.py's list_docs() already treats a missing
+# case-studies/ as "not available" and degrades cleanly - no reader-side
+# change needed for this.
+function Copy-CepWizardDocs {
+    Copy-LibraryTree "CONCEPT.md" ".github/skills/$CepWizardSkillName/docs/CONCEPT.md"
+    Copy-LibraryTree "PROTOCOL.md" ".github/skills/$CepWizardSkillName/docs/PROTOCOL.md"
+    Copy-LibraryTree "README.md" ".github/skills/$CepWizardSkillName/docs/README.md"
+    Copy-LibraryTree "FAQ.md" ".github/skills/$CepWizardSkillName/docs/FAQ.md"
+}
+
+# New-CepInstallManifest: writes .cep-install.json at the target root — the
+# one place any CEP-shipped script can ask "which paths did the installer
+# itself put here", instead of each guessing independently via its own
+# hardcoded exclusion list. $OwnedPaths is exactly the set of top-level
+# relative paths this run actually wrote, built up by the caller alongside
+# each Copy-LibraryTree/New-ProjectGuidelinesPointer call above rather than
+# hardcoded here, so the manifest can never drift out of sync with what the
+# run actually did. Always overwrites — same "library-owned files always
+# mirror the source" rule Copy-LibraryTree follows — so re-running the
+# installer keeps the manifest in sync with whatever the run just did.
+function New-CepInstallManifest {
+    param(
+        [string[]]$OwnedPaths,
+        [string[]]$MergedPaths,
+        [string]$Mode,
+        [string[]]$OnlySkills
+    )
+
+    if ($DryRun) {
+        Write-InstallAction "would write: .cep-install.json"
+        return
+    }
+
+    $dst = Join-Path $TargetPath ".cep-install.json"
+    # .cep-install.json records its own path too - it's a file this run
+    # itself wrote, same as everything else in $OwnedPaths, and consumers
+    # (discover_layers.py/cep_retrofit.py/scaffold_state.py's manifest
+    # readers) should never treat it as project-authored content either.
+    $OwnedPaths += ".cep-install.json"
+    # RuntimeList: derived from the same $Include* flags that gated the real
+    # copy/merge work below, so the manifest records the tools this run
+    # actually installed for instead of restating the -Runtime string. Every
+    # -Runtime value copies .github/skills/, so "claude" is always present;
+    # the other three names ride along with the tree each one needs. Built
+    # by += onto a plain array rather than an if/else expression, so the
+    # single-element-array collapse described below never applies to it.
+    $RuntimeList = @("claude")
+    if ($IncludePrompts) { $RuntimeList += "copilot" }
+    if ($IncludeCursorRules) { $RuntimeList += "cursor" }
+    if ($IncludeAgentsMd) { $RuntimeList += "codex" }
+    # ConvertTo-Json gotcha: an `if (...) { $arr } else { $null }` expression
+    # captured as a hashtable value silently collapses a *single-element*
+    # array to a bare scalar (verified: a 2+-element array is unaffected,
+    # and a direct `key = $arr` assignment like owned_paths below is also
+    # unaffected — only this if/else-expression shape triggers it). The
+    # unary comma operator (,$OnlySkills) forces array-ness through the
+    # if-branch regardless of element count, so `--only <one-skill>` still
+    # round-trips as a JSON array instead of a bare string. runtime and
+    # merged_paths below use the same direct `key = $arr` assignment shape
+    # as owned_paths (not the if/else-expression shape), so neither is
+    # subject to the collapse and neither needs a comma guard - verified for
+    # the single-element $RuntimeList (-Runtime claude) and for an empty
+    # $MergedPaths, both of which still serialize as JSON arrays.
+    #
+    # merged_paths is always present, and is an empty array on any run that
+    # never merged AGENTS.md (e.g. -Runtime claude or copilot), so readers
+    # can index it unconditionally.
+    $manifest = [ordered]@{
+        schema_version = 1
+        runtime        = $RuntimeList
+        mode           = $Mode
+        only_skills    = if ($OnlySkills.Count -gt 0) { ,$OnlySkills } else { $null }
+        owned_paths    = $OwnedPaths
+        merged_paths   = $MergedPaths
+        installed_at   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    }
+    $json = $manifest | ConvertTo-Json -Depth 5
+    Set-Content -LiteralPath $dst -Value $json -NoNewline
+    Write-InstallAction "wrote: .cep-install.json"
+}
+
+# IncludePrompts / IncludeCursorRules / IncludeAgentsMd: .github/skills/ is
+# always copied (every -Runtime value reads it natively via the CEP skill
+# format); which of the other three trees comes along is scoped per-value
+# instead of one switch conflating all of them — see the .PARAMETER Runtime
+# doc comment above for the full per-value mapping. "both" is today's
+# unconditional copy of everything, unchanged when -Runtime is omitted.
+$IncludePrompts = @("copilot", "cursor", "both") -contains $Runtime
+$IncludeCursorRules = @("cursor", "both") -contains $Runtime
+$IncludeAgentsMd = @("codex", "both") -contains $Runtime
+
+$OwnedPaths = @()
+# MergedPaths: paths this run wrote *into* without owning them outright -
+# today only AGENTS.md, where Merge-AgentsMd writes a marked block and
+# leaves the rest of the file to the adopter. Kept separate from
+# $OwnedPaths so a consumer that excludes owned_paths wholesale still sees
+# the write recorded without treating the whole file as CEP-generated.
+# Script-scoped because Merge-AgentsMd appends to it from inside a function.
+$script:MergedPaths = @()
 if ($OnlyNames.Count -gt 0) {
     foreach ($name in $OnlyNames) {
         Copy-LibraryTree ".github/skills/$name" ".github/skills/$name"
-        Copy-LibraryTree ".github/prompts/$name.prompt.md" ".github/prompts/$name.prompt.md"
-        Copy-LibraryTree ".cursor/rules/$name.mdc" ".cursor/rules/$name.mdc"
+        $OwnedPaths += ".github/skills/$name"
+        if ($IncludePrompts) {
+            Copy-LibraryTree ".github/prompts/$name.prompt.md" ".github/prompts/$name.prompt.md"
+            $OwnedPaths += ".github/prompts/$name.prompt.md"
+        }
+        if ($IncludeCursorRules) {
+            Copy-LibraryTree ".cursor/rules/$name.mdc" ".cursor/rules/$name.mdc"
+            $OwnedPaths += ".cursor/rules/$name.mdc"
+        }
+        if ($name -eq $CepWizardSkillName) {
+            Copy-CepWizardDocs
+            $OwnedPaths += ".github/skills/$CepWizardSkillName/docs"
+        }
     }
 }
 else {
     Copy-LibraryTree ".github/skills" ".github/skills"
-    Copy-LibraryTree ".github/prompts" ".github/prompts"
-    Copy-LibraryTree ".cursor/rules" ".cursor/rules"
+    $OwnedPaths += ".github/skills"
+    if ($IncludePrompts) {
+        Copy-LibraryTree ".github/prompts" ".github/prompts"
+        $OwnedPaths += ".github/prompts"
+    }
+    if ($IncludeCursorRules) {
+        Copy-LibraryTree ".cursor/rules" ".cursor/rules"
+        $OwnedPaths += ".cursor/rules"
+    }
+    Copy-CepWizardDocs
+    $OwnedPaths += ".github/skills/$CepWizardSkillName/docs"
 }
-Merge-AgentsMd
+if ($IncludeAgentsMd) {
+    Merge-AgentsMd
+}
 
 if ($InitProject) {
     New-ContextConfig
     New-ProjectGuidelinesPointer
 }
+
+$CepInstallMode = if ($OnlyNames.Count -gt 0) { "only" } else { "full" }
+New-CepInstallManifest -OwnedPaths $OwnedPaths -MergedPaths $MergedPaths -Mode $CepInstallMode -OnlySkills $OnlyNames
 
 Write-Host ""
 if ($DryRun) {

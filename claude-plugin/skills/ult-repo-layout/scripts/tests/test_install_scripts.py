@@ -5,7 +5,19 @@ subprocess, exercising the same on-disk contract their own --help/synopsis
 promises: copy the skill set (.github/skills/, .github/prompts/,
 .cursor/rules/, AGENTS.md as a marked block) into --target/-TargetPath, and
 under --init-project/-InitProject additionally scaffold context-config.yaml
-and starter_kit/project_guidelines/.pointer.md.
+and starter_kit/project_guidelines/.pointer.md. Also covers two later
+additions with the same on-disk-contract framing: bundling CEP's own docs
+(CONCEPT.md/PROTOCOL.md/README.md/FAQ.md/case-studies/) into
+.github/skills/ult-cep-wizard/docs/ so wizard_docs.py has something to serve
+in a real install, and writing .cep-install.json recording what the
+installer itself just put on disk (see cep_retrofit.py/discover_layers.py/
+scaffold_state.py's own manifest-consumer docstrings for why that fact
+matters downstream). Also covers --runtime/-Runtime claude|copilot|cursor|codex|both, which
+scopes which of .github/prompts/, .cursor/rules/, and an AGENTS.md merge
+come along beside .github/skills/ (always copied, every value) - claude:
+skills only; copilot: skills + prompts; cursor: skills + prompts + rules;
+codex: skills + AGENTS.md; both: everything (default, unchanged when the
+flag is omitted).
 
 Reuses generated_config_text() from test_generated_context_config.py rather
 than re-deriving the substitution table a third time (install.sh and
@@ -19,6 +31,7 @@ CI (ubuntu-latest) has both.
     python -m unittest discover -s scripts/tests -v
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -42,6 +55,28 @@ LIBRARY_DIRS = [
     ".cursor/rules",
 ]
 
+# The manifest's `runtime` array is derived from the include_* flags that
+# actually gate each tree's copy/merge, not from the --runtime/-Runtime
+# string, so every value expands to the full set of tools the run installed
+# for. "claude" is in all of them: .github/skills/ is copied unconditionally.
+RUNTIME_CLAUDE = ["claude"]
+RUNTIME_COPILOT = ["claude", "copilot"]
+RUNTIME_CURSOR = ["claude", "copilot", "cursor"]
+RUNTIME_CODEX = ["claude", "codex"]
+RUNTIME_BOTH = ["claude", "copilot", "cursor", "codex"]
+
+# See Copy-CepWizardDocs (install.ps1) / copy_cep_wizard_docs (install.sh):
+# both installers bundle CEP's own repo-root docs into this path, sibling to
+# the ult-cep-wizard skill itself, so wizard_docs.py has something to serve
+# in a real install. It is NOT part of the .github/skills source tree (its
+# content comes from repo-root files, composed at install time), so
+# test_plain_install_copies_library excludes it from the strict
+# .github/skills tree-match and _assert_cep_wizard_docs_bundle checks it
+# separately instead. Deliberately just the 4 docs, not case-studies/ - see
+# copy_cep_wizard_docs/Copy-CepWizardDocs's own comment on why.
+DOCS_BUNDLE_REL = "ult-cep-wizard/docs"
+DOCS_BUNDLE_SOURCE_FILES = ["CONCEPT.md", "PROTOCOL.md", "README.md", "FAQ.md"]
+
 BEGIN_MARKER = "<!-- BEGIN context-engineering-protocol SKILLS (auto-generated, do not edit) -->"
 END_MARKER = "<!-- END context-engineering-protocol SKILLS -->"
 
@@ -58,15 +93,20 @@ your own files alongside it; they are never touched.
 
 
 
-# Gitignored local build artifacts (see repo .gitignore) that may exist in
-# this checkout's working tree if tests were ever run here. Both installers
-# now exclude these when copying (never leak into an installed target
-# project), so the source side of the comparison must ignore them too -
-# otherwise this test just re-encodes the leak as "correct" behavior.
-_IGNORED_DIR_NAMES = {"__pycache__", ".pytest_cache"}
+# Directory names both installers now always strip when copying, so the
+# source side of every tree-match comparison below must ignore them too -
+# otherwise this test just re-encodes a leak (or a since-removed bundle) as
+# "correct" behavior. __pycache__/.pytest_cache are gitignored local build
+# artifacts that may exist in this checkout's working tree if tests were
+# ever run here; "tests" is CEP's own unit-test subtree, deliberately never
+# shipped into an installed target (see copy_tree/Copy-LibraryTree's own
+# comment on this) - test_no_tests_directories_are_installed below is the
+# positive-absence check that this exclusion isn't just quietly hiding a
+# real leak.
+_IGNORED_DIR_NAMES = {"__pycache__", ".pytest_cache", "tests"}
 
 
-def _tree_files(root: Path):
+def _tree_files(root: Path, ignore_prefixes=()):
     files = set()
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _IGNORED_DIR_NAMES]
@@ -74,14 +114,17 @@ def _tree_files(root: Path):
             if name.endswith(".pyc"):
                 continue
             rel = Path(dirpath, name).relative_to(root)
-            files.add(str(rel).replace("\\", "/"))
+            rel_str = str(rel).replace("\\", "/")
+            if any(rel_str == p or rel_str.startswith(p + "/") for p in ignore_prefixes):
+                continue
+            files.add(rel_str)
     return files
 
 
-def _assert_tree_matches(test, src: Path, dst: Path):
+def _assert_tree_matches(test, src: Path, dst: Path, ignore_prefixes=()):
     test.assertTrue(dst.is_dir(), f"missing directory: {dst}")
-    src_files = _tree_files(src)
-    dst_files = _tree_files(dst)
+    src_files = _tree_files(src, ignore_prefixes)
+    dst_files = _tree_files(dst, ignore_prefixes)
     test.assertEqual(src_files, dst_files, f"file set mismatch between {src} and {dst}")
     for rel in src_files:
         test.assertEqual(
@@ -89,6 +132,122 @@ def _assert_tree_matches(test, src: Path, dst: Path):
             (dst / rel).read_bytes(),
             f"content mismatch: {rel}",
         )
+
+
+def _assert_cep_wizard_docs_bundle(test, target: Path):
+    """Asserts the bundled docs/ subtree (see DOCS_BUNDLE_REL) is present
+    under the installed ult-cep-wizard skill and byte-identical to its
+    repo-root source files, and that case-studies/ was NOT bundled
+    alongside it (deliberately dropped - see copy_cep_wizard_docs/
+    Copy-CepWizardDocs's own comment)."""
+    bundle = target / ".github/skills" / DOCS_BUNDLE_REL
+    test.assertTrue(bundle.is_dir(), f"missing bundled docs dir: {bundle}")
+    for name in DOCS_BUNDLE_SOURCE_FILES:
+        test.assertEqual(
+            (REPO_ROOT / name).read_bytes(),
+            (bundle / name).read_bytes(),
+            f"content mismatch: {name}",
+        )
+    test.assertFalse(
+        (bundle / "case-studies").exists(),
+        f"case-studies/ must not be bundled into an install: {bundle / 'case-studies'}",
+    )
+
+
+def _assert_cep_install_manifest(test, target: Path, mode: str, only_skills=None, runtime=None):
+    """Asserts .cep-install.json's shape (see New-CepInstallManifest in
+    install.ps1 / write_cep_install_manifest in install.sh). `runtime`
+    defaults to the "both" value's expansion (every tool name) — pass the
+    expected list explicitly for any narrower --runtime/-Runtime run.
+
+    merged_paths is derived from `runtime` rather than passed separately:
+    AGENTS.md is merged by exactly the runtimes that include "codex", so
+    the expectation is already fully determined by the runtime list."""
+    manifest_path = target / ".cep-install.json"
+    test.assertTrue(manifest_path.is_file(), f"missing manifest: {manifest_path}")
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    test.assertEqual(data.get("schema_version"), 1)
+    expected_runtime = RUNTIME_BOTH if runtime is None else runtime
+    test.assertEqual(sorted(data.get("runtime") or []), sorted(expected_runtime))
+    test.assertEqual(data.get("mode"), mode)
+    if only_skills:
+        test.assertEqual(sorted(data.get("only_skills") or []), sorted(only_skills))
+    else:
+        test.assertIsNone(data.get("only_skills"))
+    owned = data.get("owned_paths")
+    test.assertIsInstance(owned, list)
+    test.assertTrue(owned, "owned_paths must not be empty")
+    # AGENTS.md is the installer's one merge target - a marked block written
+    # into a file whose remaining content belongs to the adopter - so it is
+    # recorded in merged_paths, never owned_paths. The key is always
+    # present, empty on runtimes that never merge.
+    merged = data.get("merged_paths")
+    test.assertIsInstance(merged, list)
+    test.assertNotIn("AGENTS.md", owned)
+    if "codex" in expected_runtime:
+        test.assertIn("AGENTS.md", merged)
+    else:
+        test.assertEqual(merged, [])
+    test.assertIn("installed_at", data)
+    return data
+
+
+# Verb vocabulary log_action (install.sh) / Write-InstallAction (install.ps1)
+# use for a dry-run line that means "this path would be written" — both
+# scripts share the exact wording at every call site (see
+# copy_tree/Copy-LibraryTree, merge_agents_md/Merge-AgentsMd,
+# scaffold_context_config/New-ContextConfig,
+# scaffold_pointer/New-ProjectGuidelinesPointer, and
+# write_cep_install_manifest/New-CepInstallManifest). These are the
+# dry-run-specific present-tense phrasings ("would create", not "would
+# created") — not derivable from the real-run past-tense verbs by just
+# prefixing "would ". "would update: ..." (the pointer's existing-file
+# dry-run case) is omitted: it only fires when the target already has a
+# pointer file, which a fresh temp dir never does.
+_DRY_RUN_CREATE_VERBS = {
+    "would create",
+    "would overwrite",
+    "would write",
+    "would update block in",
+    "would append block to",
+}
+
+
+def _parse_created_paths(transcript: str):
+    """Extracts every path a dry-run transcript claims it would write, using
+    _DRY_RUN_CREATE_VERBS. Each write site logs exactly one line per
+    top-level call — a whole-directory copy (e.g. ".github/skills") is one
+    line for the whole subtree, while copy_cep_wizard_docs/Copy-CepWizardDocs
+    calls copy_tree/Copy-LibraryTree once per doc file, so it contributes one
+    line per file."""
+    paths = []
+    for line in transcript.splitlines():
+        line = line.strip()
+        if ": " not in line:
+            continue
+        verb, _, rest = line.partition(": ")
+        if verb in _DRY_RUN_CREATE_VERBS:
+            paths.append(rest.strip())
+    return paths
+
+
+def _owned_path_covers(rel: str, owned_paths) -> bool:
+    """True iff `rel` exactly matches one of owned_paths, or is a descendant
+    of one — mirrors the descendant-aware convention discover_layers.py's
+    _manifest_extra_ignored already uses for the same owned_paths list, so a
+    directory entry like ".github/skills" covers every file dry-run reports
+    under it without each file needing its own owned_paths entry."""
+    rel_path = Path(rel)
+    for owned in owned_paths:
+        owned_path = Path(owned)
+        if rel_path == owned_path:
+            return True
+        try:
+            rel_path.relative_to(owned_path)
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 class _InstallScriptTestBase:
@@ -103,7 +262,12 @@ class _InstallScriptTestBase:
             result = self._run(target, [])
             self.assertEqual(result.returncode, 0, result.stderr)
             for rel in LIBRARY_DIRS:
-                _assert_tree_matches(self, REPO_ROOT / rel, target / rel)
+                # .github/skills also gains the bundled ult-cep-wizard/docs/
+                # subtree (see DOCS_BUNDLE_REL) - not part of this source
+                # tree, so excluded here and checked separately below.
+                ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
+                _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            _assert_cep_wizard_docs_bundle(self, target)
             agents = (target / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn(BEGIN_MARKER, agents)
             self.assertIn(END_MARKER, agents)
@@ -111,6 +275,26 @@ class _InstallScriptTestBase:
             self.assertIn(source_agents, agents)
             self.assertFalse((target / "context-config.yaml").exists())
             self.assertFalse((target / "starter_kit").exists())
+            _assert_cep_install_manifest(self, target, mode="full")
+
+    def test_no_tests_directories_are_installed(self):
+        # CEP's own unit-test subtree (scripts/tests/ under every skill
+        # that has one) is never something an installed target needs to
+        # run - a positive-absence check, not just the negative-space
+        # tolerance _IGNORED_DIR_NAMES gives the tree-match assertions
+        # above.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            skills_root = target / ".github" / "skills"
+            self.assertTrue(skills_root.is_dir())
+            found = [
+                str(p.relative_to(target))
+                for p in skills_root.rglob("tests")
+                if p.is_dir()
+            ]
+            self.assertEqual(found, [], f"tests/ dir(s) leaked into install: {found}")
 
     def test_init_project_scaffolds_config_and_pointer(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -143,6 +327,99 @@ class _InstallScriptTestBase:
                 (target / "context-config.yaml").read_text(encoding="utf-8"),
                 "# hand-edited\n",
             )
+
+    def _owned_paths_after_run(self, target, args):
+        """Runs the installer and returns the manifest's owned_paths list."""
+        result = self._run(target, args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(
+            (target / ".cep-install.json").read_text(encoding="utf-8")
+        )
+        owned = data.get("owned_paths")
+        self.assertIsInstance(owned, list)
+        return owned
+
+    def test_reinstall_keeps_ownership_of_scaffolded_context_config(self):
+        # The manifest is rebuilt wholesale on every run, never merged with
+        # the prior one, and scaffold_context_config/New-ContextConfig only
+        # writes context-config.yaml when it is absent. So a second run finds
+        # the file the first run created, skips writing it, and - without the
+        # carry-forward check on that skip branch - would drop it from
+        # owned_paths even though CEP still owns that exact unedited file.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            first = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertIn("context-config.yaml", first)
+
+            generated = (target / "context-config.yaml").read_text(encoding="utf-8")
+            second = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertIn(
+                "context-config.yaml",
+                second,
+                "re-install dropped the ownership claim on a file CEP created",
+            )
+            # Nobody edited it between runs - ownership lapsed purely on the
+            # bookkeeping, which is exactly what must not happen.
+            self.assertEqual(
+                (target / "context-config.yaml").read_text(encoding="utf-8"),
+                generated,
+            )
+
+    def test_ownership_of_scaffolded_context_config_survives_three_runs(self):
+        # The carry-forward reads the prior run's manifest, so it has to keep
+        # working when that manifest was itself written by a carry-forward
+        # rather than by the run that created the file.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            for run_number in (1, 2, 3):
+                owned = self._owned_paths_after_run(target, [self.init_flag])
+                self.assertIn(
+                    "context-config.yaml",
+                    owned,
+                    f"ownership claim lost on run {run_number}",
+                )
+
+    def test_preexisting_context_config_is_never_claimed(self):
+        # Regression guard for the carry-forward above: ownership may only be
+        # carried forward from a genuine prior claim, never invented from the
+        # file merely being present. An adopter's own context-config.yaml
+        # placed before CEP's first install is unclaimed on run 1 (which
+        # itself takes the "skipped (exists)" branch, so no claim is ever
+        # recorded) and must stay unclaimed on every later run too.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            adopter_text = "# adopter-authored\n"
+            (target / "context-config.yaml").write_text(
+                adopter_text, encoding="utf-8"
+            )
+
+            first = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertNotIn("context-config.yaml", first)
+
+            second = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertNotIn(
+                "context-config.yaml",
+                second,
+                "re-install invented an ownership claim on an adopter's file",
+            )
+            self.assertEqual(
+                (target / "context-config.yaml").read_text(encoding="utf-8"),
+                adopter_text,
+            )
+
+    def test_unreadable_prior_manifest_does_not_break_reinstall(self):
+        # The carry-forward consults a file it did not write this run, so a
+        # corrupt or truncated leftover manifest must degrade to "no prior
+        # claim" rather than abort the install.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            self._owned_paths_after_run(target, [self.init_flag])
+            (target / ".cep-install.json").write_text(
+                "{ this is not json", encoding="utf-8"
+            )
+
+            owned = self._owned_paths_after_run(target, [self.init_flag])
+            self.assertIn(".cep-install.json", owned)
 
     def test_dry_run_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -194,9 +471,36 @@ class _InstallScriptTestBase:
             for rel in self._skill_paths("ult-codegraph"):
                 self.assertFalse((target / rel).exists(), f"unselected skill leaked in: {rel}")
 
+            # ult-cep-wizard wasn't selected: no docs bundle at all, not even
+            # an empty one - Copy-CepWizardDocs/copy_cep_wizard_docs only run
+            # when that name is in the selected set.
+            self.assertFalse((target / ".github/skills/ult-cep-wizard").exists())
+
             agents = (target / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn("demo-consume-context", agents)
             self.assertNotIn("ult-codegraph", agents)
+
+            _assert_cep_install_manifest(
+                self, target, mode="only", only_skills=["demo-consume-context"]
+            )
+
+    def test_only_flag_with_cep_wizard_bundles_docs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.only_flag, "ult-cep-wizard"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            for rel in self._skill_paths("ult-cep-wizard"):
+                self.assertTrue((target / rel).exists(), f"missing selected skill path: {rel}")
+            _assert_cep_wizard_docs_bundle(self, target)
+
+            data = _assert_cep_install_manifest(
+                self, target, mode="only", only_skills=["ult-cep-wizard"]
+            )
+            self.assertIn(
+                f".github/skills/{DOCS_BUNDLE_REL}",
+                data["owned_paths"],
+            )
 
     def test_only_flag_supports_multiple_skills(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,6 +522,13 @@ class _InstallScriptTestBase:
             self.assertIn("ult-codegraph", agents)
             self.assertNotIn("compiling-project-guidelines", agents)
 
+            _assert_cep_install_manifest(
+                self,
+                target,
+                mode="only",
+                only_skills=["demo-consume-context", "ult-codegraph"],
+            )
+
     def test_only_flag_rejects_unknown_skill_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
@@ -225,24 +536,220 @@ class _InstallScriptTestBase:
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("bogus-skill-name", result.stderr + result.stdout)
 
+    def test_runtime_claude_installs_skills_tree_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "claude"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((target / ".github/skills").is_dir())
+            self.assertFalse((target / ".github/prompts").exists())
+            self.assertFalse((target / ".cursor/rules").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
+            # The bundled ult-cep-wizard docs live under .github/skills/, so
+            # they're still copied even though prompts/rules are skipped.
+            _assert_cep_wizard_docs_bundle(self, target)
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_CLAUDE)
+
+    def test_runtime_copilot_installs_prompts_but_not_cursor_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "copilot"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for rel in (".github/skills", ".github/prompts"):
+                ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
+                _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            self.assertFalse((target / ".cursor/rules").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_COPILOT)
+
+    def test_runtime_cursor_installs_skills_prompts_and_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "cursor"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for rel in LIBRARY_DIRS:
+                ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
+                _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            self.assertFalse((target / "AGENTS.md").exists())
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_CURSOR)
+
+    def test_runtime_codex_installs_skills_and_agents_md_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "codex"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((target / ".github/skills").is_dir())
+            self.assertFalse((target / ".github/prompts").exists())
+            self.assertFalse((target / ".cursor/rules").exists())
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn(BEGIN_MARKER, agents)
+            self.assertIn(END_MARKER, agents)
+            _assert_cep_wizard_docs_bundle(self, target)
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_CODEX)
+
+    def test_runtime_both_matches_default_behavior(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "both"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for rel in LIBRARY_DIRS:
+                ignore = (DOCS_BUNDLE_REL,) if rel == ".github/skills" else ()
+                _assert_tree_matches(self, REPO_ROOT / rel, target / rel, ignore)
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn(BEGIN_MARKER, agents)
+            _assert_cep_install_manifest(self, target, mode="full", runtime=RUNTIME_BOTH)
+
+    def test_runtime_claude_with_only_flag_skips_prompts_and_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(
+                target, [self.only_flag, "demo-consume-context", self.runtime_flag, "claude"]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((target / ".github/skills/demo-consume-context").is_dir())
+            self.assertFalse((target / ".github/prompts/demo-consume-context.prompt.md").exists())
+            self.assertFalse((target / ".cursor/rules/demo-consume-context.mdc").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
+            _assert_cep_install_manifest(
+                self,
+                target,
+                mode="only",
+                only_skills=["demo-consume-context"],
+                runtime=RUNTIME_CLAUDE,
+            )
+
+    def test_runtime_copilot_dry_run_excludes_cursor_and_agents_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "copilot", self.dry_run_flag])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            transcript = result.stdout
+            self.assertNotIn(".cursor/rules", transcript)
+            self.assertNotIn("AGENTS.md", transcript)
+
+    def test_runtime_rejects_unknown_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = self._run(target, [self.runtime_flag, "bogus-runtime"])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime", (result.stderr + result.stdout).lower())
+
+    def _assert_dry_run_paths_covered_by_owned_paths(self, args, mode, **manifest_kwargs):
+        """Runs a dry-run and a real install with the same `args` in two
+        separate temp dirs, then asserts every path the dry-run transcript
+        reports writing is covered (see _owned_path_covers) by the real
+        install's .cep-install.json. Catches the exact defect class this
+        manifest exists to prevent: a write site the installer performs but
+        forgets to record at all.
+
+        Checked against owned_paths + merged_paths together, not owned_paths
+        alone: what this completeness check is really asserting is "every
+        write the installer performs leaves some record in the manifest",
+        and a "would append/update block" write to AGENTS.md is legitimately
+        recorded in merged_paths (partial ownership) rather than
+        owned_paths. Which of the two lists a path belongs in is asserted by
+        _assert_cep_install_manifest instead."""
+        with tempfile.TemporaryDirectory() as dry_tmp, tempfile.TemporaryDirectory() as real_tmp:
+            dry_target = Path(dry_tmp)
+            dry_result = self._run(dry_target, [*args, self.dry_run_flag])
+            self.assertEqual(dry_result.returncode, 0, dry_result.stderr)
+            created = _parse_created_paths(dry_result.stdout)
+            self.assertTrue(created, "dry-run transcript reported no writes to check")
+
+            real_target = Path(real_tmp)
+            real_result = self._run(real_target, args)
+            self.assertEqual(real_result.returncode, 0, real_result.stderr)
+            data = _assert_cep_install_manifest(self, real_target, mode=mode, **manifest_kwargs)
+            recorded_paths = data.get("owned_paths", []) + data.get("merged_paths", [])
+            owned_paths = data["owned_paths"]
+
+            for rel in created:
+                if rel == ".cep-install.json":
+                    # Recorded by construction (write_cep_install_manifest /
+                    # New-CepInstallManifest appends its own path before
+                    # serializing) — checked directly rather than via
+                    # _owned_path_covers so a future rename of that self-
+                    # append still fails this assertion instead of silently
+                    # passing through the descendant-match fallback.
+                    self.assertIn(".cep-install.json", owned_paths)
+                    continue
+                self.assertTrue(
+                    _owned_path_covers(rel, recorded_paths),
+                    f"dry-run reported writing {rel!r} but no manifest entry covers it: "
+                    f"{recorded_paths!r}",
+                )
+
+    def test_full_install_owned_paths_cover_everything_the_dry_run_reports(self):
+        self._assert_dry_run_paths_covered_by_owned_paths([self.init_flag], mode="full")
+
+    def test_only_install_owned_paths_cover_everything_the_dry_run_reports(self):
+        self._assert_dry_run_paths_covered_by_owned_paths(
+            [self.only_flag, "ult-cep-wizard", self.init_flag],
+            mode="only",
+            only_skills=["ult-cep-wizard"],
+        )
+
+
+def _to_git_bash_path(win_path) -> str:
+    """Converts a native Windows path (e.g. "C:\\foo\\bar") to the MSYS2
+    mount-point form ("/c/foo/bar") Git Bash's own POSIX layer always
+    accepts as an argument. Not every bash build on PATH can be assumed to
+    understand a raw drive-letter path passed straight through as argv (the
+    specific build matters here, not just "is bash present") — converting
+    explicitly removes that assumption instead of depending on it. A no-op
+    shape (backslashes flipped to forward slashes) on any path that isn't
+    drive-letter-rooted, which also makes it harmless on POSIX."""
+    p = str(win_path)
+    if len(p) >= 2 and p[1] == ":" and p[0].isalpha():
+        drive = p[0].lower()
+        rest = p[2:].replace("\\", "/")
+        return f"/{drive}{rest}"
+    return p.replace("\\", "/")
+
+
+def _run_install_sh(target, args):
+    """Module-level so the cross-installer tests below can invoke install.sh
+    without going through a TestInstallSh instance - one definition of how
+    each installer is called, shared by its own test class and by the
+    mixed-installer ones."""
+    return subprocess.run(
+        [
+            "bash",
+            _to_git_bash_path(INSTALL_SH),
+            "--target",
+            _to_git_bash_path(target),
+            *args,
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
+
 
 @unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
 class TestInstallSh(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "--init-project"
     dry_run_flag = "--dry-run"
     only_flag = "--only"
+    runtime_flag = "--runtime"
 
     def _run(self, target, args):
-        return subprocess.run(
-            ["bash", str(INSTALL_SH), "--target", str(target), *args],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-        )
+        return _run_install_sh(target, args)
 
 
 def _powershell_executable():
     return shutil.which("pwsh") or shutil.which("powershell")
+
+
+def _run_install_ps1(target, args):
+    """See _run_install_sh - same rationale, PowerShell side."""
+    exe = _powershell_executable()
+    return subprocess.run(
+        [exe, "-NoProfile", "-File", str(INSTALL_PS1), "-TargetPath", str(target), *args],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
 
 
 @unittest.skipUnless(_powershell_executable(), "neither pwsh nor powershell on PATH")
@@ -250,15 +757,104 @@ class TestInstallPs1(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "-InitProject"
     dry_run_flag = "-DryRun"
     only_flag = "-Only"
+    runtime_flag = "-Runtime"
 
     def _run(self, target, args):
-        exe = _powershell_executable()
-        return subprocess.run(
-            [exe, "-NoProfile", "-File", str(INSTALL_PS1), "-TargetPath", str(target), *args],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
+        return _run_install_ps1(target, args)
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
+@unittest.skipUnless(_powershell_executable(), "neither pwsh nor powershell on PATH")
+class TestCrossInstallerOwnershipCarryForward(unittest.TestCase):
+    """context-config.yaml ownership must survive a re-install by the *other*
+    installer, not just by the same one.
+
+    The two installers are interchangeable on a given target - nothing stops
+    an adopter running install.ps1 on Windows and install.sh from Git Bash or
+    WSL against the same checkout - and each rebuilds .cep-install.json
+    wholesale, reading the prior run's manifest to decide whether a
+    already-present context-config.yaml is one CEP itself created. That read
+    crosses installers, so the two of them have to agree on the manifest
+    format in both directions: install.sh emits single-line JSON arrays by
+    hand, while install.ps1's ConvertTo-Json pretty-prints them across
+    several lines. The same-installer tests in _InstallScriptTestBase cannot
+    see this - each of those classes only ever runs one installer against
+    itself, so each only ever reads back a manifest in the format it just
+    wrote. Both orderings are covered here rather than only the one that
+    happened to break, so neither reader can regress unnoticed."""
+
+    def _owned_paths(self, target):
+        data = json.loads((target / ".cep-install.json").read_text(encoding="utf-8"))
+        owned = data.get("owned_paths")
+        self.assertIsInstance(owned, list)
+        return owned
+
+    def _assert_claim_survives(self, first, second, first_args, second_args):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+
+            result = first(target, first_args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "context-config.yaml",
+                self._owned_paths(target),
+                "the creating installer did not claim the file it scaffolded",
+            )
+            generated = (target / "context-config.yaml").read_text(encoding="utf-8")
+
+            result = second(target, second_args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "context-config.yaml",
+                self._owned_paths(target),
+                "the other installer dropped a still-valid ownership claim - "
+                "most likely it cannot read the manifest format its "
+                "counterpart writes",
+            )
+            # Nothing edited the file between the two runs, so the claim
+            # lapsed purely on bookkeeping if it lapsed at all.
+            self.assertEqual(
+                (target / "context-config.yaml").read_text(encoding="utf-8"),
+                generated,
+            )
+
+    def test_ps1_created_ownership_survives_reinstall_by_sh(self):
+        self._assert_claim_survives(
+            _run_install_ps1,
+            _run_install_sh,
+            ["-InitProject"],
+            ["--init-project"],
         )
+
+    def test_sh_created_ownership_survives_reinstall_by_ps1(self):
+        self._assert_claim_survives(
+            _run_install_sh,
+            _run_install_ps1,
+            ["--init-project"],
+            ["-InitProject"],
+        )
+
+    def test_adopter_context_config_is_never_claimed_across_installers(self):
+        # The mirror of the two above: carrying a claim across installers must
+        # not slide into inventing one. An adopter's own file, present before
+        # either installer ran, stays unclaimed no matter which installer
+        # follows which.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            adopter_text = "# adopter-authored\n"
+            (target / "context-config.yaml").write_text(adopter_text, encoding="utf-8")
+
+            for runner, args in (
+                (_run_install_ps1, ["-InitProject"]),
+                (_run_install_sh, ["--init-project"]),
+            ):
+                result = runner(target, args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("context-config.yaml", self._owned_paths(target))
+            self.assertEqual(
+                (target / "context-config.yaml").read_text(encoding="utf-8"),
+                adopter_text,
+            )
 
 
 if __name__ == "__main__":

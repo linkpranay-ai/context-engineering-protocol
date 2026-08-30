@@ -148,7 +148,14 @@
         </p>
         <p class="retrofit-inventory-target" id="retrofit-inventory-target"></p>
         <p id="retrofit-inventory-message" role="status"></p>
+        <p id="retrofit-tier-summary" class="retrofit-tier-summary"></p>
+        <label class="retrofit-review-gate-label">
+          <input type="checkbox" id="retrofit-inventory-reviewed" />
+          I have reviewed this inventory, including which units are flagged
+          supplementary and why.
+        </label>
         <ul id="retrofit-unclaimed-dirs" class="retrofit-unclaimed-list"></ul>
+        <ul id="retrofit-excluded-owned-paths" class="retrofit-unclaimed-list"></ul>
         <ul id="retrofit-units-list" class="retrofit-units-list"></ul>
       </section>
 
@@ -226,13 +233,13 @@
            steps, this is guide copy only, never a gate on the button itself. -->
       <div id="needs-discover-greenfield" style="display: none;">
         <p>
-          This repo hasn't run <code>ult-repo-layout init</code> yet, so there's no
-          <code>context-config.yaml</code> for Discover to write proposals into.
-          <code>init</code> is a short conversational step with your coding agent
-          &mdash; it asks for this project's name and description, and (optionally)
-          whether its content lives in a separate workspace root &mdash; it never
-          guesses these from existing files. Run <code>/ult-repo-layout init</code>
-          whenever you're ready.
+          A baseline <code>context-config.yaml</code> exists, but this repo hasn't run
+          <code>ult-repo-layout init</code> yet, so layout initialization hasn't
+          completed. <code>init</code> is a short conversational step with your coding
+          agent &mdash; it asks for this project's name and description, and
+          (optionally) whether its content lives in a separate workspace root &mdash;
+          it never guesses these from existing files. Run
+          <code>/ult-repo-layout init</code> whenever you're ready.
         </p>
         <p>
           You can run <strong>Discover</strong> below before or after
@@ -332,6 +339,10 @@
           <h2>Trip-wire</h2>
           <p class="box-desc">Decision-ledger status: entries, cursors, rejected sources.</p>
           <p class="box-meta"></p>
+          <!-- Guide-only "copy this prompt for your agent" card (wizard_stub_content),
+               filled in by renderStubCards() only when /api/status sends one for this
+               box - e.g. the ledger is absent or still empty. -->
+          <div class="stub-card" style="display: none;"></div>
         </article>
       </div>
     </section>

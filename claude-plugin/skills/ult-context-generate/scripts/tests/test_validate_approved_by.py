@@ -160,6 +160,30 @@ class TestGatherPackageFiles(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 vab.gather_package_files(path)
 
+    def test_layout_marker_excluded_from_directory_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "alpha_design_20260701.yaml").write_text(ONE_ENTRY_APPROVED_BY, encoding="utf-8")
+            (tmp_path / ".layout-slots.yaml").write_text(
+                "slots:\n  - slot: context_packages\n", encoding="utf-8"
+            )
+            files = vab.gather_package_files(tmp_path)
+            self.assertEqual([p.name for p in files], ["alpha_design_20260701.yaml"])
+
+    def test_any_dot_prefixed_yaml_is_excluded_not_just_the_layout_marker(self):
+        # Proves the exclusion is a shape rule (any dot-prefixed name), not a
+        # denylist entry naming .layout-slots.yaml specifically -- a future
+        # marker file with a different dot-prefixed name is excluded too,
+        # with no new literal name needed here.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "alpha_design_20260701.yaml").write_text(ONE_ENTRY_APPROVED_BY, encoding="utf-8")
+            (tmp_path / ".some-other-tool-marker.yaml").write_text(
+                "marker: true\n", encoding="utf-8"
+            )
+            files = vab.gather_package_files(tmp_path)
+            self.assertEqual([p.name for p in files], ["alpha_design_20260701.yaml"])
+
 
 class TestMain(unittest.TestCase):
     def test_main_reports_all_valid(self):

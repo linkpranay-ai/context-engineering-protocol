@@ -45,6 +45,7 @@ CLI:
 
 import argparse
 import datetime
+import json
 import os
 import re
 import sys
@@ -71,11 +72,60 @@ from layout_decision_grammar import (  # noqa: E402
 # discovery, not corpus scoring, and does not include the CEP buckets).
 CEP_BUCKET_DIR_NAMES = {"contexts", "inputs", "cache"}
 
+# `.github/` is a fixed How-L2 candidate (HOW_L2_CANDIDATE_DIRS below)
+# because many repos keep their own conventions there (CONTRIBUTING.md,
+# CODEOWNERS, workflow docs). A repo with CEP itself installed also has
+# `.github/skills/` (every installed skill's own SKILL.md plus scripts) and
+# `.github/prompts/` (every installed slash-command prompt) sitting right
+# alongside that - dozens of markdown files that are CEP's own shipped
+# content, not this project's own authored conventions, and enough on their
+# own to make `.github/` outscore every genuine candidate. Mirrors
+# validate_layout.py's own `_owning_skill_installed` convention of treating
+# `.github/skills/` as CEP's install marker.
+#
+# This pair is always applied to the `.github/` candidate scan, whether or
+# not the target repo has a `.cep-install.json` manifest (see
+# _read_cep_manifest below) - an unmanifested repo (CEP installed by an
+# older installer, or copied in by hand) gets exactly this hardcoded pair
+# excluded and nothing more, same as before. When a manifest is present,
+# _manifest_extra_ignored contributes whatever the manifest's own
+# `owned_paths` actually says CEP put under the candidate, and
+# discover_how_l2 unions that with this hardcoded pair rather than replacing
+# it - so a narrower or older manifest never excludes less than an
+# unmanifested repo would, and the manifest-derived half stays correct for
+# any HOW_L2_CANDIDATE_DIRS entry, not just `.github/`, and correct even if
+# a future install adds paths this constant doesn't know about.
+# Used only as `extra_ignored` for the relevant candidate's own scan
+# in discover_how_l2 below - it never touches any other directory's scan,
+# including a legitimately-named `skills/` or `prompts/` directory
+# elsewhere in the repo.
+HOW_L2_GITHUB_CANDIDATE_EXCLUDE = {"skills", "prompts"}
+
 # §17.4's What-L2/How-L2 sibling-scan exclusion list, applied in addition to
-# CEP_BUCKET_DIR_NAMES.
+# CEP_BUCKET_DIR_NAMES. Mirrored by ult-autoscaffold-content/scaffold_state.py's
+# own SCAN_IGNORED_DIR_NAMES -- a small local duplicate, not a shared import
+# (house convention: see that module's own comment on this pair). Keep the
+# two sets content-identical.
+#
+# The equality is asserted from both sides: each skill's own test suite
+# imports the sibling skill's module off sys.path and compares the two sets
+# (test_discover_layers.py's TestScanIgnoredDirNamesParity here,
+# test_scaffold_state.py's mirror of it there). Only test_discover_layers.py
+# used to carry that check, so an edit made from the autoscaffold side had
+# to be run through this skill's suite before anything caught the drift;
+# the mirrored direction closes that hole. Either suite skips its own check
+# when the sibling skill's directory isn't installed -- a partial checkout
+# is not this test's failure to report.
+# "graphify-out" is ult-codegraph's own fixed, always-gitignored tool output
+# location; "third_party"/"starter_kit"/"output_docs"/"extern"/"external"/
+# "deps"/"submodules" are vendor/CEP-bucket names no first-party application
+# module is likely to use (see scaffold_state.py's comment for the full
+# rationale on each).
 SCAN_IGNORED_DIR_NAMES = {
     ".git", "node_modules", "vendor", "dist", "build", "target",
-    ".venv", "__pycache__",
+    ".venv", "__pycache__", "graphify-out",
+    "third_party", "starter_kit", "output_docs", "extern", "external",
+    "deps", "submodules",
 }
 
 DOC_EXTENSIONS = (".md", ".rst", ".adoc")
@@ -173,6 +223,64 @@ def _dir_mtime(dirpath):
         return dirpath.stat().st_mtime
     except OSError:
         return 0.0
+
+
+def _read_cep_manifest(repo_root):
+    """Reads `.cep-install.json` at `repo_root` (written by install.ps1/
+    install.sh) and returns its `owned_paths` as a set of resolved absolute
+    Paths, or None if no manifest exists or it can't be parsed. Deliberately
+    duplicated per-consumer rather than factored into a shared module - this
+    repo's own no-shared-library convention (see `_find_repo_layout_scripts_dir`
+    precedent elsewhere) keeps each small script's dependency surface to
+    Python 3 stdlib plus its declared sibling imports, not a growing shared
+    lib. Callers must treat None as "no signal available" and fall back to
+    their pre-manifest behavior - never an error for an unmanifested repo."""
+    manifest_path = Path(repo_root) / ".cep-install.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    owned = data.get("owned_paths")
+    if not isinstance(owned, list):
+        return None
+    result = set()
+    for item in owned:
+        if isinstance(item, str) and item:
+            result.add((Path(repo_root) / item).resolve())
+    return result
+
+
+def _manifest_extra_ignored(cand_dir, manifest_owned):
+    """Given a HOW_L2_CANDIDATE_DIRS entry's absolute directory and the
+    manifest's `owned_paths` (or None), return the set of immediate child
+    directory *names* under `cand_dir` that are CEP-owned - the same
+    name-based `extra_ignored` shape `_prune_ignored` already expects (see
+    HOW_L2_GITHUB_CANDIDATE_EXCLUDE, now generalized instead of hardcoded to
+    `.github/`). Works for any candidate, not just `.github/` - e.g. an
+    install that lands a candidate-adjacent CEP path elsewhere is excluded
+    the same way, with no new hardcoded pair needed. Returns an empty set
+    when there's no manifest (discover_how_l2 unions this with
+    HOW_L2_GITHUB_CANDIDATE_EXCLUDE for `.github/` in that case, rather than
+    replacing it - see that call site).
+
+    Matches any *descendant* of `cand_dir`, not just a direct child: a
+    manifest entry like `.github/skills/<name>` (written by a `--only`
+    install of a single skill) has to resolve to the immediate-child name
+    `skills` when `cand_dir` is `.github/`, the same as a full-install
+    entry of `.github/skills` itself would. An exact `owned.parent ==
+    cand_dir` check misses this - it only matches an owned path that is
+    itself a direct child, not one nested inside a direct child."""
+    if not manifest_owned:
+        return set()
+    names = set()
+    for owned in manifest_owned:
+        try:
+            rel = owned.relative_to(cand_dir)
+        except ValueError:
+            continue
+        if rel.parts:
+            names.add(rel.parts[0])
+    return names
 
 
 def _has_content(repo_root, rel_path):
@@ -621,12 +729,30 @@ def discover_how_l2(repo_root, config):
             ],
         ), default_path
 
+    manifest_owned = _read_cep_manifest(repo_root)
+
     ranked = []
     for cand_rel in HOW_L2_CANDIDATE_DIRS:
         cand = repo_root / cand_rel.rstrip("/")
         if cand.is_dir():
-            doc_count = _count_docs(cand)
-            if doc_count > 0 or any(True for _ in _iter_files(cand)):
+            # Manifest-derived names are unioned with, never a replacement
+            # for, the hardcoded .github/-only fallback below. A manifest
+            # is a positive, additive signal - it tells us about paths CEP
+            # itself is certain it owns, but it is never proof that nothing
+            # else needs excluding (a narrower/older manifest, e.g. from a
+            # single-skill --only install, must never make results worse
+            # than having no manifest at all).
+            manifest_names = (
+                _manifest_extra_ignored(cand, manifest_owned)
+                if manifest_owned is not None
+                else set()
+            )
+            hardcoded_fallback = (
+                HOW_L2_GITHUB_CANDIDATE_EXCLUDE if cand_rel == ".github/" else frozenset()
+            )
+            extra_ignored = manifest_names | hardcoded_fallback
+            doc_count = _count_docs(cand, extra_ignored)
+            if doc_count > 0 or any(True for _ in _iter_files(cand, extra_ignored)):
                 ranked.append((cand_rel, doc_count, _dir_mtime(cand)))
     ranked.sort(key=lambda r: (r[1], r[2]), reverse=True)
 

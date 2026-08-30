@@ -15,6 +15,7 @@ is always a fabricated placeholder library ("widget-reviewer", "second-widget")
 never a real skill name, matching ult-cep-retrofit's own zero-hardcoded-knowledge
 rule and this repo's established test-fixture naming.
 """
+import json
 import sys
 import tempfile
 import unittest
@@ -128,6 +129,9 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         result = wri.build_inventory(str(self.root), ".")
         self.assertEqual(result.target_rel_path, ".")
         self.assertEqual(result.unclaimed_dirs, ["orphan-notes"])
+        # No .cep-install.json in this fixture, so nothing was pruned - the
+        # field is still present and empty, never absent.
+        self.assertEqual(result.excluded_owned_paths, [])
 
         by_id = {u.unit_id: u for u in result.units}
         self.assertEqual(set(by_id), {"widget-reviewer", "second-widget.md"})
@@ -154,6 +158,30 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         self.assertTrue(flat_file.task_related)
         self.assertIn("plans", flat_file.matched_task_terms)
         self.assertEqual(flat_file.primary_file, "second-widget.md")
+
+    def test_manifest_owned_paths_are_passed_through_as_excluded(self):
+        # A target with its own .cep-install.json has those paths pruned by
+        # cep_retrofit.inventory(). build_inventory() must carry that list
+        # through to the frontend, target-relative and unrewritten, the same
+        # way unclaimed_dirs is - otherwise the wizard shows an inventory
+        # with a silent hole in it.
+        _write(
+            self.root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude", "copilot"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": [".github/skills"],
+                "merged_paths": [],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        result = wri.build_inventory(str(self.root), ".")
+        self.assertIn(".github/skills", result.excluded_owned_paths)
+        unit_ids = {u.unit_id for u in result.units}
+        self.assertFalse(any(u.startswith(".github/skills") for u in unit_ids))
+        self.assertIn(".github/skills", wri.to_json_dict(result)["excluded_owned_paths"])
 
     def test_to_json_dict_round_trips_as_plain_dict(self):
         result = wri.build_inventory(str(self.root), ".")
@@ -212,6 +240,132 @@ class TestSuccessfulInventory(RetrofitInventoryTestCase):
         # against repo_root (not `target`) must be able to resolve.
         for unit in result.units:
             self.assertTrue((self.root / unit.primary_file).is_file())
+
+    def test_flat_file_matching_skill_dir_name_is_flagged_not_dropped(self):
+        # Regression test: cep_retrofit.inventory()'s union-of-heuristics
+        # design (correct and intentional at that layer - see its docstring)
+        # means a flat *.md file named after an existing skill directory
+        # (e.g. a stray skills/implement.md sibling of
+        # skills/implement/SKILL.md) surfaces as a second, independent
+        # unit. Real library run returned 82 units instead of the true 37,
+        # with duplicate "implement" entries. This wizard view flags that
+        # unit rather than silently dropping it - see
+        # _flag_stray_duplicate_flat_files's own docstring for why a drop
+        # (an earlier version of this function) turned out to be the wrong
+        # call. Sibling placement here (both directly under "skills") is
+        # the easy case; test_separate_top_level_trees_with_matching_leaf_
+        # name_are_flagged below covers the shape that a proximity-gated
+        # version of this check used to miss entirely.
+        _write(self.root / "library" / "skills" / "implement" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "skills" / "implement.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"skills/implement", "skills/implement.md"})
+
+        skill_dir = by_id["skills/implement"]
+        self.assertEqual(skill_dir.type, "skill-dir")
+        self.assertEqual(skill_dir.tier, "canonical")
+        self.assertEqual(skill_dir.note, "")
+
+        flat_file = by_id["skills/implement.md"]
+        self.assertEqual(flat_file.type, "flat-file")
+        self.assertEqual(flat_file.tier, "supplementary")
+        self.assertIn("duplicates skills/implement", flat_file.note)
+
+    def test_root_adjacent_same_stem_flat_file_is_flagged_not_dropped(self):
+        # A flat file sitting right outside the directory tree holding the
+        # skill-dir it duplicates - same flag-not-drop treatment as the
+        # sibling case above.
+        _write(self.root / "library" / "skills" / "implement" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "implement.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"skills/implement", "implement.md"})
+
+        flat_file = by_id["implement.md"]
+        self.assertEqual(flat_file.tier, "supplementary")
+        self.assertIn("duplicates skills/implement", flat_file.note)
+
+    def test_separate_top_level_trees_with_matching_leaf_name_are_flagged(self):
+        # The exact real-world shape a proximity-gated version of this check
+        # used to miss: a documentation flat-file and its skill-dir
+        # counterpart living in two entirely separate top-level trees
+        # (docs/ vs. skills/), sharing only a leaf name ("implement") - not
+        # siblings, not one level apart. Matching is unconditional on
+        # location now, so this pair must be flagged, not silently missed.
+        _write(self.root / "library" / "skills" / "engineering" / "implement" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "docs" / "engineering" / "implement.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"skills/engineering/implement", "docs/engineering/implement.md"})
+
+        flat_file = by_id["docs/engineering/implement.md"]
+        self.assertEqual(flat_file.tier, "supplementary")
+        self.assertIn("duplicates skills/engineering/implement", flat_file.note)
+
+    def test_double_suffix_companion_is_flagged_not_dropped(self):
+        # A .prompt.md companion of a skill-dir must still be recognized as
+        # a stem match - the double suffix has to be stripped before stem
+        # comparison, or "widget.prompt" (the un-stripped stem) never
+        # matches "widget".
+        _write(self.root / "library" / "skills" / "widget" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "skills" / "widget.prompt.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"skills/widget", "skills/widget.prompt.md"})
+
+        flat_file = by_id["skills/widget.prompt.md"]
+        self.assertEqual(flat_file.tier, "supplementary")
+        self.assertIn("duplicates skills/widget", flat_file.note)
+
+
+class TestTierPropagation(RetrofitInventoryTestCase):
+    def setUp(self):
+        super().setUp()
+        _install_ult_cep_retrofit(self.root)
+
+    def test_tier_and_note_propagate_onto_each_unit(self):
+        _write(self.root / "widget-reviewer" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "docs" / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+        by_id = {u.unit_id: u for u in result.units}
+
+        skill_dir = by_id["widget-reviewer"]
+        self.assertEqual(skill_dir.tier, "canonical")
+        self.assertEqual(skill_dir.note, "")
+
+        docs_flat_file = by_id["docs/second-widget.md"]
+        self.assertEqual(docs_flat_file.tier, "supplementary")
+        self.assertNotEqual(docs_flat_file.note, "")
+
+    def test_result_reports_tier_counts_reflecting_all_units_including_flagged_duplicates(self):
+        # tier_counts must reflect what's actually in result.units after
+        # _flag_stray_duplicate_flat_files() runs. Nothing is dropped any
+        # more, so all three units survive; the stem-matched flat file is
+        # flagged supplementary with a duplicate note, and the unrelated
+        # flat file is supplementary too (cep_retrofit.py's own default tier
+        # for every flat-file unit) but carries no duplicate note.
+        _write(self.root / "skills" / "widget" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "skills" / "widget.md", SECOND_WIDGET_MD)
+        _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+
+        self.assertEqual(len(result.units), 3)
+        self.assertEqual(result.tier_counts, {"canonical": 1, "supplementary": 2})
+
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertIn("duplicates skills/widget", by_id["skills/widget.md"].note)
+        self.assertEqual(by_id["second-widget.md"].note, "")
 
 
 class TestDescribeErrorIsolation(RetrofitInventoryTestCase):

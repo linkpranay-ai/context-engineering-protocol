@@ -95,8 +95,10 @@ That copies `.github/skills/`, `.github/prompts/`, `.cursor/rules/`, and `AGENTS
 project, and (with `--init-project`/`-InitProject`) scaffolds a starter `context-config.yaml`.
 Re-running is safe — library files are refreshed, project-owned files (like a filled-in
 `context-config.yaml`) are left alone. Run `./install.sh --help` / `Get-Help ./install.ps1` for
-the full flag list, including `--dry-run`/`-DryRun` and `--only`/`-Only <skill1,skill2>` to
-install just a subset of skills instead of the full set.
+the full flag list, including `--dry-run`/`-DryRun`, `--only`/`-Only <skill1,skill2>` to
+install just a subset of skills instead of the full set, and `--runtime`/`-Runtime
+claude|copilot|both` (default `both`) to scope the install to `.github/skills/` alone
+(`claude`) or also include `.github/prompts/`/`.cursor/rules/` (`copilot`, `both`).
 
 You can also drive layout setup itself through a browser instead of the CLI above —
 `ult-repo-layout` doesn't need to have run first; a repo with it merely *installed*

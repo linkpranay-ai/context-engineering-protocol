@@ -96,6 +96,29 @@ class InventoryHeuristicCTest(unittest.TestCase):
             result = cep_retrofit.inventory(tmp)
             self.assertEqual(result["units"], [])
 
+    def test_root_control_files_excluded_from_flat_units(self):
+        # AGENTS.md/CLAUDE.md/CONTEXT.md describe how to work in a repo as a
+        # whole - not retrofittable skill units, same class as README/LICENSE.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "AGENTS.md", "agents")
+            _write(Path(tmp) / "CLAUDE.md", "claude")
+            _write(Path(tmp) / "CONTEXT.md", "context")
+            result = cep_retrofit.inventory(tmp)
+            self.assertEqual(result["units"], [])
+
+    def test_non_skill_flat_names_checked_at_root_depth_only(self):
+        # _NON_SKILL_FLAT_NAMES's exclusion is a depth-0 (target-root-only)
+        # rule -- a nested file sharing one of those names is a different
+        # thing (some other convention's real per-directory doc) and must
+        # surface, unlike the true root-level case above.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "AGENTS.md", "agents")
+            _write(Path(tmp) / "rules" / "agents.md", "nested agents rule")
+            _write(Path(tmp) / "rules" / "context.md", "nested context rule")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertEqual(unit_ids, {"rules/agents.md", "rules/context.md"})
+
 
 class InventoryUnionNotWinnerTakeAllTest(unittest.TestCase):
     """The blocking review finding: mixed conventions must not swallow each other."""
@@ -126,9 +149,269 @@ class InventoryExclusionsTest(unittest.TestCase):
             result = cep_retrofit.inventory(tmp)
             self.assertEqual(result["units"], [])
 
+    def test_former_governance_denylist_names_now_surface_as_supplementary(self):
+        # A previous round excluded "adr"/".changeset"/".out-of-scope" by
+        # name. That's gone now: shape/tiering replaced the rationale -- a
+        # directory with one of those names but no SKILL.md is no different
+        # from any other directory holding ordinary markdown, so its *.md
+        # files surface via heuristic (c), tagged "supplementary" (a weaker
+        # guess than a dedicated skill-dir/manifest-dir), not silently
+        # dropped by a denylist that would need a new name added every time
+        # some other org's governance convention showed up.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "adr" / "0001-decision.md", "# ADR 1\n")
+            _write(Path(tmp) / "nested" / "adr" / "0002-decision.md", "# ADR 2\n")
+            _write(Path(tmp) / ".changeset" / "some-change.md", "# Change\n")
+            _write(Path(tmp) / ".out-of-scope" / "draft.md", "# Draft\n")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertEqual(
+                unit_ids,
+                {
+                    "adr/0001-decision.md",
+                    "nested/adr/0002-decision.md",
+                    ".changeset/some-change.md",
+                    ".out-of-scope/draft.md",
+                },
+            )
+            self.assertTrue(all(u["tier"] == "supplementary" for u in result["units"]))
+
     def test_missing_root_raises(self):
         with self.assertRaises(NotADirectoryError):
             cep_retrofit.inventory("/definitely/does/not/exist/anywhere")
+
+    def test_default_excluded_name_holding_a_real_skill_is_still_inventoried(self):
+        # Negative control for test_generated_dirs_excluded above:
+        # name-based exclusion must be strictly weaker than the shape
+        # check. A directory that happens to be named "node_modules" (or
+        # any other DEFAULT_EXCLUDES entry) but actually holds a SKILL.md
+        # is a real, legitimate skill-dir -- it must never be silently
+        # dropped just because its name matches a tooling/VCS-directory
+        # convention.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "node_modules" / "SKILL.md", "# Odd but real skill\n")
+            _write(Path(tmp) / "review" / "SKILL.md", "# Review skill\n")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertEqual(unit_ids, {"node_modules", "review"})
+
+
+class InventoryManifestExclusionTest(unittest.TestCase):
+    def _write_manifest(self, tmp, owned_paths, mode="full", only_skills=None):
+        _write(
+            Path(tmp) / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude", "copilot"],
+                "mode": mode,
+                "only_skills": only_skills,
+                "owned_paths": owned_paths,
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+
+    def test_manifest_owned_container_excluded_from_units_and_unclaimed(self):
+        # Common full-install shape: manifest owns ".github/skills" itself
+        # (a container), which holds a real SKILL.md-bearing subdirectory.
+        # The whole subtree is CEP's own installed content and must not be
+        # surfaced as a retrofit candidate, or leak into unclaimed_dirs.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / ".github" / "skills" / "installed-skill" / "SKILL.md", "# Installed\n")
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            self._write_manifest(tmp, [".github/skills", ".github/prompts"])
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertEqual(unit_ids, {"widget-reviewer"})
+            self.assertNotIn(".github/skills/installed-skill", result.get("unclaimed_dirs", []))
+            # Excluded, but not invisibly: the pruned container is reported
+            # so the calling skill can show a human what the scan left out.
+            self.assertIn(".github/skills", result["excluded_owned_paths"])
+
+    def test_excluded_owned_paths_is_empty_when_nothing_was_pruned(self):
+        # The key is always present, so a consumer can read it unconditionally
+        # -- empty on a scan where no manifest-owned path matched anything.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            result = cep_retrofit.inventory(tmp)
+            self.assertEqual(result["excluded_owned_paths"], [])
+
+    def test_manifest_absent_leaves_behavior_unchanged(self):
+        # No .cep-install.json in this fixture -- _read_cep_manifest must
+        # return None (not raise), and inventory() must fall back to
+        # today's DEFAULT_EXCLUDES-only behavior: an un-manifested ".github/
+        # skills" subtree is a real candidate like any other directory.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(cep_retrofit._read_cep_manifest(tmp))
+            _write(Path(tmp) / ".github" / "skills" / "installed-skill" / "SKILL.md", "# Installed\n")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertIn(".github/skills/installed-skill", unit_ids)
+
+    def test_only_mode_manifest_naming_a_skill_dir_directly_is_excluded(self):
+        # An -Only install's manifest names skill-dirs *directly* as
+        # owned_paths (rather than a container), and every such directory
+        # also carries a SKILL.md. Manifest ownership is checked before the
+        # shape checks, so the directory is excluded like any other owned
+        # path -- not reported as a human-authored candidate on the strength
+        # of a shape that CEP's own installed content always has.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / ".github" / "skills" / "example-skill" / "SKILL.md", "# Example\n")
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            self._write_manifest(
+                tmp,
+                [".github/skills/example-skill"],
+                mode="only",
+                only_skills=["example-skill"],
+            )
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertNotIn(".github/skills/example-skill", unit_ids)
+            # The target's own content is untouched by the exclusion.
+            self.assertEqual(unit_ids, {"widget-reviewer"})
+            self.assertNotIn(".github/skills/example-skill", result["unclaimed_dirs"])
+            self.assertIn(".github/skills/example-skill", result["excluded_owned_paths"])
+
+    def test_manifest_owned_dir_with_manifest_file_shape_is_excluded(self):
+        # Same ordering gap from the other shape's side: an owned directory
+        # holding exactly one recognizable manifest file would match
+        # heuristic (b). Ownership still wins.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "installed" / "example-skill" / "skill.yaml", "name: example\n")
+            self._write_manifest(
+                tmp,
+                ["installed/example-skill"],
+                mode="only",
+                only_skills=["example-skill"],
+            )
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertNotIn("installed/example-skill", unit_ids)
+            self.assertEqual(result["units"], [])
+            self.assertIn("installed/example-skill", result["excluded_owned_paths"])
+
+    def test_ordinary_skill_dir_and_manifest_dir_detection_unaffected_by_a_manifest(self):
+        # Negative control for the two tests above: with a manifest present
+        # that owns something else entirely, ordinary shape detection still
+        # produces canonical skill-dir/manifest-dir units exactly as before.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            _write(Path(tmp) / "second-widget" / "skill.yaml", "name: second-widget\n")
+            self._write_manifest(tmp, [".github/skills"])
+            result = cep_retrofit.inventory(tmp)
+            by_id = {u["unit_id"]: u for u in result["units"]}
+            self.assertEqual(set(by_id), {"widget-reviewer", "second-widget"})
+            self.assertEqual(by_id["widget-reviewer"]["type"], "skill-dir")
+            self.assertEqual(by_id["second-widget"]["type"], "manifest-dir")
+
+    def test_manifest_owned_individual_file_excluded_from_flat_file_units(self):
+        # owned_paths can name an individual file, not just a container
+        # directory (e.g. a bundled doc copied next to project content
+        # rather than under a container the walk already prunes). A flat
+        # file exactly matching a manifest-owned path must be excluded the
+        # same way an owned container is, not surfaced as a flat-file unit.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "docs" / "cep-bundled-note.md", "# CEP note\n")
+            _write(Path(tmp) / "docs" / "genuine-guide.md", "# Genuine guide\n")
+            self._write_manifest(tmp, ["docs/cep-bundled-note.md"])
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertNotIn("docs/cep-bundled-note.md", unit_ids)
+            self.assertIn("docs/genuine-guide.md", unit_ids)
+            # Reported, like an owned container is, so a human reviewing the
+            # inventory can see which file the manifest claimed.
+            self.assertIn("docs/cep-bundled-note.md", result["excluded_owned_paths"])
+            self.assertNotIn("docs/genuine-guide.md", result["excluded_owned_paths"])
+
+    def test_dir_whose_only_candidate_file_is_manifest_owned_is_not_unclaimed(self):
+        # unclaimed_dirs means "human-authored content the heuristics
+        # couldn't classify -- look at this". A directory whose only
+        # qualifying file was just pruned as manifest-owned has no such
+        # content left, and reporting it would directly contradict this
+        # same payload's excluded_owned_paths entry for that file.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "docs" / "cep-bundled-note.md", "# CEP note\n")
+            self._write_manifest(tmp, ["docs/cep-bundled-note.md"])
+            result = cep_retrofit.inventory(tmp)
+            self.assertNotIn("docs", result["unclaimed_dirs"])
+            self.assertEqual(result["units"], [])
+            # Still visible as an exclusion, just not double-reported as
+            # unclaimed content.
+            self.assertIn("docs/cep-bundled-note.md", result["excluded_owned_paths"])
+
+    def test_dir_with_one_owned_and_one_genuine_candidate_file_is_still_unclaimed(self):
+        # Sibling of the test above, guarding against overcorrection: the
+        # prune only discounts the owned file. One genuine non-owned
+        # qualifying file is still enough candidate content on its own.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "docs" / "cep-bundled-note.md", "# CEP note\n")
+            _write(Path(tmp) / "docs" / "genuine-guide.md", "# Genuine guide\n")
+            self._write_manifest(tmp, ["docs/cep-bundled-note.md"])
+            result = cep_retrofit.inventory(tmp)
+            self.assertIn("docs", result["unclaimed_dirs"])
+            self.assertIn("docs/cep-bundled-note.md", result["excluded_owned_paths"])
+
+    def test_manifest_owned_param_overrides_autodetection(self):
+        # Passing manifest_owned explicitly (e.g. manifest_owned=set())
+        # disables manifest-based exclusion entirely, even when a real
+        # .cep-install.json is present on disk -- documented override,
+        # mainly for tests.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / ".github" / "skills" / "installed-skill" / "SKILL.md", "# Installed\n")
+            self._write_manifest(tmp, [".github/skills"])
+            result = cep_retrofit.inventory(tmp, manifest_owned=set())
+            unit_ids = {u["unit_id"] for u in result["units"]}
+            self.assertIn(".github/skills/installed-skill", unit_ids)
+
+
+class InventoryTieringTest(unittest.TestCase):
+    def test_skill_dir_and_manifest_dir_are_canonical_with_no_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            _write(Path(tmp) / "second-widget" / "skill.yaml", "name: second-widget\n")
+            result = cep_retrofit.inventory(tmp)
+            for unit in result["units"]:
+                self.assertEqual(unit["tier"], "canonical")
+                self.assertEqual(unit["note"], "")
+
+    def test_flat_file_outside_docs_is_supplementary_with_no_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "rules" / "widget.mdc", "widget rule")
+            result = cep_retrofit.inventory(tmp)
+            unit = result["units"][0]
+            self.assertEqual(unit["tier"], "supplementary")
+            self.assertEqual(unit["note"], "")
+
+    def test_flat_file_under_docs_is_supplementary_with_a_note(self):
+        # "docs" at any depth, not just directly under the target root.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "docs" / "implement.md", "# Implement\n")
+            _write(Path(tmp) / "nested" / "docs" / "deploy.md", "# Deploy\n")
+            result = cep_retrofit.inventory(tmp)
+            unit_ids = {u["unit_id"]: u for u in result["units"]}
+            for unit_id in ("docs/implement.md", "nested/docs/deploy.md"):
+                self.assertEqual(unit_ids[unit_id]["tier"], "supplementary")
+                self.assertNotEqual(unit_ids[unit_id]["note"], "")
+
+    def test_docs_ancestor_match_ignores_case(self):
+        # A library that capitalizes the directory ("Docs", "DOCS") gets the
+        # same weaker-signal note as a lowercase "docs" -- the note is about
+        # the directory's meaning, not its exact spelling.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "Docs" / "implement.md", "# Implement\n")
+            _write(Path(tmp) / "nested" / "DOCS" / "deploy.md", "# Deploy\n")
+            result = cep_retrofit.inventory(tmp)
+            units_by_id = {u["unit_id"]: u for u in result["units"]}
+            for unit_id in ("Docs/implement.md", "nested/DOCS/deploy.md"):
+                self.assertEqual(units_by_id[unit_id]["tier"], "supplementary")
+                self.assertNotEqual(units_by_id[unit_id]["note"], "")
+
+    def test_tier_counts_summarizes_across_all_units(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(Path(tmp) / "widget-reviewer" / "SKILL.md", "# Widget Reviewer\n")
+            _write(Path(tmp) / "docs" / "implement.md", "# Implement\n")
+            _write(Path(tmp) / "flat-rule.prompt.md", "flat rule")
+            result = cep_retrofit.inventory(tmp)
+            self.assertEqual(result["tier_counts"], {"canonical": 1, "supplementary": 2})
 
 
 @unittest.skipUnless(hasattr(os, "symlink"), "symlinks not supported on this platform/permission level")

@@ -6,6 +6,7 @@ with scaffold_state.py itself. Run with:
     python -m unittest discover -s scripts/tests -v
 """
 
+import json
 import sys
 import tempfile
 import unittest
@@ -111,8 +112,83 @@ class FilesystemScanHelperTests(unittest.TestCase):
                 (root / name).mkdir()
             self.assertEqual(ss._top_level_candidate_dirs(root), ["core"])
 
+    def test_top_level_candidate_dirs_prunes_vendor_and_cep_scaffold_stopgap_names(self):
+        # The seven name-based stopgap entries SCAN_IGNORED_DIR_NAMES adds on
+        # top of graphify-out: "starter_kit"/"output_docs" (CEP's own
+        # scaffolded locations, kept as a fallback for manifest-unaware
+        # repos -- see test_top_level_candidate_dirs_keeps_manifest_owned_
+        # name_without_manifest_when_not_denylisted below for the case a
+        # manifest-unaware repo still needs) and "third_party"/"extern"/
+        # "external"/"deps"/"submodules" (a project's own vendored code, a
+        # problem the manifest can never see at all).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            stopgap_names = (
+                "third_party", "starter_kit", "output_docs", "extern",
+                "external", "deps", "submodules",
+            )
+            for name in ("core",) + stopgap_names:
+                (root / name).mkdir()
+            self.assertEqual(ss._top_level_candidate_dirs(root), ["core"])
+
     def test_top_level_candidate_dirs_missing_root_returns_empty(self):
         self.assertEqual(ss._top_level_candidate_dirs("/does/not/exist/anywhere"), [])
+
+    def test_top_level_candidate_dirs_excludes_manifest_owned_top_level_name(self):
+        # custom_output_bucket/ has no dot prefix and isn't in
+        # SCAN_IGNORED_DIR_NAMES, so without manifest awareness it would be
+        # walked and tiered like a real application module -- the exact
+        # false-positive _manifest_owned_top_level_names exists to close.
+        # Deliberately not "starter_kit" here (that name is covered by the
+        # denylist stopgap test above regardless of manifest presence) --
+        # this fixture isolates manifest-driven exclusion from the
+        # name-based denylist, so a regression in either one shows up as
+        # exactly one of these two test pairs failing, not both.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "core").mkdir()
+            _write(
+                root / "custom_output_bucket" / "project_guidelines" / "GUIDE.md",
+                "# guide",
+            )
+            _write(
+                root / ".cep-install.json",
+                json.dumps({
+                    "schema_version": 1,
+                    "runtime": ["claude", "copilot"],
+                    "mode": "full",
+                    "only_skills": None,
+                    "owned_paths": [
+                        ".github/skills",
+                        ".github/prompts",
+                        "custom_output_bucket/project_guidelines",
+                    ],
+                    "installed_at": "2026-01-01T00:00:00Z",
+                }),
+            )
+            self.assertEqual(ss._top_level_candidate_dirs(root), ["core"])
+
+    def test_top_level_candidate_dirs_keeps_manifest_owned_name_without_manifest_when_not_denylisted(self):
+        # Same custom_output_bucket/ fixture as above, but with no
+        # .cep-install.json present -- _read_cep_manifest must return None
+        # (not raise), and scaffold_state falls back to pre-manifest
+        # behavior: custom_output_bucket/ still surfaces as a real
+        # candidate module, exactly as it always has for a manually
+        # installed or unmanifested repo. (A name actually in
+        # SCAN_IGNORED_DIR_NAMES, like starter_kit, would stay pruned even
+        # here -- that's the point of the denylist stopgap; this test picks
+        # a name outside it specifically to isolate manifest-only behavior.)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "core").mkdir()
+            _write(
+                root / "custom_output_bucket" / "project_guidelines" / "GUIDE.md",
+                "# guide",
+            )
+            self.assertIsNone(ss._read_cep_manifest(root))
+            self.assertEqual(
+                ss._top_level_candidate_dirs(root), ["core", "custom_output_bucket"]
+            )
 
     def test_iter_files_prunes_nested_ignored_dirs(self):
         with tempfile.TemporaryDirectory() as d:
@@ -416,20 +492,151 @@ class GraphRepoRootAlignmentTests(unittest.TestCase):
         self.assertIn("src", message)
 
 
+class GraphCepContaminationTests(unittest.TestCase):
+    """_check_graph_cep_contamination() -- a different, thinner footgun
+    than GraphRepoRootAlignmentTests above: the graph points at the right
+    repo, but graphify was never scoped away from CEP's own installed
+    footprint (skills/, docs, wizard scripts -- whatever this repo's own
+    .cep-install.json manifest lists under owned_paths), so a slice of the
+    graph's nodes are CEP's own internal wiring, not the target's code."""
+
+    @staticmethod
+    def _graph(*source_files):
+        return {
+            "nodes": [
+                {"id": "n{}".format(i), "source_file": sf}
+                for i, sf in enumerate(source_files)
+            ]
+        }
+
+    def test_returns_none_when_no_manifest_present(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            graph = self._graph("legacy/old.py", "core/main.py")
+            self.assertIsNone(ss._check_graph_cep_contamination(root, graph))
+
+    def test_returns_none_when_manifest_has_no_owned_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(root / ".cep-install.json", json.dumps({}))
+            graph = self._graph("legacy/old.py", "core/main.py")
+            self.assertIsNone(ss._check_graph_cep_contamination(root, graph))
+
+    def test_returns_none_when_graph_has_no_nodes(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(
+                root / ".cep-install.json", json.dumps({"owned_paths": ["legacy"]})
+            )
+            self.assertIsNone(ss._check_graph_cep_contamination(root, {"nodes": []}))
+
+    def test_returns_none_when_contamination_is_below_threshold(self):
+        # 1 of 20 nodes owned -- 5%, not strictly greater than the 5%
+        # threshold, so this must NOT warn (matches the rest of this
+        # module's own ">" -- not ">=" -- convention for a warn threshold).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(
+                root / ".cep-install.json", json.dumps({"owned_paths": ["legacy"]})
+            )
+            source_files = ["legacy/old.py"] + [
+                "core/f{}.py".format(i) for i in range(19)
+            ]
+            warning = ss._check_graph_cep_contamination(root, self._graph(*source_files))
+            self.assertIsNone(warning)
+
+    def test_warns_when_contamination_exceeds_threshold(self):
+        # 2 of 20 nodes owned -- 10% > 5% threshold.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(
+                root / ".cep-install.json", json.dumps({"owned_paths": ["legacy"]})
+            )
+            source_files = ["legacy/old.py", "legacy/older.py"] + [
+                "core/f{}.py".format(i) for i in range(18)
+            ]
+            warning = ss._check_graph_cep_contamination(root, self._graph(*source_files))
+            self.assertIsNotNone(warning)
+            self.assertIn("2/20", warning)
+            self.assertIn(".cep-install.json", warning)
+
+    def test_owned_file_path_counts_toward_contamination_too(self):
+        # owned_paths isn't only directories -- a manifest-owned single
+        # file (e.g. AGENTS.md, context-config.yaml) must count too if the
+        # graph somehow indexed it.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            _write(
+                root / ".cep-install.json",
+                json.dumps({"owned_paths": ["AGENTS.md"]}),
+            )
+            source_files = ["AGENTS.md"] + ["core/f{}.py".format(i) for i in range(18)]
+            warning = ss._check_graph_cep_contamination(root, self._graph(*source_files))
+            self.assertIsNotNone(warning)
+            self.assertIn("1/19", warning)
+
+
 class TierAssignmentTests(unittest.TestCase):
     def test_tier_for_graph_thresholds(self):
-        self.assertEqual(ss._tier_for_graph(10, False), (1, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(9, False), (2, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(1, False), (2, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(0, False), (3, "graph:in-degree"))
-        self.assertEqual(ss._tier_for_graph(62, True), (0, "generated"))
+        # node_count > 0 in every non-empty case below -- a real module with
+        # its own nodes, regardless of in-degree.
+        self.assertEqual(ss._tier_for_graph(10, False, 5, 5), (1, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(9, False, 5, 5), (2, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(1, False, 5, 5), (2, "graph:in-degree"))
+        # in_degree 0 with node_count > 0 -- a real tier-3 leaf (has its own
+        # nodes, nothing else just imports it), not empty.
+        self.assertEqual(ss._tier_for_graph(0, False, 5, 5), (3, "graph:in-degree"))
+        self.assertEqual(ss._tier_for_graph(62, True, 5, 5), (0, "generated"))
+
+    def test_tier_for_graph_zero_nodes_and_zero_files_is_empty_not_leaf(self):
+        # node_count == 0 AND file_count == 0 -- nothing under this
+        # directory at all. Distinct from the in_degree==0-but-has-nodes
+        # leaf case above: this must never be offered as a selectable
+        # tier-3 module.
+        self.assertEqual(ss._tier_for_graph(0, False, 0, 0), (None, "empty"))
+        # generated still takes priority over empty, same as it does over
+        # every other tier.
+        self.assertEqual(ss._tier_for_graph(0, True, 0, 0), (0, "generated"))
+
+    def test_tier_for_graph_zero_nodes_with_files_falls_back_to_file_count(self):
+        # Zero graph nodes but real files on disk -- a directory graphify
+        # never walked, or one holding assets it doesn't traverse. That's
+        # not empty: tier it off file_count exactly as heuristic mode
+        # would, but with a basis string that records the fallback so the
+        # state file never claims a graph signal it didn't have.
+        fallback = "heuristic:file-count (no graph nodes)"
+        self.assertEqual(ss._tier_for_graph(0, False, 0, 50), (1, fallback))
+        self.assertEqual(ss._tier_for_graph(0, False, 0, 49), (2, fallback))
+        self.assertEqual(ss._tier_for_graph(0, False, 0, 1), (2, fallback))
+        # in_degree is irrelevant on this branch -- there are no nodes for
+        # anything to point at, so the file-count tier stands either way.
+        self.assertEqual(ss._tier_for_graph(12, False, 0, 1), (2, fallback))
+        # generated still wins over the fallback, same as over empty.
+        self.assertEqual(ss._tier_for_graph(0, True, 0, 7), (0, "generated"))
+        # The tier must agree with what heuristic mode would have said --
+        # only the basis label differs.
+        for file_count in (1, 49, 50, 500):
+            self.assertEqual(
+                ss._tier_for_graph(0, False, 0, file_count)[0],
+                ss._tier_for_heuristic(file_count, False)[0],
+            )
 
     def test_tier_for_heuristic_thresholds(self):
         self.assertEqual(ss._tier_for_heuristic(50, False), (1, "heuristic:file-count"))
         self.assertEqual(ss._tier_for_heuristic(49, False), (2, "heuristic:file-count"))
         self.assertEqual(ss._tier_for_heuristic(1, False), (2, "heuristic:file-count"))
-        self.assertEqual(ss._tier_for_heuristic(0, False), (3, "heuristic:file-count"))
         self.assertEqual(ss._tier_for_heuristic(5, True), (0, "generated"))
+
+    def test_tier_for_heuristic_zero_files_is_empty_not_leaf(self):
+        self.assertEqual(ss._tier_for_heuristic(0, False), (None, "empty"))
+        # generated still takes priority over empty.
+        self.assertEqual(ss._tier_for_heuristic(0, True), (0, "generated"))
 
 
 class ScanTests(unittest.TestCase):
@@ -474,6 +681,72 @@ class ScanTests(unittest.TestCase):
             for module_id in ("core/", "utils/", "legacy/", "orphan/"):
                 self.assertEqual(by_id[module_id]["basis"], "heuristic:file-count")
             self.assertEqual(state["repo_scan"]["graph_source"], "heuristic")
+
+    def test_scan_empty_directory_is_skipped_not_offered_pending(self):
+        # A genuinely empty top-level directory (zero files, zero graph
+        # nodes) must never be offered as a selectable "pending" module in
+        # either mode -- it lands in the tier=None empty-skip bucket
+        # instead, distinct from tier 0 generated/vendor.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            (root / "trantor").mkdir()
+
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIsNone(by_id["trantor/"]["tier"])
+            self.assertEqual(by_id["trantor/"]["status"], "skipped")
+            self.assertEqual(by_id["trantor/"]["basis"], "empty")
+            self.assertIn("empty", by_id["trantor/"]["skip_reason"])
+            pending_ids = {m["id"] for m in state["modules"] if m["status"] == "pending"}
+            self.assertNotIn("trantor/", pending_ids)
+
+            graph_path = Path(d) / "graph.json"
+            import json
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+            graph_state = ss.empty_state()
+            ss.scan(graph_state, root, "graphify", graph_path=graph_path)
+            by_id_graph = {m["id"]: m for m in graph_state["modules"]}
+            self.assertIsNone(by_id_graph["trantor/"]["tier"])
+            self.assertEqual(by_id_graph["trantor/"]["status"], "skipped")
+            self.assertEqual(by_id_graph["trantor/"]["basis"], "empty")
+            pending_ids_graph = {
+                m["id"] for m in graph_state["modules"] if m["status"] == "pending"
+            }
+            self.assertNotIn("trantor/", pending_ids_graph)
+
+    def test_scan_graph_mode_keeps_directory_with_files_but_no_graph_nodes(self):
+        # A directory with real files that graphify never indexed -- here a
+        # folder of non-code assets, the shape _fixture_graph() has no
+        # nodes for. Zero graph nodes on its own must NOT read as "empty":
+        # the directory has content, so it stays a normal, selectable
+        # module tiered off its file count, not a skipped one.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(root / "assets" / "logo.svg", "<svg/>")
+            _write(root / "assets" / "theme.css", "body{}")
+            _write(root / "assets" / "icons" / "check.svg", "<svg/>")
+
+            graph_path = Path(d) / "graph.json"
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)
+
+            by_id = {m["id"]: m for m in state["modules"]}
+            entry = by_id["assets/"]
+            self.assertIsNotNone(entry["tier"])
+            self.assertEqual(entry["tier"], 2)
+            self.assertEqual(entry["file_count"], 3)
+            self.assertEqual(entry["basis"], "heuristic:file-count (no graph nodes)")
+            self.assertEqual(entry["status"], "pending")
+            self.assertIsNone(entry["skip_reason"])
+            pending_ids = {m["id"] for m in state["modules"] if m["status"] == "pending"}
+            self.assertIn("assets/", pending_ids)
+            skipped_ids = {m["id"] for m in state["modules"] if m["status"] == "skipped"}
+            self.assertNotIn("assets/", skipped_ids)
 
     def test_scan_rejects_bad_graph_mode(self):
         with tempfile.TemporaryDirectory() as d:
@@ -593,6 +866,63 @@ class ScanTests(unittest.TestCase):
             self.assertIn("20%", warning)
             # Non-fatal: tiering still ran and state was still written.
             self.assertTrue(len(state["modules"]) > 0)
+
+    def test_scan_reports_contamination_warning_when_manifest_owned_path_dominates_graph(self):
+        # legacy/'s single node is 1 of the fixture graph's 8 total nodes
+        # (12.5%) -- above the 5% contamination warn threshold once
+        # legacy/ is marked CEP-owned in the manifest.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(
+                root / ".cep-install.json",
+                json.dumps({"owned_paths": ["legacy"]}),
+            )
+            graph_path = Path(d) / "graph.json"
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)  # must not raise
+
+            warning = state["repo_scan"]["graph_cep_contamination_warning"]
+            self.assertIsNotNone(warning)
+            self.assertIn("1/8", warning)
+            # Non-fatal: tiering still ran and state was still written.
+            self.assertTrue(len(state["modules"]) > 0)
+
+    def test_scan_stays_silent_on_contamination_below_threshold(self):
+        # A manifest whose owned_paths never intersect the graph at all
+        # contaminates 0 of 8 nodes -- well under the 5% threshold, so no
+        # warning at all (None, not an empty string).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(
+                root / ".cep-install.json",
+                json.dumps({"owned_paths": ["nonexistent-dir"]}),
+            )
+            graph_path = Path(d) / "graph.json"
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)
+
+            self.assertIsNone(state["repo_scan"]["graph_cep_contamination_warning"])
+
+    def test_scan_stays_silent_on_contamination_with_no_manifest(self):
+        # No .cep-install.json at all -- nothing to check against, so this
+        # must stay silent rather than guess (same "None means no signal"
+        # convention _read_cep_manifest() itself documents).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            graph_path = Path(d) / "graph.json"
+            graph_path.write_text(json.dumps(_fixture_graph()), encoding="utf-8")
+
+            state = ss.empty_state()
+            ss.scan(state, root, "graphify", graph_path=graph_path)
+
+            self.assertIsNone(state["repo_scan"]["graph_cep_contamination_warning"])
 
     def test_scan_graphify_mode_populates_interfaces(self):
         with tempfile.TemporaryDirectory() as d:
@@ -792,6 +1122,19 @@ class RenderIndexTests(unittest.TestCase):
         self.assertIn("**WARNING:**", text)
         self.assertIn("only 20% of on-disk modules matched the graph", text)
 
+    def test_render_index_surfaces_graph_cep_contamination_warning(self):
+        # Same "must reach CEP-INDEX.md readers, not just scan-time stderr"
+        # reasoning as the overlap-warning test above, for the other
+        # non-fatal graph warning.
+        state = ss.empty_state()
+        state["repo_scan"] = {
+            "graph_source": "graphify", "graph_path": "x", "scanned_at": "now",
+            "graph_cep_contamination_warning": "12% of graph.json's nodes (1/8) live under CEP-owned paths",
+        }
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("**WARNING:**", text)
+        self.assertIn("12% of graph.json's nodes (1/8) live under CEP-owned paths", text)
+
     def test_render_index_repo_docs_section_reports_each_kind(self):
         state = ss.empty_state()
         ss.mark_repo_doc_generated(state, "coding_standards", "org/CODING-STANDARDS.md")
@@ -853,6 +1196,45 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(summary["repo_docs"]["coding_standards"], "generated")
         self.assertEqual(summary["repo_docs"]["testing_guidelines"], "pending")
         self.assertEqual(summary["interfaces"], {"total": 1, "generated": 0, "pending": 1, "deferred": 0})
+
+
+class TestScanIgnoredDirNamesParity(unittest.TestCase):
+    """scaffold_state.SCAN_IGNORED_DIR_NAMES and ult-repo-layout's
+    discover_layers.SCAN_IGNORED_DIR_NAMES are deliberately kept as two
+    small local duplicates rather than a shared import (house convention -
+    see either module's own comment on the pair). This is the mirror of
+    test_discover_layers.py's own parity check: without it, an edit made
+    from this side only failed once somebody happened to run the other
+    skill's suite.
+    """
+
+    def test_scan_ignored_dir_names_match_ult_repo_layout(self):
+        repo_layout_scripts = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "ult-repo-layout"
+            / "scripts"
+        )
+        if not repo_layout_scripts.is_dir():
+            # A partial checkout / install without the sibling skill has
+            # nothing to compare against. That is not this test's own
+            # failure to report - skip rather than fail.
+            self.skipTest(
+                f"sibling skill scripts dir not present at {repo_layout_scripts}"
+            )
+        sys.path.insert(0, str(repo_layout_scripts))
+        try:
+            import discover_layers as dl  # noqa: E402
+        finally:
+            sys.path.remove(str(repo_layout_scripts))
+
+        self.assertEqual(
+            ss.SCAN_IGNORED_DIR_NAMES,
+            dl.SCAN_IGNORED_DIR_NAMES,
+            "scaffold_state.SCAN_IGNORED_DIR_NAMES and "
+            "discover_layers.SCAN_IGNORED_DIR_NAMES have drifted apart - "
+            "keep the two sets content-identical (see either module's "
+            "comment on this pair).",
+        )
 
 
 if __name__ == "__main__":

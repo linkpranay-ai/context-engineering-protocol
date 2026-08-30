@@ -24,6 +24,23 @@ class TestWhatHowCard(unittest.TestCase):
     def test_no_resolved_paths_returns_none(self):
         self.assertIsNone(wsc.what_how_card("What", self.root, []))
 
+    def test_pending_decision_suppresses_card_even_when_path_is_empty(self):
+        # Regression test: a still-pending decision means Apply may move
+        # this box's resolved path out from under the very instruction the
+        # card would hand the user - the empty-path case alone must not be
+        # enough to build a card while that's true.
+        card = wsc.what_how_card(
+            "What", self.root, ["docs/requirements/"], layer_decisions_pending=True,
+        )
+        self.assertIsNone(card)
+
+    def test_default_keeps_prior_no_decisions_involved_behavior(self):
+        # Every pre-existing caller/test omits layer_decisions_pending
+        # entirely - the default must keep producing a card for an empty
+        # path, unchanged from before this parameter existed.
+        card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
+        self.assertIsNotNone(card)
+
     def test_nonexistent_directory_yields_a_card(self):
         card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
         self.assertIsNotNone(card)
@@ -119,6 +136,90 @@ class TestGuidelinesCard(unittest.TestCase):
         )
         self.assertIsNone(card)
 
+    def test_layer_decisions_pending_suppresses_the_card(self):
+        # Closes the What/How-vs-Guidelines/Trip-wire card-gating asymmetry:
+        # an uninitialized, otherwise card-worthy state is still suppressed
+        # while a What/How layer decision is unresolved.
+        card = wsc.guidelines_card(
+            self.root, initialized=False,
+            default_path="starter_kit/project_guidelines/COMPILED-GUIDELINES.md",
+            layer_decisions_pending=True,
+        )
+        self.assertIsNone(card)
+
+
+class TestTripwireCard(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_unavailable_yields_no_card(self):
+        # Owning skill not installed - the frontend's own "not available"
+        # messaging already covers this; a stub card here would just repeat it.
+        card = wsc.tripwire_card(
+            self.root, available=False, initialized=False, entries=0, ledger_path=None,
+        )
+        self.assertIsNone(card)
+
+    def test_never_initialized_yields_a_card_naming_the_skill(self):
+        card = wsc.tripwire_card(
+            self.root, available=True, initialized=False, entries=0,
+            ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
+        )
+        self.assertIsNotNone(card)
+        self.assertEqual(card.box_title, "Trip-wire")
+        self.assertIn("ult-institutional-memory-distill", card.prompt_text)
+        self.assertEqual(
+            card.expected_path, "cache/decision-ledger/DECISION-LEDGER.json"
+        )
+
+    def test_initialized_but_empty_ledger_still_yields_a_card(self):
+        # Regression test for the report finding this fixes: an
+        # initialized-but-0-entries ledger is exactly as much of an onboarding
+        # dead end as a missing one - entries==0 must gate independently of
+        # initialized, not be masked by it.
+        card = wsc.tripwire_card(
+            self.root, available=True, initialized=True, entries=0,
+            ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
+        )
+        self.assertIsNotNone(card)
+
+    def test_initialized_with_real_entries_yields_no_card(self):
+        card = wsc.tripwire_card(
+            self.root, available=True, initialized=True, entries=3,
+            ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
+        )
+        self.assertIsNone(card)
+
+    def test_missing_ledger_path_yields_no_card_defensively(self):
+        # Shouldn't happen per wizard_tripwire.read_summary()'s own contract, but
+        # this module never assumes it - same defensive posture as what_how_card's
+        # empty-resolved_paths branch.
+        card = wsc.tripwire_card(
+            self.root, available=True, initialized=False, entries=0, ledger_path=None,
+        )
+        self.assertIsNone(card)
+
+    def test_prompt_states_no_synthesis_without_evidence(self):
+        card = wsc.tripwire_card(
+            self.root, available=True, initialized=False, entries=0,
+            ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
+        )
+        self.assertIn("evidence", card.prompt_text)
+        self.assertIn("source streams", card.prompt_text)
+
+    def test_layer_decisions_pending_suppresses_the_card(self):
+        # Same card-gating asymmetry fix as guidelines_card's own test above.
+        card = wsc.tripwire_card(
+            self.root, available=True, initialized=False, entries=0,
+            ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
+            layer_decisions_pending=True,
+        )
+        self.assertIsNone(card)
+
 
 class TestZeroOnDiskMutation(unittest.TestCase):
     """Direct assertion that this module never writes anything - not just an
@@ -150,6 +251,14 @@ class TestZeroOnDiskMutation(unittest.TestCase):
         wsc.what_how_card("How", self.root, ["org/"])  # populated -> no card
         wsc.guidelines_card(self.root, initialized=False, default_path="guidelines.md")
         wsc.guidelines_card(self.root, initialized=True, default_path="guidelines.md")
+        wsc.tripwire_card(  # never initialized -> card
+            self.root, available=True, initialized=False, entries=0,
+            ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
+        )
+        wsc.tripwire_card(  # real entries -> no card
+            self.root, available=True, initialized=True, entries=3,
+            ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
+        )
 
         after = self._snapshot()
         self.assertEqual(before, after)

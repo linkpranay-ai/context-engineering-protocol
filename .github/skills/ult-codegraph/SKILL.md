@@ -81,6 +81,90 @@ or bindings for other languages?
   `graph.json` carried no `directed`/`multigraph` keys at all; 0.9.11's does).
   Upgrade first (`uv tool install --force graphifyy`) if you hit that error.
 
+**If this repo has itself consumed CEP** (i.e. it was set up with
+`install.ps1`/`install.sh` from this library), a `.cep-install.json` file
+sits at the repo root recording exactly which paths CEP installed
+(`owned_paths`) — that's CEP's own tooling content, not the codebase you're
+trying to graph, and indexing it just adds noise to `query`/`explain`
+results (and, worse, inflates in-degree/tier numbers for whatever real
+modules happen to sit near CEP's installed paths — `ult-autoscaffold-content`
+warns about exactly this if it slips through). Before your first
+`graphify update`, check for that file and, if present, merge its
+`owned_paths` into `.graphifyignore` — one entry per line.
+
+`.graphifyignore` is a file the adopter may also want to write in
+themselves (build output, fixture trees, anything else they never want
+indexed), so this recipe **must not regenerate the whole file**. Write the
+manifest-derived entries into a marked block instead, exactly the way the
+installer maintains its block inside `AGENTS.md`: everything between the
+BEGIN/END markers is CEP's to rewrite on every run, everything outside them
+is the adopter's and is left byte-for-byte alone. That covers all three
+states — no `.graphifyignore` yet (create it holding just the block), one
+that exists without the block (append the block, keep the existing lines),
+one that already has the block (replace only the block in place, keeping the
+lines before and after it in their original order).
+
+```bash
+BEGIN_MARK='# --- BEGIN CEP-managed entries (auto-generated, do not edit) ---'
+END_MARK='# --- END CEP-managed entries ---'
+
+if [ -f .cep-install.json ]; then
+  {
+    printf '%s\n' "$BEGIN_MARK"
+    python3 -c "import json; [print(p) for p in json.load(open('.cep-install.json')).get('owned_paths', [])]"
+    printf '%s\n' "$END_MARK"
+  } > .cep-block.tmp
+
+  if [ -f .graphifyignore ] && grep -qF "$BEGIN_MARK" .graphifyignore; then
+    awk -v b="$BEGIN_MARK" 'index($0,b)==1{exit} {print}' .graphifyignore > .cep-before.tmp
+    awk -v e="$END_MARK" 'f{print} index($0,e)==1{f=1}' .graphifyignore > .cep-after.tmp
+    cat .cep-before.tmp .cep-block.tmp .cep-after.tmp > .graphifyignore.new
+    mv .graphifyignore.new .graphifyignore
+    rm -f .cep-before.tmp .cep-after.tmp
+  elif [ -f .graphifyignore ]; then
+    { cat .graphifyignore; printf '\n'; cat .cep-block.tmp; } > .graphifyignore.new
+    mv .graphifyignore.new .graphifyignore
+  else
+    cp .cep-block.tmp .graphifyignore
+  fi
+  rm -f .cep-block.tmp
+fi
+```
+
+```powershell
+$beginMark = '# --- BEGIN CEP-managed entries (auto-generated, do not edit) ---'
+$endMark   = '# --- END CEP-managed entries ---'
+
+if (Test-Path -LiteralPath .cep-install.json) {
+    $owned = (Get-Content -LiteralPath .cep-install.json -Raw | ConvertFrom-Json).owned_paths
+    $block = (@($beginMark) + @($owned) + @($endMark)) -join "`n"
+
+    if (Test-Path -LiteralPath .graphifyignore) {
+        $current = Get-Content -LiteralPath .graphifyignore -Raw
+        if ($current.Contains($beginMark)) {
+            $pattern = [regex]::Escape($beginMark) + "[\s\S]*?" + [regex]::Escape($endMark)
+            $evaluator = { param($match) $block }
+            $new = [regex]::Replace($current, $pattern, $evaluator)
+        }
+        else {
+            $new = $current.TrimEnd("`r", "`n") + "`n`n$block`n"
+        }
+    }
+    else {
+        $new = "$block`n"
+    }
+    Set-Content -LiteralPath .graphifyignore -Value $new -NoNewline
+}
+```
+
+Confirm the exact syntax your installed `graphifyy` version expects via
+`graphify --help` — ignore-file handling has evolved across releases,
+including whether `#` comment lines are tolerated; if this version rejects
+them, keep the same merge shape and pick marker lines it does accept. But
+the source of truth for *what* goes inside the block is always the
+manifest's `owned_paths`, never a hand-maintained list — and anything the
+adopter put outside the block stays theirs.
+
 ```bash
 # Install (idempotent — safe to run multiple times)
 uv tool install graphifyy
@@ -99,12 +183,19 @@ graphify update . --no-cluster
 graphify cluster-only . --no-label
 ```
 
-This writes `graphify-out/{graph.json, GRAPH_REPORT.md, graph.html,
+Together, these write `graphify-out/{graph.json, GRAPH_REPORT.md, graph.html,
 manifest.json, cache/}` at the project root — `graphify`'s fixed working
 location. It has no `--output` flag; `graphify update`/`query`/`path`/`explain`
 all default-read from `graphify-out/` relative to the path you point them at,
 so this directory must stay where the tool expects it for incremental updates
 and queries to work.
+
+**`GRAPH_REPORT.md`/`graph.html` are produced by the `cluster-only` step, not
+by `graphify update . --no-cluster` alone.** If a consuming skill's flow only
+ran the first command (`--no-cluster` skips clustering by design), those two
+files won't exist yet — treat their absence as expected, not an error, and
+fall back to `graph.json` directly (or suggest running `graphify cluster-only`
+if a report is actually needed).
 
 ## No normalization step — consume `graphify-out/` directly
 
@@ -124,9 +215,11 @@ tool-maintained path, so copying it would only:
 - fight the tool's own incremental-update model, which depends on
   `graphify-out/` staying exactly where `graphify` put it.
 
-So: **consuming skills read `graphify-out/graph.json` and
+So: **consuming skills read `graphify-out/graph.json` and, when present,
 `graphify-out/GRAPH_REPORT.md` directly** — no copy, no second location.
-See `CONSUMING-CODE-GRAPH.md` in this folder for the consumption contract
+`GRAPH_REPORT.md` isn't produced under `--no-cluster` (the default
+invocation above); treat its absence as expected, not an error. See
+`CONSUMING-CODE-GRAPH.md` in this folder for the consumption contract
 (which also explains *how* to consume it: prefer scoped `graphify query`
 over reading the full files).
 
@@ -141,6 +234,9 @@ Re-run `graphify update .` (incremental — it only re-parses changed files).
 Nothing to re-copy: `graphify-out/graph.json` updates in place.
 `GRAPH_REPORT.md`'s "Graph Freshness" section records the commit the graph
 was built from; compare it against `git rev-parse HEAD` to spot staleness.
+If `GRAPH_REPORT.md` isn't present (`--no-cluster` was used without a
+follow-up `cluster-only` run), skip the staleness nudge rather than treating
+its absence as an error.
 
 ## Measuring impact (optional, run once)
 

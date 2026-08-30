@@ -15,9 +15,13 @@ Step 7.7 (human tiering).
 
 Format-agnostic by construction (see the design draft's binding constraint, 3):
 every heuristic here is shape-based (does this directory contain a file matching a
-known pattern) never name-based (is this file literally named X) -- so it runs the
-same way against any target library, seen or unseen, and never encodes knowledge of
-any specific private library.
+known pattern), with one narrow, documented exception -- a small set of root-level
+filenames (AGENTS.md, README.md, etc. -- see _NON_SKILL_FLAT_NAMES) are excluded by
+literal name, but only at the target root itself (depth 0), never at any nested
+depth, so a nested file that happens to share one of those names (e.g.
+`rules/agents.md`) is unaffected. Everywhere else this runs the same way against
+any target library, seen or unseen, and never encodes knowledge of any specific
+private library.
 
 Symlink handling: a symlinked directory is inventoried at one level (its own direct
 files are checked against the same heuristics, with the real path recorded) but
@@ -91,6 +95,18 @@ DEFAULT_EXCLUDES = {
     ".git", ".hg", ".svn", "node_modules", "dist", "build", ".venv", "venv",
     "__pycache__", ".tox", ".mypy_cache", ".pytest_cache", "site-packages",
     ".idea", ".vscode",
+    # Deliberately tooling/VCS-only. A previous round also excluded "adr",
+    # ".changeset", and ".out-of-scope" by name, on the theory that those
+    # are repository-governance shapes that never hold real skill units --
+    # but that reasoning doesn't hold once the shape check (below, in
+    # walk()) is fixed to run and win *before* any name-based exclusion:
+    # a directory happening to be named "adr" that holds ordinary markdown
+    # notes (not a SKILL.md) is no different from one named "notes" or
+    # "docs" holding the same -- see inventory()'s docstring on tiering for
+    # how that content is surfaced (as a lower-confidence "supplementary"
+    # unit) instead of silently dropped by a denylist entry that would need
+    # a new name added every time some other org's governance convention
+    # showed up.
 }
 
 _SKILL_FILENAMES = ("SKILL.md", "skill.md")
@@ -104,6 +120,20 @@ _FLAT_FILE_DOUBLE_SUFFIX = ".prompt.md"
 _NON_SKILL_FLAT_NAMES = {
     "readme.md", "license.md", "changelog.md", "contributing.md",
     "code_of_conduct.md",
+    # Root-level AI-coding-agent instruction files, same class as the OSS
+    # governance filenames above: a broadly used, cross-project naming
+    # convention (not any specific library's own name), so excluding them
+    # here doesn't encode knowledge of any one private library. A repo's own
+    # AGENTS.md/CLAUDE.md/CONTEXT.md describes how to work in that repo as a
+    # whole - it is not itself a retrofittable skill unit.
+    #
+    # Checked at depth 0 (the inventory target's own root) only -- see
+    # _is_flat_skill_file's `is_root` parameter. A nested file that happens
+    # to share one of these names (e.g. `rules/agents.md`, a real per-rule
+    # doc in some other convention) is a different thing entirely and must
+    # not be swept up by a root-level-instruction-file rule that doesn't
+    # apply to it.
+    "agents.md", "claude.md", "context.md",
 }
 
 _CODE_TRIGGER_TERMS = {
@@ -126,9 +156,9 @@ _FRONTMATTER_BLOCK_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---", re.DOTALL)
 _FRONTMATTER_FIELD_RE = re.compile(r"^(name|description|summary):\s*(.+)$", re.MULTILINE)
 
 
-def _is_flat_skill_file(name):
+def _is_flat_skill_file(name, is_root=False):
     lower = name.lower()
-    if lower in _NON_SKILL_FLAT_NAMES:
+    if is_root and lower in _NON_SKILL_FLAT_NAMES:
         return False
     if lower.endswith(_FLAT_FILE_DOUBLE_SUFFIX):
         return True
@@ -139,7 +169,31 @@ def _rel(path, root):
     return os.path.relpath(str(path), str(root)).replace(os.sep, "/")
 
 
-def inventory(root, excludes=None):
+def _read_cep_manifest(root):
+    """Reads `.cep-install.json` at `root` (written by install.ps1/
+    install.sh) and returns its `owned_paths` as a set of resolved absolute
+    Paths, or None if no manifest exists or it can't be parsed. Deliberately
+    duplicated per-consumer rather than factored into a shared module (see
+    this file's own module docstring on why no-shared-library is the house
+    convention here). Callers must treat None as "no signal available" and
+    fall back to pre-manifest behavior -- never an error for an
+    unmanifested library."""
+    manifest_path = Path(root) / ".cep-install.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    owned = data.get("owned_paths")
+    if not isinstance(owned, list):
+        return None
+    result = set()
+    for item in owned:
+        if isinstance(item, str) and item:
+            result.add((Path(root) / item).resolve())
+    return result
+
+
+def inventory(root, excludes=None, manifest_owned=None):
     """Union of three shape-based heuristics -- never a single winner.
 
     Per directory, in order:
@@ -159,26 +213,74 @@ def inventory(root, excludes=None):
     Anything left over that isn't claimed by (a)/(b)/(c) but directly holds
     markdown/YAML/JSON content is reported in "unclaimed_dirs" for the calling
     skill to ask the human about -- never silently included or excluded.
+
+    Every unit carries a "tier": "canonical" for (a)/(b) units (a real,
+    dedicated marker file -- high confidence this is a genuine skill unit)
+    or "supplementary" for (c) units (a bare markdown file -- a weaker
+    guess; it could just as easily be ordinary documentation). A
+    "supplementary" unit whose containing directory is named "docs" (at any
+    depth, matched case-insensitively, so `Docs/` and `DOCS/` count the same
+    as `docs/`) additionally carries a non-empty "note" flagging
+    that weaker signal explicitly, rather than being dropped by a
+    docs-specific denylist entry. Nothing is ever removed from the walk
+    output on tier grounds alone -- tiering is a confidence label for the
+    calling skill to group/filter by, not a fourth exclusion heuristic. The
+    returned dict's "tier_counts" gives a quick `{"canonical": N,
+    "supplementary": M}` summary across all units.
+
+    If `root` has a `.cep-install.json` manifest (written by install.ps1/
+    install.sh -- see _read_cep_manifest), its `owned_paths` are excluded on
+    top of DEFAULT_EXCLUDES, checked *before* the (a)/(b) shape checks above
+    -- so CEP's own installed content is never surfaced as a candidate unit
+    for retrofitting, whether `owned_paths` names a container like
+    `.github/skills` (the full-install case) or the individual skill
+    directories themselves (the `-Only`-install case, where every owned
+    directory also carries a SKILL.md and would match shape check (a) if
+    ownership were tested second). Pass
+    `manifest_owned` explicitly to override auto-detection (mainly for
+    tests); pass `manifest_owned=set()` to disable manifest-based exclusion
+    entirely. Every path this exclusion actually prunes -- directory or
+    individual file -- is listed in the returned dict's
+    "excluded_owned_paths" (root-relative, same path convention as
+    "unclaimed_dirs"), so the calling skill can show a human what the scan
+    left out and why, instead of the exclusion being invisible.
     """
     excludes = DEFAULT_EXCLUDES if excludes is None else excludes
     root = Path(root)
     if not root.is_dir():
         raise NotADirectoryError(f"not a readable directory: {root}")
+    if manifest_owned is None:
+        manifest_owned = _read_cep_manifest(root) or set()
 
     units = []
     unclaimed_dirs = []
+    excluded_owned_paths = []
 
-    def walk(dir_path, is_root, via_symlink):
+    def walk(dir_path, is_root, via_symlink, name=None):
         try:
             entries = sorted(os.scandir(dir_path), key=lambda e: e.name)
         except OSError:
             return  # permission-denied/race-condition subdir: skip, don't abort the whole scan
 
         filenames = [e.name for e in entries if e.is_file(follow_symlinks=True)]
-        subdirs = [
-            e for e in entries
-            if e.is_dir(follow_symlinks=True) and e.name not in excludes
-        ]
+        subdirs = [e for e in entries if e.is_dir(follow_symlinks=True)]
+
+        if not is_root and Path(dir_path).resolve() in manifest_owned:
+            # Manifest ownership is checked *first*, ahead of the shape
+            # checks below: a directory the target's own .cep-install.json
+            # names in owned_paths is CEP's own installed content whatever
+            # it happens to look like. Ordering matters because CEP's
+            # installed skill directories always carry a SKILL.md, so an
+            # -Only install (whose manifest names skill-dirs directly rather
+            # than a container) would otherwise match the skill-dir shape
+            # and be reported as a human-authored candidate -- while that
+            # same manifest's sibling flat files were being excluded in the
+            # same scan. Pruned like DEFAULT_EXCLUDES: not descended into,
+            # not reported as unclaimed either -- but recorded in
+            # "excluded_owned_paths" so the exclusion is visible to the
+            # calling skill rather than silent.
+            excluded_owned_paths.append(_rel(dir_path, root))
+            return
 
         skill_file = next((f for f in filenames if f in _SKILL_FILENAMES), None)
         if skill_file is not None and not is_root:
@@ -189,6 +291,8 @@ def inventory(root, excludes=None):
                 "primary_file": _rel(os.path.join(dir_path, skill_file), root),
                 "via_symlink": via_symlink,
                 "real_path": os.path.realpath(dir_path),
+                "tier": "canonical",
+                "note": "",
             })
             return
 
@@ -203,12 +307,49 @@ def inventory(root, excludes=None):
                 "primary_file": _rel(os.path.join(dir_path, manifest_matches[0]), root),
                 "via_symlink": via_symlink,
                 "real_path": os.path.realpath(dir_path),
+                "tier": "canonical",
+                "note": "",
             })
             return
 
+        if not is_root and name in excludes:
+            # Name-based exclusion is strictly weaker than the shape checks
+            # above: this directory didn't match SKILL.md/manifest-file
+            # shape, so its name now takes over purely as a descent-bounding
+            # signal for known tooling/VCS directories (node_modules, .git,
+            # etc., DEFAULT_EXCLUDES's fixed, generic set) -- never a reason
+            # to drop a directory that *does* have skill/manifest shape. A
+            # directory named "node_modules" holding real SKILL.md content
+            # is caught by the checks above and never reaches this line; one
+            # holding only its usual dependency-tree contents is pruned here
+            # exactly as before, not scanned for flat-file units or reported
+            # as unclaimed.
+            return
+
+        owned_filenames = set()
         for f in filenames:
-            if _is_flat_skill_file(f):
+            if _is_flat_skill_file(f, is_root):
                 fpath = os.path.join(dir_path, f)
+                if Path(fpath).resolve() in manifest_owned:
+                    # This exact file is CEP's own installed content (an
+                    # individually-listed owned_paths entry, not just a
+                    # container directory already pruned above) -- excluded
+                    # like any other manifest-owned path, and recorded in
+                    # "excluded_owned_paths" so the exclusion stays visible.
+                    # Its bare name is remembered so the unclaimed-dirs check
+                    # below doesn't count content this scan just excluded.
+                    excluded_owned_paths.append(_rel(fpath, root))
+                    owned_filenames.add(f)
+                    continue
+                note = ""
+                if "docs" in {p.lower() for p in Path(_rel(dir_path, root)).parts}:
+                    note = (
+                        'flat-file unit found under a directory named "docs" '
+                        '(at this or an ancestor level) -- a weaker signal '
+                        'than a dedicated skill-dir/manifest-dir (heuristic '
+                        '(c) vs. (a)/(b)); treat as supplementary, not '
+                        'canonical'
+                    )
                 units.append({
                     "unit_id": _rel(fpath, root),
                     "type": "flat-file",
@@ -216,12 +357,21 @@ def inventory(root, excludes=None):
                     "primary_file": _rel(fpath, root),
                     "via_symlink": via_symlink,
                     "real_path": os.path.realpath(fpath),
+                    "tier": "supplementary",
+                    "note": note,
                 })
 
         if not is_root:
+            # Files the flat-file loop above just pruned as manifest-owned
+            # don't count as candidate content: a directory whose only
+            # qualifying file is CEP's own installed content isn't
+            # human-authored material needing a retrofit decision, and
+            # reporting it as unclaimed would contradict the same scan's
+            # own "excluded_owned_paths" entry for that file.
             has_candidate_content = any(
-                _is_flat_skill_file(f) or f.lower().endswith((".yaml", ".yml", ".json"))
+                _is_flat_skill_file(f, is_root) or f.lower().endswith((".yaml", ".yml", ".json"))
                 for f in filenames
+                if f not in owned_filenames
             )
             if has_candidate_content and skill_file is None and len(manifest_matches) != 1:
                 unclaimed_dirs.append(_rel(dir_path, root))
@@ -230,10 +380,18 @@ def inventory(root, excludes=None):
             return  # bounded: one level of symlink dereference, never recursed further
 
         for e in subdirs:
-            walk(e.path, False, e.is_symlink())
+            walk(e.path, False, e.is_symlink(), e.name)
 
     walk(str(root), True, False)
-    return {"units": units, "unclaimed_dirs": sorted(unclaimed_dirs)}
+    tier_counts = {"canonical": 0, "supplementary": 0}
+    for u in units:
+        tier_counts[u["tier"]] += 1
+    return {
+        "units": units,
+        "unclaimed_dirs": sorted(unclaimed_dirs),
+        "excluded_owned_paths": sorted(excluded_owned_paths),
+        "tier_counts": tier_counts,
+    }
 
 
 def describe(path):

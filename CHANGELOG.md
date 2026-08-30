@@ -55,6 +55,26 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   artifact kinds. `compiling-project-guidelines` now auto-discovers this skill's How-L2 output
   and its `context-config.yaml`-resolved directory as additional guideline sources, and notes
   scaffold-generated drafts distinctly in its `Sources:` footer.
+- **`ult-autoscaffold-content`: a new non-fatal warning when the code graph has indexed
+  CEP's own installed files.** `scaffold_state.py`'s graph-mode scan already defended
+  against a `graph.json` built for a different repo entirely; it had no defense against a
+  thinner, easier-to-hit variant — `graphify` pointed at the right repo, but never scoped
+  away from CEP's own installed footprint. The graph still looks plausible in that case
+  (real module names, real in-degrees) while a slice of its nodes are CEP's own skills,
+  docs, and wizard scripts, quietly inflating the in-degree and tier numbers of whatever
+  real modules happen to sit near CEP's installed paths. The new
+  `_check_graph_cep_contamination()` resolves each node's `source_file` against the
+  target's own `.cep-install.json` `owned_paths` and returns a warning once the
+  contaminated fraction exceeds 5% (`GRAPH_CEP_CONTAMINATION_WARN_THRESHOLD`) —
+  deliberately far below the existing 50% module-overlap warn threshold, since CEP's own
+  footprint should be a thin sliver of any real target repo's graph, so even a small
+  fraction is meaningful signal. It is a distinct check from that overlap warning, and
+  shares its posture: never fatal, never silent — printed to stderr at scan time,
+  persisted to `TRIAGE-STATE.json`'s `repo_scan.graph_cep_contamination_warning`, and
+  echoed in `render-index`'s output. The warning text names the fix, and
+  `ult-codegraph/SKILL.md` Step 0 now carries a concrete, copy-pasteable recipe for both
+  shells that writes `.graphifyignore` straight from `owned_paths`, replacing its prior
+  "confirm the exact mechanism yourself" hedge.
 
 ### Fixed
 
@@ -123,6 +143,357 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
   across all six files resolves against the wizard's own `_slugify`, all six render cleanly through
   `wizard_markdown.render()`, the full wizard test suite (371 tests) and all four catalog gates
   stayed green.
+- **`ult-repo-layout/SKILL.md`'s slot-registry prose was out of sync with `SLOT_REGISTRY`
+  itself** — it said "eight" path-slots while the registry actually defines eleven;
+  `decision_ledger`, `autoscaffold_content_state`, and `autoscaffold_content_index` (added
+  alongside their owning skills) were never folded into the documented `init` walkthrough, so a
+  user following that walkthrough exactly would never register them. Corrected the count and
+  added the three slots' own descriptions. Added a regression test
+  (`TestSkillMdSlotRegistryTableConsistency`) that parses SKILL.md's "Slot registry" table
+  directly and diffs its keys against `SLOT_REGISTRY`, so this class of doc/code drift fails a
+  test run instead of sitting undetected.
+- **`ult-cep-wizard`'s Trip-wire box had no "run this yourself" guidance card**, unlike What/How/
+  Guidelines, which all point the user at the skill that populates them — a Trip-wire ledger
+  that's missing or still empty (initialized but zero entries) left the user with no onboarding
+  path at all for that box. Added `tripwire_card()` (`wizard_stub_content.py`), wired into
+  `/api/status` and the existing stub-card rendering in `wizard.js`/`index.html`. Its guidance is
+  deliberately different in kind from the other three cards: `ult-institutional-memory-distill`
+  needs a human to choose and confirm real source streams before writing anything, so the card
+  points at starting that human-in-the-loop process rather than promising the skill will write
+  the file unattended.
+- **Wizard's greenfield-Discover guide card wrongly implied no `context-config.yaml`
+  existed yet.** The `#needs-discover-greenfield` copy in `index.html` said "there's no
+  `context-config.yaml` for Discover to write proposals into" even though the installer
+  always writes a baseline one — the accurate blocker is that `ult-repo-layout init`
+  hasn't run yet, not that the file is missing. Corrected the wording (shipped in the
+  same commit as the Trip-wire card above; recorded separately here since it's an
+  unrelated fix).
+- **What/How onboarding cards could point at a path Discover was about to replace.**
+  `wizard_stub_content.what_how_card()` gained a `layer_decisions_pending` parameter
+  (shipped in the same commit as the Trip-wire card above) that suppresses the card
+  while its box's own What/How decision is still `pending`/`staged` rather than
+  `confirmed` — otherwise the card hands out a resolved path that Apply may be about to
+  move out from under the user. The initial `wizard_server.py` computation matched
+  pending decisions by section-title prefix (`"What"`/`"How"`); see below for the
+  follow-up that replaces this with real layer resolution and extends the same
+  suppression to the Guidelines and Trip-wire cards.
+- **`ult-cep-wizard`'s in-app docs viewer served the target repo's own README under CEP
+  branding once installed into a consumer repo.** `wizard_docs.py`'s `install_root()` resolves to
+  "whatever repo this skill's directory sits under" — correct while self-testing the wizard
+  against its own repo, but once the skill directory is copied into an unrelated consumer repo
+  (the normal way it reaches anyone else's project), it silently resolves to *that* repo's root
+  instead, and the docs viewer would list and render whatever `README.md`/case-study-shaped
+  content happened to exist there as though it were CEP's own documentation. Added
+  `_bundle_verified()`: `list_docs()` now returns nothing at all unless both `CONCEPT.md` and
+  `PROTOCOL.md` are present together at the resolved root — two files distinctly named after CEP
+  itself, unlike `README.md` alone, which nearly every repo has. No frontend changes were needed:
+  `wizard.js`'s nav already disables any doc button missing from `/api/docs`'s response.
+- **`ult-cep-retrofit`'s inventory over-classified ordinary repository files as retrofit-skill
+  candidates.** Root control files (`AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`) and well-known
+  repository-governance directories (`adr/` — Architecture Decision Records, `.changeset/`,
+  `.out-of-scope/`) were being swept in by the existing flat-file/shape-based heuristics purely
+  because they happen to hold `.md` files, presenting a human reviewer with a large, noisy
+  mixed list of genuine skill candidates alongside governance/release content that was never
+  meant to be retrofitted. Extended `cep_retrofit.py`'s existing `_NON_SKILL_FLAT_NAMES` and
+  `DEFAULT_EXCLUDES` sets — the same class of broadly-known, non-library-specific naming
+  convention already used there for `README.md`/`LICENSE.md`/`node_modules`/`.git` — to cover
+  these too. (This name-based denylist approach was superseded shortly after by
+  shape-based detection — see the shape-check and tiering entries below, which make it
+  unnecessary for `adr`/`.changeset`/`.out-of-scope` specifically while keeping the
+  underlying goal.)
+- **Nothing in the codebase knew which paths CEP itself had installed.**
+  `discover_layers.py`, `scaffold_state.py`, `cep_retrofit.py`, and `wizard_docs.py` each
+  guessed at this independently via separate, narrower, hardcoded exclusion lists.
+  `install.ps1`/`install.sh` now write a `.cep-install.json` manifest at the install
+  target root (`schema_version`, `runtime`, `mode`, `only_skills`, `owned_paths`,
+  `merged_paths`, `installed_at`; skipped under `-DryRun`/`--dry-run`) recording what the
+  run actually wrote, trimmed to the `--only` subset when used and split by how much of
+  each path belongs to CEP: `owned_paths` lists the paths CEP owns outright and rewrites
+  on every run, and `merged_paths` lists the paths CEP only partially owns — today just
+  `AGENTS.md`, where the installer maintains one marked block and everything outside it
+  is the adopter's. Each of the four Python consumers now prefers the manifest's `owned_paths` over
+  its old hardcoded guess, falling back to today's behavior unchanged when no manifest is
+  present: `discover_layers.py`'s How-L2 candidate-exclusion special case generalizes
+  from one hardcoded path to any manifest-owned subpath; `scaffold_state.py`'s
+  module-candidate walk drops any manifest-owned directory; `cep_retrofit.py`'s
+  `inventory()` excludes manifest-owned paths on top of its existing excludes, checked
+  after shape detection so a directly-named `--only` skill-dir is still correctly
+  inventoried; and `wizard_docs.py`'s `install_root()` walks up looking for the manifest
+  instead of guessing a fixed directory depth, with its docs-bundle verification and
+  `wizard_server.py`'s doc-asset route now sharing the same manifest-backed trust check.
+  `ult-codegraph`'s docs gained a step pointing at the manifest's `owned_paths` as an
+  input to `graphify`'s own ignore mechanism. Also fixed a real `install.ps1` bug the new
+  test coverage caught: an `if`/`else`-expression building the manifest's `only_skills`
+  field silently collapsed a single-element array to a bare scalar, corrupting every
+  `-Only` install that selected exactly one skill.
+- **`ult-cep-retrofit`'s name-based exclusion could silently drop a real skill.**
+  `inventory()`'s walk pruned any directory matching `DEFAULT_EXCLUDES` by name before
+  ever looking inside it, so a directory that happened to share a governance-directory
+  name (e.g. `adr`) but actually held a real `SKILL.md` was dropped instead of
+  inventoried — the opposite of the module's own documented shape-based contract. The
+  walk now always checks `SKILL.md`/manifest-file shape first; the name-based exclude
+  only applies after both shape checks miss, so it can no longer override a real match.
+  New negative-control test: `adr/SKILL.md` and `review/SKILL.md` are both correctly
+  inventoried as skill units.
+- **`ult-cep-retrofit`'s growing name-based denylist is replaced with shape-first
+  tiering.** `DEFAULT_EXCLUDES` is trimmed back to genuine tooling/VCS-only names —
+  including removing the `adr`/`.changeset`/`.out-of-scope` additions above, now
+  redundant since shape wins regardless of name (previous entry). `_NON_SKILL_FLAT_NAMES`
+  is now checked only at the inventory target's own root, not at every depth, fixing a
+  false drop of nested files like `rules/agents.md` that merely share a name with a
+  root-level convention file. Every unit now carries a `tier` (`"canonical"` for a real
+  skill-dir/manifest marker, `"supplementary"` for a bare flat-file guess, with a `note`
+  when it sits under a `docs/` directory at any depth, not just as its immediate parent)
+  and the result reports `tier_counts` — nothing is dropped on tier grounds alone, tiering
+  is a confidence label for the calling skill to group or filter by. Both are now rendered
+  in the wizard's own retrofit-inventory UI: a `tier_counts` header line, a per-unit tier
+  badge and note sub-text, and a "reviewed this inventory" checkbox that gates the
+  select/draft controls until checked. `wizard_retrofit_inventory.py`'s duplicate-flat-file
+  detection is fixed to strip the `.prompt.md` double-suffix before comparing stems; a
+  flat-file unit whose stem matches any skill-dir/manifest-dir unit's leaf name anywhere in
+  the inventory is now tagged `"supplementary"` with a `note` naming the matching canonical
+  path — no longer gated on the two paths being close together in the tree, which
+  previously missed real duplicates living in separate top-level trees (a flat `docs/*.md`
+  guess and its real `skill-dir/SKILL.md` counterpart elsewhere in the repo), and never
+  silently dropped either way. `tier`/`note` now propagate through the wizard's own
+  inventory build, and both `cep_retrofit.py`'s module docstring and
+  `ult-cep-retrofit/SKILL.md` are corrected to describe the depth-0-only name-based
+  exception accurately instead of claiming detection is purely shape-based.
+- **Wizard onboarding cards resolved What/How pending-decision status by matching a
+  section title's text prefix**, which silently missed a re-discovery section (titled
+  `Re-discovery - ...`) and the cross-layer-collision section (titled `Cross-layer path
+  collisions ...`) — both can carry a live, unconfirmed decision the prefix check never
+  saw, so a card could still point the user at a path Discover was about to move.
+  Replaced with `layout_decision_grammar.resolve_section_layer()`, which resolves a
+  section title to its real layer(s) via the same canonical titles the grammar module
+  already owns, including the re-discovery-prefixed and collision forms.
+  `guidelines_card()` and `tripwire_card()` now take the same `layer_decisions_pending`
+  suppression parameter `what_how_card()` already had, closing the gap where a pending
+  decision suppressed only the What/How cards and not Guidelines/Trip-wire.
+- **`validate_approved_by`'s package-file scan excluded exactly one hardcoded marker
+  filename** (`.layout-slots.yaml`), which would have needed a new denylist entry for
+  every future dot-prefixed marker file some other tool introduces. Replaced with a shape
+  rule: any dot-prefixed `.yaml` filename is excluded, matching the same "leading dot
+  means tool bookkeeping" convention already used elsewhere in the repo. New test proves
+  the rule is genuinely shape-based by excluding a fabricated marker filename with no
+  denylist entry of its own.
+- **The wizard's doc-asset route had no direct test of its trust gate.**
+  `_handle_api_doc_asset` already refused (404) when `wizard_docs.docs_root()` didn't
+  verify, mirroring `list_docs()`'s own check, but nothing exercised that gate through
+  the real HTTP route. Added positive and negative regression coverage (including a real
+  file placed exactly where the route would look, to prove the refusal comes from the
+  trust check and not a missing file) plus the no-cookie/401 case matching this suite's
+  convention for other authenticated routes.
+- **`ult-autoscaffold-content`'s module-candidate scan could walk into a project's own
+  vendored code.** Added `third_party`, `starter_kit`, `output_docs`, `extern`,
+  `external`, `deps`, and `submodules` to `scaffold_state.SCAN_IGNORED_DIR_NAMES`,
+  alongside the existing manifest-owned-path exclusion above. `starter_kit`/`output_docs`
+  are CEP's own scaffolded locations, kept as a name-based fallback for repos without a
+  `.cep-install.json` manifest; the other five are a project's own vendored/third-party
+  code, which the manifest can never recognize since it only knows about paths CEP itself
+  installed.
+- **`ult-repo-layout`'s `init` mode had no script backing its mechanical steps** —
+  scaffolding each installed slot's directory, writing its `.layout-slots.yaml` marker,
+  and writing the `project_layout` section into `context-config.yaml` were all left to
+  the agent to do by hand from prose instructions. `validate_layout.py` gains an
+  `--init` mode (alongside its existing `--validate`) that performs exactly the
+  mechanical half: for a `kind: directory` slot it scaffolds the directory itself and
+  writes its marker ("Scaffolded ..."); for a `kind: file` slot (e.g. the decision
+  ledger, the autoscaffold-content index) it only registers the marker and the slot's
+  resolved location ("Registered ...") — the content file itself is left for the
+  owning skill to write on its own first run, and `init` says so explicitly rather than
+  claiming it created a file that doesn't exist yet. It also writes `project_layout`,
+  optionally sets `layout.workspace_root` plus the `what_l2.exclude` triad, and disables
+  the What-L2/How-L2 layers in `context-config.yaml` when their shipped default paths
+  don't exist yet in the target repo (leaving an explicitly-configured path alone even
+  if unpopulated), so a fresh install validates clean instead of warning about its own
+  defaults on day one. A `.git/hooks/pre-commit` wrapper is scaffolded only when asked
+  for via `--ci-hook` — it's opt-in, not a default — and when it is scaffolded, it's
+  written to fail open: it resolves `python3`/`python` off `PATH` and exits `0` rather
+  than blocking a commit if neither is found or validation itself errors. `init` refuses
+  cleanly if `context-config.yaml` is missing or already initialized, and never
+  overwrites an existing `workspace_root` or hook. The conversational half — asking for
+  the project's name and description, offering to relocate a slot's default path,
+  suggesting rather than silently adding `include_roots` — stays the agent's job,
+  matching how every other `ult-*` skill in this repo splits labor between agent
+  judgment and a deterministic script.
+- **Several docs promised `GRAPH_REPORT.md`/`graph.html` unconditionally**, even though
+  the documented default invocation (`graphify update . --no-cluster`) skips the
+  clustering step that produces them — only a follow-up cluster-only run does. Added a
+  consistent caveat everywhere the file is promised or read: `ult-codegraph/SKILL.md`,
+  `CONSUMING-CODE-GRAPH.md`, and the staleness-nudge steps in
+  `ult-autoscaffold-content/SKILL.md` and `ult-context-generate/SKILL.md`, so a consuming
+  skill treats its absence under `--no-cluster` as expected rather than a broken graph.
+- **The installer always copied all three trees (`.github/skills/`, `.github/prompts/`,
+  `.cursor/rules/`) and always merged `AGENTS.md`, regardless of which coding agent the
+  user actually uses.** `install.ps1` gains `-Runtime` and `install.sh` gains
+  `--runtime`, both accepting `claude`/`copilot`/`cursor`/`codex`/`both` (default `both`,
+  unchanged behavior when omitted). Internally each of `.github/prompts/`,
+  `.cursor/rules/`, and the `AGENTS.md` merge is now gated by its own independent flag
+  rather than one shared boolean, so a runtime that needs only one of the three no
+  longer pulls in the other two: `claude` installs `.github/skills/` only; `copilot`
+  additionally installs `.github/prompts/`; `cursor` additionally installs
+  `.cursor/rules/` on top of `.github/prompts/`; `codex` additionally merges
+  `AGENTS.md`; `both` installs everything, same as omitting `--runtime`/`-Runtime`
+  entirely. The `.cep-install.json` manifest's `runtime` field is derived from those same
+  per-tree flags rather than restating the flag verbatim, so it names exactly the tools
+  the run actually installed for — each of the five accepted values produces its own
+  list: `claude` → `[claude]`, `copilot` → `[claude, copilot]`, `cursor` → `[claude,
+  copilot, cursor]`, `codex` → `[claude, codex]`, `both` → all four.
+- **The installer's own Bash test harness passed native Windows paths straight to
+  `bash.exe` as arguments**, relying on whichever Git Bash build happened to be on
+  `PATH` to accept a drive-letter path unconverted. Added `_to_git_bash_path()`,
+  converting `C:\foo\bar` to the MSYS2 mount-point form `/c/foo/bar`, used for both the
+  installer script path and `--target` in `test_install_scripts.py`'s Bash harness, so
+  the tests no longer depend on that specific build's own path handling.
+- **`ult-cep-retrofit`'s inventory silently dropped the paths a target's own
+  `.cep-install.json` manifest claimed.** Both the directory-level and the file-level
+  prune discarded a matching path with no record of it, so a manifest that over-claims a
+  path — or names one the adopter also authored content under — looked identical to a
+  target that simply had nothing there. `inventory()` now returns a sorted
+  `excluded_owned_paths` list alongside `unclaimed_dirs`, using the same root-relative
+  path convention and always present (empty when nothing was pruned). `ult-cep-wizard`'s
+  retrofit inventory screen renders it as its own list beside the unclaimed-dirs list, so
+  the human reviewing a scan can tell a pruned path from an empty one.
+- **The installer's manifest claimed three paths more completely than it wrote them.**
+  `AGENTS.md` now lands in the new `merged_paths` key instead of `owned_paths`: the
+  installer only ever writes its own marked block into that file, and a consumer that
+  excludes `owned_paths` wholesale (`discover_layers.py`, `cep_retrofit.py`,
+  `scaffold_state.py`) would otherwise silently drop the adopter-authored content living
+  outside the block. `context-config.yaml` is now recorded from inside the scaffold
+  function, right after the real "created" action, so a second run that hits the
+  "skipped (exists)" branch no longer claims a file it did not write. And
+  `starter_kit/project_guidelines` narrows to the single `.pointer.md` the installer
+  actually writes there — the directory around it is an additive drop-zone whose other
+  files belong to the adopter.
+- **A directory with nothing in it was offered as an ordinary module to write content
+  for.** `ult-autoscaffold-content`'s two tier functions folded a genuinely empty
+  directory into Tier 3 ("leaf") alongside real leaf modules that merely have no incoming
+  dependency edges, and `scan()` auto-skips only Tier 0 (generated/vendor) — so an empty
+  directory reached the user as an ordinary selectable module with nothing to actually
+  cover. `_tier_for_heuristic()` and `_tier_for_graph()` now both return a `None` tier
+  with basis `"empty"` for that case, checked after the generated-code check (which still
+  wins, unchanged) and before the real tier thresholds; `scan()` routes a `None` tier into
+  the same modules list with `status: "skipped"` and its own `skip_reason` wording,
+  distinct from Tier 0's, so "why was this skipped" stays answerable per module rather
+  than silent. Graph mode's emptiness test uses a new per-module node count
+  (`_graph_module_node_counts()`) rather than in-degree, since a real Tier-3 leaf can
+  legitimately have in-degree 0 while still holding plenty of its own graph nodes — see
+  the next entry for the follow-up that additionally requires a zero file count before
+  calling a graph-mode directory empty. `render_index()`/`summarize()` gained a fifth
+  bucket alongside Tiers 0-3, so an empty module is shown as auto-skipped in the rendered
+  index instead of becoming invisible once tiered, and `ult-autoscaffold-content/SKILL.md`
+  names the bucket in its tier-table walkthrough.
+- **`ult-autoscaffold-content` reported a directory with real files but no code-graph
+  nodes as empty.** In graphify mode the tier lookup returned an empty verdict on a zero
+  node count alone, so a directory of non-code assets graphify doesn't traverse, or one
+  it simply never walked, was dropped from the wizard's selectable module list even
+  though heuristic mode would have tiered it normally. The empty verdict now requires
+  both a zero node count and a zero file count; with files present it falls back to
+  file-count tiering and records the basis as a graph-mode fallback, so the state file
+  shows where the tier came from. Genuinely empty directories are unaffected.
+- **`SCAN_IGNORED_DIR_NAMES` drift was only caught from one side.** `ult-repo-layout`'s
+  `discover_layers.py` and `ult-autoscaffold-content`'s `scaffold_state.py` each keep
+  their own copy of the set, and both modules' comments claimed both skills' suites
+  assert the two are equal — only `ult-repo-layout`'s did, so an edit made from the
+  autoscaffold side stayed green in its own suite. `test_scaffold_state.py` now carries
+  the mirror of that check, so an edit from either side fails in that side's own suite,
+  and both comments are rewritten to describe the arrangement as it now stands. Both
+  parity checks skip rather than hard-fail when the sibling skill isn't installed. The
+  two sets are already identical, so no scan behavior changed.
+- **`ult-repo-layout`'s `--ci-hook` was unreachable after the first `init`.** The
+  pre-commit hook is opt-in, but the already-initialized check refused and returned
+  before `run_init()` ever looked at whether `--ci-hook` was passed on this call, so
+  anyone who initialized without the hook had no way to add it short of re-initializing —
+  and the refusal message pointed at `reconcile`/`discover`, neither of which scaffolds a
+  hook. A repeat `--init --ci-hook` on an already-initialized repo now scaffolds the hook
+  and exits 0, reporting both that the layout was left untouched and what the hook step
+  did; an existing hook is still never overwritten, and a customized `project_layout`
+  still can't be reset by a repeat call. The plain no-flag refusal is unchanged apart
+  from its message, which now names `--ci-hook` as the way in.
+- **`ult-codegraph`'s `.graphifyignore` setup recipe overwrote the whole file on every
+  run.** As written it rebuilt the file from the install manifest's `owned_paths` and
+  nothing else, so re-running it destroyed any line the adopter had added themselves.
+  Both the bash and the PowerShell variant now maintain a marker-delimited block the same
+  way the installer maintains its block inside `AGENTS.md` — the lines between the
+  markers are regenerated, every line outside them is left alone — covering all three
+  states: no `.graphifyignore` yet, one that exists without the block, and one that
+  already has it. `ult-codegraph` ships no scripts of its own, so this is a change to the
+  instructions the skill hands an agent to run, not to code this repo executes.
+- **`ult-cep-retrofit`'s `docs`-ancestor check was case-sensitive.** The weaker-signal
+  note attached to a flat-file unit under a directory named `docs` tested the path parts
+  for the exact lowercase string, so a library spelling it `Docs` or `DOCS` got no note
+  and its units read as ordinary supplementary files. The parts are lowercased before the
+  membership test. Spelling only — no synonyms (`doc`, `documentation`, …) were added.
+- **A `.cep-install.json` manifest could leave How-L2 discovery worse off than no manifest
+  at all.** `discover_layers._manifest_extra_ignored()` matched an owned path only when it
+  was a *direct child* of the candidate directory — so a `--only` install, whose manifest
+  names each skill's own directory (`.github/skills/<name>`) rather than the
+  `.github/skills/` container, never matched at all. `discover_how_l2()` then compounded
+  it by *replacing* the hardcoded `.github/`-only noise-exclusion fallback with that
+  (empty) manifest result instead of adding to it, so the presence of a narrower manifest
+  produced a noisier candidate scan than having none. The matcher now resolves any
+  *descendant* of the candidate directory down to its immediate-child name, and
+  `discover_how_l2()` unions the manifest-derived names with the hardcoded fallback:
+  a manifest is treated as a positive, additive signal about paths CEP is certain it owns,
+  never as proof that nothing else needs excluding. Verified against a real external skills
+  repo — the old exact-match-and-replace logic left a manifest-owned candidate directory's
+  noise count at 2; the fix brings it to 0, matching the no-manifest baseline exactly.
+  `ult-cep-retrofit`'s inventory walk got the matching file-level fix in the same change:
+  an individually manifest-owned flat file is now excluded from the flat-file scan, where
+  previously only directory-level ownership was checked.
+- **`ult-cep-retrofit`'s inventory contradicted its own manifest-ownership exclusion
+  within a single scan**, in two ways. First, the ownership check ran *after* the
+  skill-dir and manifest-dir shape checks, both of which return early — and every
+  CEP-installed skill directory carries a `SKILL.md`, so an `--only` install (whose
+  manifest names skill directories directly rather than a container) had those very
+  directories reported as human-authored canonical units, while the same manifest's
+  sibling flat files were excluded in the same run. The ownership check now runs ahead of
+  both shape checks, so a manifest-owned path is excluded whatever shape it happens to
+  have — superseding the "checked after shape detection" ordering described in the
+  `.cep-install.json` manifest entry above, and the `--only`-install case it was meant to
+  protect. Second, the unclaimed-directory computation iterated the raw filename list,
+  including files the flat-file loop had just pruned as manifest-owned, so a directory
+  whose only qualifying file was CEP's own landed in `unclaimed_dirs` while that same file
+  sat in `excluded_owned_paths`. The pruned names are now tracked and discounted from that
+  computation; a directory holding any genuine non-owned qualifying file still lands in
+  `unclaimed_dirs` as before. `inventory()`'s docstring, which documented the old ordering
+  as intentional, is corrected, and both cases are covered by tests plus negative controls
+  for ordinary shape detection and for non-overcorrection.
+- **A repeat install silently dropped CEP's ownership claim on a `context-config.yaml` it
+  had created itself.** `install.sh`'s `scaffold_context_config` and `install.ps1`'s
+  `New-ContextConfig` appended the file to `owned_paths` only on the branch where the run
+  actually created it. That is right for a target where CEP never wrote the file — an
+  adopter-authored `context-config.yaml` of unknown provenance must never be silently
+  claimed — but wrong for the ordinary re-install: run 1 creates the file and records it,
+  run 2 finds it already present and takes the "skipped (exists)" branch, and because the
+  manifest is rebuilt wholesale on every run rather than merged with the prior one, run 2's
+  manifest dropped a path CEP genuinely still owned and nobody had edited. The test changes
+  from "did *this* run write it" to "does CEP still own it": both scripts consult the prior
+  run's `.cep-install.json`, still unmodified on disk at that point since both scaffold
+  before they write the manifest. Ownership is only ever carried forward from a genuine
+  prior claim, never invented from the file merely being present, so an adopter's own
+  pre-existing `context-config.yaml` — which run 1 itself skipped and never claimed — stays
+  unclaimed on every later run exactly as before. `install.sh` matches the prior manifest
+  as text, keeping its standing no-`jq`/no-`python3` constraint, but the match is agnostic
+  about which installer wrote that manifest: it strips newlines before matching, because
+  the prior run may have been `install.ps1`, whose `ConvertTo-Json` output pretty-prints
+  `owned_paths` across several lines rather than as the single-line array `install.sh`
+  itself writes by hand; `install.ps1` parses it with `ConvertFrom-Json`
+  and treats a missing file, empty content, malformed JSON, or a non-array `owned_paths`
+  alike as "no prior claim", rather than letting a corrupt leftover manifest abort the
+  install. Deliberately narrow — only this one file, in this one function: the
+  project-guidelines pointer rewrites its own file unconditionally on every run, so its
+  claim is re-recorded every time and has no analogous gap. Covered by four
+  subprocess-driven cases that run against both installers: two consecutive inits keep the
+  claim with the file byte-identical across runs, three consecutive inits keep it (so the
+  carry-forward is exercised reading a manifest itself written by a carry-forward), an
+  adopter's pre-existing file stays unclaimed across runs, and a corrupt leftover manifest
+  still lets the next install complete and rewrite a valid one. A fifth, cross-installer
+  case covers the re-install being done by the *other* script, in both directions —
+  `install.ps1` then `install.sh` and `install.sh` then `install.ps1` — keeping the claim
+  across the handover, and keeping an adopter's pre-existing file unclaimed across that
+  same crossing.
 
 ## [0.5.0]
 

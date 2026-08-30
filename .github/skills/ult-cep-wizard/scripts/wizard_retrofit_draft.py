@@ -75,12 +75,14 @@ _TEMPLATE_SENTENCES = {
     ),
 }
 
-# Small local duplicate of the excluded-directory set every filesystem-
-# scanning helper in this repo keeps locally rather than importing (see
-# ult-autoscaffold-content/scripts/scaffold_state.py's own docstring on this
-# convention) - bounds detect_contract_locations()'s walk the same way
-# cep_retrofit.py's own DEFAULT_EXCLUDES bounds inventory(), without
-# importing that module just for one constant.
+# Purpose-scoped ignore list for detect_contract_locations()'s walk only,
+# following this repo's convention of each filesystem-scanning helper
+# keeping its own local set rather than importing one. Deliberately its own
+# list: it bounds a narrower walk (finding three fixed contract filenames)
+# than module/layer discovery does, so it carries entries that walk needs
+# and omits vendored-tree names that one needs. Not asserted identical to
+# the discover_layers.py/scaffold_state.py pair, which do check parity
+# against each other - no cross-file parity check covers this set.
 _SCAN_IGNORED_DIR_NAMES = {
     ".git", ".hg", ".svn", "node_modules", "dist", "build", "target",
     ".venv", "venv", "__pycache__", ".tox", ".mypy_cache", ".pytest_cache",

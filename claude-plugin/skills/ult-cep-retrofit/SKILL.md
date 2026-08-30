@@ -42,9 +42,12 @@ described to it yet, and against the author's own private skill collections. Con
   instructions, its helper script, or its tests — not even as "for example, in a library like...".
   Every example anywhere in this skill is a fabricated placeholder (`example-skill/`,
   `widget-reviewer/`).
-- Detection heuristics are **shape-based**, never **name-based**. "Does this directory contain a
-  file matching `SKILL.md`/`skill.md`" is fine; "if the file is literally named `X`" for any real
-  `X` is not.
+- Detection heuristics are **shape-based**, with one narrow, documented exception: a small set of
+  root-level filenames (`AGENTS.md`, `README.md`, etc. — a broadly used, cross-project convention,
+  not any specific library's own name) are excluded by literal name, but only at the target root
+  itself, never at any nested depth. "Does this directory contain a file matching
+  `SKILL.md`/`skill.md`" is fine; "if the file is literally named `X`" for any real, private `X` is
+  not.
 - `scripts/cep_retrofit.py` owns every heuristic that can be made deterministic (inventory,
   description extraction, recommendation *signals*, idempotency checking, insertion-point
   detection) so those rules live in one tested place, not re-derived ad hoc per run. **All ledger-
@@ -61,12 +64,16 @@ guess about where someone's skill library lives is worse than just asking.
 
 ### Step 2 — Inventory candidate skill units
 
-`cep_retrofit.py inventory <path>` returns `{"units": [...], "unclaimed_dirs": [...]}` — the union
-of three shape-based heuristics (skill-directory, manifest-directory, flat-file), never a single
-winner, so a library mixing conventions (skill directories and flat prompt files coexisting as
-real siblings — this repo's own shape) doesn't silently lose one convention's files. Conventional
-generated/dependency/VCS directories are excluded by default; symlinked directories are inventoried
-one level deep with their real path recorded, never followed further.
+`cep_retrofit.py inventory <path>` returns `{"units": [...], "unclaimed_dirs": [...],
+"tier_counts": {...}}` — the union of three shape-based heuristics (skill-directory,
+manifest-directory, flat-file), never a single winner, so a library mixing conventions (skill
+directories and flat prompt files coexisting as real siblings — this repo's own shape) doesn't
+silently lose one convention's files. Conventional generated/dependency/VCS directories are
+excluded by default; symlinked directories are inventoried one level deep with their real path
+recorded, never followed further. Each unit also carries a `tier` (`"canonical"` for a real
+skill-dir/manifest-dir marker, `"supplementary"` for a bare flat-file guess) and, for a
+supplementary unit sitting directly under a directory named `docs`, a `note` flagging that weaker
+signal — group/filter by `tier` rather than treating every unit as equally confident.
 
 If `unclaimed_dirs` is non-empty, **show it to the human and ask** how a "skill" is delimited for
 those directories — don't guess a fourth heuristic. Always show the full resulting inventory

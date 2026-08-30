@@ -14,6 +14,14 @@ should follow this before doing that work:
    - **Not present:** proceed exactly as you normally would. Don't ask the
      user to generate one — this is an optional aid, not a requirement.
    - **Present:** continue to step 2.
+   - **Present but results are noisy with CEP's own installed content**
+     (skill/prompt files under `.github/`, `.cursor/`, etc. showing up in
+     `query`/`explain` results for a question about the project's own
+     code): the graph was likely built before CEP's `.cep-install.json`
+     `owned_paths` were excluded at generation time. Mention it in one line
+     and point back to `ult-codegraph/SKILL.md` Step 0 rather than trying
+     to filter results here — scoping belongs at generation time, not at
+     every query.
 
 2. **Prefer scoped runtime queries over reading the full graph.** Run
    `graphify query "<question>" --budget N` (a budget-capped traversal that
@@ -48,10 +56,12 @@ should follow this before doing that work:
 
    Fall back, in order, only when the scoped query doesn't surface enough:
    - `graphify-out/wiki/index.md`, if present, for broad navigation.
-   - `graphify-out/GRAPH_REPORT.md` for a broad architecture review (God
-     Nodes, Surprising Connections, Import Cycles, community groupings) —
-     read this when the question is bigger than a scoped query can answer,
-     not as a routine first step.
+   - `graphify-out/GRAPH_REPORT.md`, if present, for a broad architecture
+     review (God Nodes, Surprising Connections, Import Cycles, community
+     groupings) — read this when the question is bigger than a scoped query
+     can answer, not as a routine first step. Not produced under
+     `--no-cluster` (`ult-codegraph/SKILL.md`'s default invocation) — treat
+     its absence as expected, not an error, and fall through to raw source.
    - Raw source files — read these when (a) you're modifying or debugging
      specific code and need the actual implementation, (b) the graph lacks
      the detail you need, or (c) the graph is missing or stale (see step 4).
@@ -69,7 +79,10 @@ should follow this before doing that work:
    "Graph Freshness" section records the commit the graph was built from.
    If `git rev-parse HEAD` differs, mention it in one line ("the code graph
    looks stale — built from `<old-commit>`, current is `<head>`; consider
-   re-running `/ult-codegraph`") and continue — don't block on it.
+   re-running `/ult-codegraph`") and continue — don't block on it. If
+   `GRAPH_REPORT.md` doesn't exist (not produced under `--no-cluster`, the
+   default invocation — see `ult-codegraph/SKILL.md`), skip this nudge
+   silently; its absence is expected, not an error.
 
 5. **Going deeper, only when steps 2–4 still come up empty (gated — ask,
    never run silently).** If you suspect a relationship exists that the
