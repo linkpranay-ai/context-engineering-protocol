@@ -1581,6 +1581,7 @@ class TestRunInit(unittest.TestCase):
         # hook must still exit 0, whether it's because it found python3 and
         # validate passed/failed, or because neither interpreter existed.
         import os
+        import shutil
         import stat
         import subprocess
 
@@ -1602,10 +1603,22 @@ class TestRunInit(unittest.TestCase):
             write(python3_shim, "#!/bin/sh\nexit 1\n")
             python3_shim.chmod(python3_shim.stat().st_mode | stat.S_IEXEC)
 
+            # Resolve `sh` to an absolute path *before* fabricating PATH below.
+            # On POSIX, subprocess locates a bare command name using the PATH
+            # of the `env` passed to it (not the real process PATH) - so once
+            # PATH is trimmed to fake_bin-only, a bare "sh" argv[0] can no
+            # longer be found and raises FileNotFoundError. Windows resolves
+            # the executable via the OS's own search instead of the child
+            # env block, which is why this never surfaced there. The fix
+            # only needs to make launching `sh` itself PATH-independent; the
+            # fabricated PATH below still correctly limits what the *hook's
+            # own* interpreter lookup sees (python3 shim only, no python).
+            sh_path = shutil.which("sh") or "sh"
+
             env = dict(os.environ)
             env["PATH"] = str(fake_bin)
             result = subprocess.run(
-                ["sh", str(hook)], cwd=str(root), env=env,
+                [sh_path, str(hook)], cwd=str(root), env=env,
                 capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
