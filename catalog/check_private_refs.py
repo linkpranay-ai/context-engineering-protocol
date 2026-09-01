@@ -31,7 +31,11 @@ past cleanup itself (this docstring, `CONTRIBUTING.md`'s citation note,
 entries) - recording that a mistake happened and was fixed is not the mistake. Those
 sites carry an inline `<!-- private-ref-allow: reason -->` marker, reviewed like any
 other diff line, not a blanket exemption (same discipline `check_radisys_scrub.py`
-uses for its own allow marker).
+uses for its own allow marker). This script's own test fixtures are the one exception
+that isn't marker-based: `tests/test_check_private_refs.py` necessarily writes each
+denylisted filename verbatim to prove detection works, so it's exempted by path
+(`THIS_SCRIPTS_TEST_FILE_REL`) the same way this module itself is (`THIS_SCRIPT`) - a
+marker on every fixture line would just be noise around the point of the test.
 
 Exits 1 if any un-allow-listed match is found anywhere in the tracked working tree.
 """
@@ -42,6 +46,16 @@ from pathlib import Path
 
 LIBRARY_ROOT = Path(__file__).resolve().parent.parent
 THIS_SCRIPT = Path(__file__).resolve()
+# This script's own unit tests necessarily write each denylisted filename into
+# fixture content, to prove `scan_file`/`run_check` actually catch it - that's
+# the check exercising itself, not a citation. Exempted by path (relative to
+# whatever root is being scanned, so this is testable against a disposable
+# fixture repo the same way the rest of `run_check` is) for the same reason
+# THIS_SCRIPT is: the 2026-09-01 evaluation's follow-up on this gate found its
+# own test file tripping its own scan - a self-referential gap this project's
+# own C-3 finding warns about (a fixture encoding a shape the check itself
+# never expected to see).
+THIS_SCRIPTS_TEST_FILE_REL = "catalog/tests/test_check_private_refs.py"
 
 # Every one of these is an unpublished, non-public document. None has a legitimate
 # reason to be cited by filename from tracked content - see the module docstring for
@@ -76,6 +90,14 @@ def _tracked_files(library_root: Path):
     for rel in out.stdout.splitlines():
         rel = rel.strip()
         if not rel:
+            continue
+        if rel == THIS_SCRIPTS_TEST_FILE_REL:
+            # Same reasoning as THIS_SCRIPT below, one level down: the fixtures
+            # that prove this gate catches each denylisted filename must contain
+            # that filename verbatim. Checked by relative path (not
+            # `path.resolve() == THIS_SCRIPT`'s style) so this exemption is
+            # exercised the same way against a disposable fixture repo as
+            # against the real one.
             continue
         path = library_root / rel
         if not path.is_file():

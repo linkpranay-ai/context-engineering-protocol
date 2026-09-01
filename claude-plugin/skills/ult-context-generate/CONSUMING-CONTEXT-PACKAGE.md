@@ -47,9 +47,9 @@
 >
 > - **`ask`** — the recommended default for implementation, design, planning,
 >   review, and debugging skills. Step 1 below asks before proceeding.
-> - **`required`** — for high-risk or governed skills. Step 1 below stops
->   until an approved package is supplied or generated — never proceeds
->   ungrounded.
+> - **`required`** — for high-risk or governed skills. Step 1 below is
+>   written to stop until an approved package is supplied or generated,
+>   rather than proceed ungrounded.
 > - **`optional`** — preserves the original lightweight behavior (proceed
 >   silently), but step 1 below now announces the absence up front instead of
 >   only in step 8's attribution line, so silence is never the only signal.
@@ -58,6 +58,16 @@
 > hand-authored skill that hasn't adopted this) behaves exactly as `optional`
 > did before this addition — this callout changes nothing for it beyond
 > requiring the up-front announcement.
+>
+> **This is a recorded decision, not an enforced one.** The policy line
+> tells a consuming skill what its own step 1 should do; nothing in this
+> file, the context-package schema, or `ult-cep-wizard` verifies that a
+> given execution actually reached and honored step 1 before doing real
+> work. A `required` unit that's driven by something other than this
+> contract's own step-by-step instructions (a differently-prompted agent, a
+> shortcut invocation) is not mechanically stopped — the guarantee here is
+> "the decision is written down and machine-readable," not "the decision is
+> enforced." Treat any doc that implies otherwise as overstating this.
 
 Any skill that is asked to work on a specific feature (brainstorm a design,
 write a plan, write test cases, review code, debug an issue, etc.) should

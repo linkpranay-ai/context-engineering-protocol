@@ -92,12 +92,15 @@ warns about exactly this if it slips through). Before your first
 `graphify update`, check for that file and, if present, merge its
 `owned_paths` into `.graphifyignore` — one entry per line.
 
-No CLI flag is needed to enable this: `.graphifyignore` is auto-discovered
-next to the directory you point `graphify update` at, the same way
-`.gitignore` is, and is evaluated after `.gitignore` (confirmed against the
-published `graphifyy` package docs, 2026-08-31). `graphify --help` not
-listing an ignore-file option is expected — it's not a sign the file is
-being ignored.
+No CLI flag is needed to enable this: the published `graphifyy` package docs
+state that `.graphifyignore` is auto-discovered next to the directory you
+point `graphify update` at, the same way `.gitignore` is, and is evaluated
+after `.gitignore`. `graphify --help` not listing an ignore-file option is
+expected per that documentation — it's not a sign the file is being ignored.
+That said, treat the auto-discovery behavior itself as unconfirmed on
+Windows rather than settled fact: a 2026-08-31 evaluation there retried with
+the documented ignore configuration in place and observed no change in
+output.
 
 `.graphifyignore` is a file the adopter may also want to write in
 themselves (build output, fixture trees, anything else they never want

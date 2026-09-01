@@ -17,7 +17,7 @@ and treat a nonzero exit the same way you'd treat `graphify update` itself
 failing - don't proceed to `graphify query`/`path`/`explain`/`affected` on a
 graph this flags as not actually produced.
 
-Four states, in order of severity:
+Five states, in order of severity:
 
   - "never_ran": `graphify-out/` doesn't exist at all under the target
     directory. Either `graphify update` was never run there, or it was run
@@ -29,7 +29,20 @@ Four states, in order of severity:
     JSON, or parses to something with no actual graph content (e.g.
     `{"nodes": [], "edges": []}`) - a graph a consuming skill would silently
     get zero results from without ever being told why.
-  - "ok": `graph.json` exists, parses, and has content.
+  - "stale": `graph.json` exists, parses, and has content, but its mtime
+    predates the target's current HEAD commit - the 2026-09-01 evaluation's
+    finding on this check having no state between "well-formed" and
+    "fresh": a graph built on Monday and never rebuilt still comes back
+    `ok` on Friday even after 400 new commits, and a consumer trusts that
+    `ok` at face value. Determined by comparing `graph.json`'s mtime
+    against HEAD's commit timestamp (cheaper and more robust than walking
+    every tracked source file's own mtime); when that comparison can't be
+    made at all (not a git working tree, git not on PATH, no commits yet)
+    this falls back to "ok" rather than guessing - the same "no signal
+    available, don't invent one" stance `_read_cep_manifest` takes
+    elsewhere in this project for an absent manifest.
+  - "ok": `graph.json` exists, parses, has content, and is not stale (or
+    staleness could not be determined).
 
 This script does not know graphify's internal JSON schema - that's an
 external tool's implementation detail (see `SKILL.md`'s "Why wrap rather
@@ -48,6 +61,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +70,7 @@ from typing import List
 NEVER_RAN = "never_ran"
 PARTIAL_FAILURE = "partial_failure"
 EMPTY_OR_CORRUPT = "empty_or_corrupt"
+STALE = "stale"
 OK = "ok"
 
 # The exact failure signature from the 2026-08-31 Round-2 evaluation's finding on the codegraph sanity-check invocation not being runnable as documented -
@@ -86,10 +101,15 @@ WINDOWS_TROUBLESHOOTING: List[str] = [
 ]
 
 GRAPHIFYIGNORE_NOTE = (
-    "Note: `.graphifyignore` needs no CLI flag - graphify auto-discovers it "
-    "next to the target directory the same way it discovers `.gitignore`, "
-    "evaluated after `.gitignore`. `graphify --help` not listing an "
-    "ignore-file option is expected, not a sign it isn't being honored."
+    "Note: graphify's own docs state that `.graphifyignore` needs no CLI "
+    "flag - it's auto-discovered next to the target directory the same way "
+    "`.gitignore` is, evaluated after it. `graphify --help` not listing an "
+    "ignore-file option is expected per that documentation, not a sign it "
+    "isn't being honored. That said, a 2026-08-31 evaluation on Windows "
+    "retried with the documented ignore configuration in place and observed "
+    "no change in output - so treat the auto-discovery behavior itself as "
+    "unconfirmed on Windows rather than settled fact, even though the "
+    "documentation is unambiguous about it."
 )
 
 
@@ -118,6 +138,30 @@ def _graph_has_content(data) -> bool:
         # as an empty top-level dict.
         return any(bool(v) for v in data.values())
     return True
+
+
+def _head_commit_timestamp(repo_dir):
+    """Returns the current HEAD commit's Unix timestamp for the git
+    working tree containing `repo_dir`, or None if that can't be
+    determined - not a git working tree, git isn't on PATH, there are no
+    commits yet, or the command otherwise fails. None means "no staleness
+    signal available"; callers must fall back to their pre-staleness
+    behavior (returning `ok`) rather than treat an unmanifested/non-git
+    target as an error - mirrors `_read_cep_manifest`'s same stance in the
+    repo-layout skill for an absent manifest."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%ct", "HEAD"],
+            cwd=str(repo_dir), capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    out = result.stdout.strip()
+    if not out.isdigit():
+        return None
+    return int(out)
 
 
 def check_graphify_output(target_dir) -> CheckResult:
@@ -187,6 +231,24 @@ def check_graphify_output(target_dir) -> CheckResult:
             "<dir> --no-cluster` against a directory that actually contains "
             "source files.",
         )
+
+    head_ts = _head_commit_timestamp(target)
+    if head_ts is not None:
+        try:
+            graph_mtime = graph_json.stat().st_mtime
+        except OSError:
+            graph_mtime = None
+        if graph_mtime is not None and graph_mtime < head_ts:
+            return CheckResult(
+                STALE,
+                f"`graph.json` at {graph_json} exists and is populated, but "
+                "its mtime predates the repo's current HEAD commit - it was "
+                "built from an older snapshot and may not reflect recent "
+                "changes. Re-run `graphify update <dir> --no-cluster` to "
+                "refresh it, or proceed deliberately if a stale graph is "
+                "acceptable for this question (see CONSUMING-CODE-GRAPH.md's "
+                "graph-availability policy).",
+            )
 
     return CheckResult(
         OK,

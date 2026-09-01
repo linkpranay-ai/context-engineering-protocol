@@ -84,6 +84,35 @@ class TestCheckPrivateRefs(unittest.TestCase):
             code = cpr.run_check(self.root)
         self.assertEqual(code, 0)
 
+    def test_own_test_file_path_is_exempt_from_the_scan(self):
+        # The 2026-09-01 evaluation's follow-up on this gate: this checker's own
+        # test fixtures necessarily write denylisted filenames verbatim to prove
+        # detection works, so `catalog/tests/test_check_private_refs.py` is
+        # exempted by relative path - not a marker, since a marker on every
+        # fixture line would defeat the point of testing raw detection. This
+        # asserts the exemption is scoped to exactly that one path, not to
+        # "anything under catalog/tests/": a sibling file at the same depth is
+        # not exempt and still trips the scan.
+        _write_and_track(
+            self.root,
+            "catalog/tests/test_check_private_refs.py",
+            "fixture line naming ISSUES.md on purpose\n",
+        )
+        with self._captured_stdout() as out:
+            code = cpr.run_check(self.root)
+        self.assertEqual(code, 0)
+        self.assertIn("No private-document reference violations found", out.getvalue())
+
+        _write_and_track(
+            self.root,
+            "catalog/tests/test_something_else.py",
+            "this sibling file is not exempt: ISSUES.md\n",
+        )
+        with self._captured_stdout() as out:
+            code = cpr.run_check(self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("test_something_else.py:1:", out.getvalue())
+
     def test_other_denylisted_filenames_are_each_caught(self):
         for name in (
             "CEP_INSTALLATION_REPORT.md",
