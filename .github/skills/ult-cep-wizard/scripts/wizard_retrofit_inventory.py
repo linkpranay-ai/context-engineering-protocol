@@ -41,6 +41,17 @@ class RetrofitInventoryError(Exception):
     a user-facing message, never a raw traceback."""
 
 
+# the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and
+# filtering by source directory: a flat/standalone retrofit target (every unit is a
+# loose top-level file, e.g. `cep_retrofit.py`, with no subdirectory) had no "/" in
+# its target-relative path, so `path.split("/", 1)[0]` returned the *whole filename*
+# as its own one-unit "directory" bucket - one bogus per-file chip instead of one
+# shared bucket for the units that share no real directory at all. This sentinel
+# name (never a legal relative-path first segment, so it can't collide with a real
+# subdirectory) buckets every such unit together instead.
+ROOT_BUCKET_NAME = "(target root)"
+
+
 def _find_cep_retrofit_scripts_dir(repo_root) -> Path:
     """Same lookup shape (and same duplication rationale) as
     wizard_decision_staging._find_repo_layout_scripts_dir: this module must be
@@ -86,11 +97,14 @@ class RetrofitUnit:
     # unit's *target*-relative path (before the _repo_rel() rewrite below) -
     # "skills/foo" (a skill-dir) and "skills/foo/SKILL.md" (its primary_file)
     # both group under "skills", so this buckets by "which immediate child of
-    # the retrofit target this unit came from" regardless of unit type. Set
-    # once in build_inventory() and reused for both this field and
-    # RetrofitInventoryResult.directory_counts below, so the frontend's
-    # directory filter buttons and the counts rendered above them can never
-    # drift apart - one computation, two consumers, not two independent ones.
+    # the retrofit target this unit came from" regardless of unit type. A
+    # unit with no subdirectory at all (a flat/standalone target-root file)
+    # gets the ROOT_BUCKET_NAME sentinel instead of its own filename - see
+    # that constant's comment. Set once in build_inventory() and reused for
+    # both this field and RetrofitInventoryResult.directory_counts below, so
+    # the frontend's directory filter buttons and the counts rendered above
+    # them can never drift apart - one computation, two consumers, not two
+    # independent ones.
     source_directory: str = ""
 
 
@@ -264,8 +278,12 @@ def build_inventory(
     for raw_unit in _flag_stray_duplicate_flat_files(raw["units"], cr._FLAT_FILE_DOUBLE_SUFFIX):
         # Computed from the *target*-relative path, before _repo_rel() below
         # prefixes it with target_rel - see RetrofitUnit.source_directory's
-        # own comment for why this is the bucketing key.
-        source_directory = raw_unit["path"].split("/", 1)[0]
+        # own comment for why this is the bucketing key. A path with no "/"
+        # is a flat/standalone unit sitting directly at the retrofit target
+        # root, not inside any subdirectory of it - bucket it under the
+        # ROOT_BUCKET_NAME sentinel rather than under its own filename.
+        raw_path = raw_unit["path"]
+        source_directory = raw_path.split("/", 1)[0] if "/" in raw_path else ROOT_BUCKET_NAME
         unit = RetrofitUnit(
             unit_id=raw_unit["unit_id"],
             type=raw_unit["type"],

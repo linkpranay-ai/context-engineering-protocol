@@ -422,15 +422,32 @@ class TestSourceDirectoryAndDirectoryCounts(RetrofitInventoryTestCase):
         self.assertEqual(by_id["skills/widget-reviewer"].source_directory, "skills")
         self.assertEqual(by_id["skills/second-widget.md"].source_directory, "skills")
 
-    def test_source_directory_for_root_level_flat_file_is_its_own_name(self):
-        # No "/" in the target-relative path at all - split("/", 1)[0] on a
-        # bare filename returns the filename itself, which is exactly the
-        # "this unit's own bucket, nothing else in it" behavior wanted here.
+    def test_source_directory_for_root_level_flat_file_is_the_root_bucket_sentinel(self):
+        # the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory
+        # grouping and filtering by source directory: no "/" in the
+        # target-relative path at all means this unit sits directly at the
+        # retrofit target root, not inside any subdirectory of it - it must
+        # bucket under the shared ROOT_BUCKET_NAME sentinel, not under its
+        # own filename (which would give every flat-target unit its own
+        # bogus one-unit "directory").
         _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
 
         result = wri.build_inventory(str(self.root), ".")
         unit = result.units[0]
-        self.assertEqual(unit.source_directory, "second-widget.md")
+        self.assertEqual(unit.source_directory, wri.ROOT_BUCKET_NAME)
+
+    def test_flat_target_with_multiple_root_level_files_share_one_bucket(self):
+        # A wholly flat/standalone target (every unit a loose top-level
+        # file, no subdirectories at all) must produce exactly one shared
+        # bucket, not one per file.
+        _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
+        _write(self.root / "third-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+
+        self.assertEqual(len(result.directory_counts), 1)
+        self.assertEqual(result.directory_counts[0]["directory"], wri.ROOT_BUCKET_NAME)
+        self.assertEqual(result.directory_counts[0]["total"], 2)
 
     def test_source_directory_is_target_relative_not_repo_root_relative(self):
         # Same distinction test_inventory_against_a_library_subdirectory
@@ -445,7 +462,24 @@ class TestSourceDirectoryAndDirectoryCounts(RetrofitInventoryTestCase):
         by_id = {u.unit_id: u for u in result.units}
 
         self.assertEqual(by_id["skills/widget-reviewer"].source_directory, "skills")
-        self.assertEqual(by_id["second-widget.md"].source_directory, "second-widget.md")
+        self.assertEqual(by_id["second-widget.md"].source_directory, wri.ROOT_BUCKET_NAME)
+
+    def test_mixed_target_gets_a_subdirectory_bucket_and_a_root_bucket(self):
+        # the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory
+        # grouping and filtering by source directory: a target mixing a
+        # real subdirectory with a loose top-level file must produce
+        # exactly two buckets - the subdirectory's own name, and the shared
+        # root-bucket sentinel for the flat file - not three (which the old
+        # per-filename bucketing would have produced for two flat files).
+        _write(self.root / "skills" / "widget-reviewer" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+
+        self.assertEqual(
+            sorted(b["directory"] for b in result.directory_counts),
+            sorted(["skills", wri.ROOT_BUCKET_NAME]),
+        )
 
     def test_directory_counts_aggregates_and_sorts_by_total_desc_then_name(self):
         # "skills" gets 2 units (1 canonical, 1 supplementary); "docs" and

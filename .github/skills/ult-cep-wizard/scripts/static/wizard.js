@@ -1108,6 +1108,19 @@
       return;
     }
     container.innerHTML = "";
+    // the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory
+    // grouping and filtering by source directory: a flat/standalone
+    // retrofit target now buckets every unit under one shared
+    // "(target root)" entry (see ROOT_BUCKET_NAME in
+    // wizard_retrofit_inventory.py) rather than one bogus chip per file,
+    // but a single bucket still isn't a meaningful *filter* - there's
+    // nothing else to narrow it against. Suppress the whole row rather
+    // than render one inert chip nobody can usefully click.
+    if (directoryCounts.length < 2) {
+      container.style.display = "none";
+      return;
+    }
+    container.style.display = "";
     directoryCounts.forEach(function (bucket) {
       var chip = document.createElement("button");
       chip.type = "button";
