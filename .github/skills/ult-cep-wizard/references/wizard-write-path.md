@@ -9,12 +9,17 @@ and `wizard-security-model.md` §7 (what gates every request before it reaches a
 the code described here).
 
 **Core rule: wizard-proposes, CLI-commits (§18.3).** The wizard never writes
-`context-config.yaml` or a `CONFIRMED` stamp directly. It only ever edits *decision
-lines* in `context-layout-discovery.md` — staging a resolved verb onto an otherwise-
-`PENDING` line. The one and only place any of this skill's code calls
-`confirm_layers.run_confirm()` — the real commit — is `wizard_apply.apply_confirmed()`.
+`context-config.yaml` or a `CONFIRMED` stamp directly *by hand* — every write on this
+D23 decision axis goes through `confirm_layers.run_confirm()`, and the one and only
+place any of this skill's code calls it is `wizard_apply.apply_confirmed()`.
 Everything before that call is refusal logic; everything after it is result
 classification, never a second write.
+
+The same invariant, read as "the wizard never writes to disk except by calling an
+already-existing, already-tested deterministic CLI script — never ad hoc code of its
+own," extends to the separate D20 axis's `wizard_init.py` → `validate_layout.run_init`
+(§6a below): a second script, a second axis (slot scaffolding/`project_layout`, not
+decision lines), same rule.
 
 ## 1. Module map
 
@@ -27,7 +32,8 @@ classification, never a second write.
 | `wizard_apply.py` | `apply_confirmed()` — the only caller of `confirm_layers.run_confirm()`. Refuses (never commits) on a stale hash, an unresolved field, or a double-primary-choice section; classifies the result into a real commit, an idempotent no-op, or the C2 failure mode. |
 | `wizard_layout_source.py` | `LayoutSource.read_decisions()` — parses the current artifact into a flat list of `DecisionField`s for `/api/decisions`, and `LayoutSource.discovery_artifact_path` — the one shared, workspace-root-aware lookup every write-path module uses to find the artifact, instead of each hand-rolling the `_normalize_workspace_root` dance. |
 | `wizard_discover.py` | Phase 2. `run_discover()` — the freshness + staged-decision guard in front of `discover_layers.run_discovery()`; see §5 below. |
-| `wizard_server.py` | `do_POST` — the three-gate dispatcher (see `wizard-security-model.md` §7) — plus `_handle_api_decisions`/`_handle_api_stage`/`_handle_api_apply`/`_handle_api_discover`. |
+| `wizard_server.py` | `do_POST` — the three-gate dispatcher (see `wizard-security-model.md` §7) — plus `_handle_api_decisions`/`_handle_api_stage`/`_handle_api_apply`/`_handle_api_discover`/`_handle_api_init_preview`/`_handle_api_init`. |
+| `wizard_init.py` | Thin wrapper around `validate_layout.run_init` (D20 axis — §6a) — `preview_init`/`run_init`, same shape as `wizard_discover.py`'s wrap of the D23 discover script. |
 | `static/wizard.js` | `postJson()` (CSRF-header-carrying POST), the decisions list UI, the picker-to-CUSTOM-arg "Use this directory" flow, the Apply button, and (Phase 2) the Discover/Re-run-Discover buttons. |
 
 ## 2. The staging step: `POST /api/stage`
@@ -162,6 +168,41 @@ case it names exactly what was discarded so the UI can show a specific summary r
 than a silent state change. A `DiscoverError` not covered by either guard above (e.g.
 `discover_layers.run_discovery` itself failing) is HTTP 400 with `{"error": str(exc)}`.
 
+## 6a. The init step: `POST /api/init/preview` and `POST /api/init` (ISSUES.md Round 2
+finding 9, 2026-08-31)
+
+A separate axis from §§2-5 above: D20 (slot scaffolding / `project_layout`), not D23
+(discovery decisions). Reachable only while `workspace_root_offer_eligible` is `true`
+in `/api/state` — see `wizard-onboarding-state-machine.md` §6 for the full eligibility
+rule and rationale. Request body for both routes: `{"workspace_root": "<path>" |
+null}` (blank/omitted → `None`, meaning "use pre-D21 defaults").
+
+Both routes call `wizard_init.py`, which calls `validate_layout.run_init` directly —
+no staging step, no freshness hash, no separate confirm route, unlike §§2-5. This is
+intentional, not a shortcut around the wizard-proposes/CLI-commits rule: `run_init` is
+itself the same kind of deterministic, already-tested CLI script `run_confirm` is
+(§4's rule extended — see the "Core rule" callout in §2 above), and `--init` already
+exists as a directly-runnable CLI command independent of the wizard. The only thing
+the wizard adds is a friendlier request/response shape and the `dry_run` preview
+distinction:
+
+- `POST /api/init/preview` → `preview_init(repo_root, workspace_root)` →
+  `run_init(..., dry_run=True)`. Runs every refusal check and the full slot-resolution
+  loop, writes nothing. Response: `{"messages": [...]}`, each line prefixed "Would …".
+- `POST /api/init` → `run_init(repo_root, workspace_root)` →
+  `run_init(..., dry_run=False)`. The real write: scaffolds each installed slot,
+  writes `project_layout` into `context-config.yaml`, and — only if `workspace_root`
+  was given — sets `layout.workspace_root` and pre-populates the
+  `layers.what_l2.exclude` triad (§16.5/§16.7). Response: same `{"messages": [...]}`
+  shape, past tense.
+
+Either route raises `wizard_init.InitError` (HTTP 400, `{"error": str(exc)}`) on any
+refusal `run_init` itself already enforces — no `context-config.yaml` yet, the repo
+root itself passed as `workspace_root`, or (the case this route exists to make
+unreachable via the UI, not just via the CLI) already D20-initialized. The frontend
+never needs to special-case that last refusal: `workspace_root_offer_eligible` already
+hides the offer before it could happen.
+
 ## 6. Frontend flow
 
 1. On load, `wizard.js` fetches `/api/decisions` and renders each field as a row: a
@@ -184,7 +225,7 @@ than a silent state change. A `DiscoverError` not covered by either guard above 
    layout changed and reloads `/api/decisions` rather than allowing a blind retry
    against state the server has already rejected once.
 
-## 6. What this plan deliberately leaves out
+## 7. What this plan deliberately leaves out
 
 - The paste-back content-handoff mode (§18.6) — a different write flow for handing
   wizard-selected content back to a calling process — is out of scope here and remains

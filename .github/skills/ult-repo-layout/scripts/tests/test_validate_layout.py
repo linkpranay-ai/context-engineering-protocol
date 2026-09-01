@@ -1652,6 +1652,172 @@ class TestRunInit(unittest.TestCase):
             code, _ = vl.run_init(root)
             self.assertEqual(code, 0)
 
+    def test_init_disables_what_l2_and_how_l2_when_shipped_defaults_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            self.assertTrue(any("layers.what_l2.enabled = false" in m for m in messages), messages)
+            self.assertTrue(
+                any("how_dimension.how_l2.enabled = false" in m for m in messages), messages
+            )
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertFalse(vl.resolve_what_l2_enabled(config))
+            self.assertFalse(vl.resolve_how_l2_enabled(config))
+
+            ok, report = vl.validate(root)
+            self.assertFalse(any("what_l2" in line and "S28" in line for line in report), report)
+            self.assertFalse(any("how_l2" in line and "S28" in line for line in report), report)
+
+    def test_init_leaves_explicit_what_l2_path_alone_even_if_absent(self):
+        # An explicitly-configured path (even one that doesn't exist yet)
+        # is the user's own decision - init must never silently disable it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(
+                root / "context-config.yaml",
+                "cache:\n  product_context_path: contexts/\n"
+                "layers:\n  what_l2:\n    path: docs/spec/\n",
+            )
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            self.assertFalse(any("layers.what_l2.enabled" in m for m in messages), messages)
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertTrue(vl.resolve_what_l2_enabled(config))
+
+    def test_init_leaves_what_l2_enabled_when_shipped_default_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / "docs" / "requirements").mkdir(parents=True)
+            write(root / "docs" / "requirements" / "spec.md", "# spec\n")
+            code, messages = vl.run_init(root)
+            self.assertEqual(code, 0, messages)
+            self.assertFalse(any("layers.what_l2.enabled" in m for m in messages), messages)
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertTrue(vl.resolve_what_l2_enabled(config))
+
+    def test_freshly_scaffolded_repo_validates_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, _ = vl.run_init(root)
+            self.assertEqual(code, 0)
+
+            ok, report = vl.validate(root)
+            fails = [line for line in report if line.startswith("FAIL")]
+            self.assertEqual(fails, [])
+            self.assertTrue(ok)
+
+
+class TestRunInitDryRun(unittest.TestCase):
+    """ISSUES.md Round 2 finding 9 (2026-08-31): `dry_run=True` previews
+    exactly what a real `run_init(...)` call would do - same eligibility
+    checks, same slot-resolution loop - without writing anything, so the
+    wizard's first-run workspace_root offer can show a tree preview before
+    the human commits to it."""
+
+    def _install_skills(self, root, *names):
+        for name in names:
+            (root / ".github" / "skills" / name).mkdir(parents=True, exist_ok=True)
+
+    def test_dry_run_writes_nothing_to_disk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            before = (root / "context-config.yaml").read_text(encoding="utf-8")
+
+            code, messages = vl.run_init(root, workspace_root="docs/", dry_run=True)
+            self.assertEqual(code, 0, messages)
+
+            after = (root / "context-config.yaml").read_text(encoding="utf-8")
+            self.assertEqual(before, after)
+            self.assertFalse((root / "docs").exists())
+            self.assertFalse((root / "contexts").exists())
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertNotIn("project_layout", config or {})
+
+    def test_dry_run_messages_use_would_phrasing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+
+            code, messages = vl.run_init(root, workspace_root="docs/", dry_run=True)
+            self.assertEqual(code, 0, messages)
+            self.assertTrue(
+                any("Would scaffold 'context_packages' at 'docs/contexts/'." in m for m in messages),
+                messages,
+            )
+            self.assertTrue(
+                any(m.startswith("Would set layout.workspace_root = 'docs'") for m in messages),
+                messages,
+            )
+            self.assertTrue(any("Would write project_layout" in m for m in messages), messages)
+            # Never the real, past-tense phrasing a completed run would use.
+            self.assertFalse(any(m.startswith("Scaffolded ") for m in messages), messages)
+            self.assertFalse(any(m.startswith("Set layout.workspace_root") for m in messages), messages)
+            self.assertFalse(any(m.startswith("Wrote project_layout") for m in messages), messages)
+
+    def test_dry_run_matches_real_run_entries_for_same_inputs(self):
+        # The preview must agree with reality: calling dry_run=True and then
+        # dry_run=False against the same untouched directory with identical
+        # inputs must produce the same number of messages (one "Would ..."
+        # per real-run message) - including the what_l2/how_l2 disable
+        # messages, which regressed before the fix that snapshots shipped-
+        # default existence *before* the scaffold loop's own mkdir() calls
+        # can create the workspace root as a side effect.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            preview_code, preview_messages = vl.run_init(root, workspace_root="docs/", dry_run=True)
+            self.assertEqual(preview_code, 0, preview_messages)
+            real_code, real_messages = vl.run_init(root, workspace_root="docs/", dry_run=False)
+            self.assertEqual(real_code, 0, real_messages)
+            self.assertTrue((root / "docs" / "contexts").is_dir())
+            self.assertEqual(len(preview_messages), len(real_messages))
+
+    def test_dry_run_still_refuses_when_already_initialized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(
+                root / "context-config.yaml",
+                "project_layout:\n  version: 1\n  initialized: true\n",
+            )
+            code, messages = vl.run_init(root, dry_run=True)
+            self.assertEqual(code, 1)
+            self.assertTrue(any("Already initialized" in m for m in messages))
+
+    def test_dry_run_with_ci_hook_on_initialized_repo_previews_hook_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            (root / ".git" / "hooks").mkdir(parents=True)
+            self.assertEqual(vl.run_init(root)[0], 0)
+
+            code, messages = vl.run_init(root, ci_hook=True, dry_run=True)
+            self.assertEqual(code, 0, messages)
+            self.assertFalse((root / ".git" / "hooks" / "pre-commit").exists())
+            self.assertTrue(any("Would scaffold pre-commit hook" in m for m in messages), messages)
+
+    def test_dry_run_invalid_workspace_root_still_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            code, messages = vl.run_init(root, workspace_root=".", dry_run=True)
+            self.assertEqual(code, 1)
+            self.assertTrue(any("S22" in m for m in messages))
+
             ok, report = vl.validate(root)
             self.assertFalse(any("decision_ledger" in line for line in report), report)
 

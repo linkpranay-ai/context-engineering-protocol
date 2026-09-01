@@ -65,7 +65,15 @@ for the full table and reasoning:
   repo (never ran `init`) sees a guide-only explanation of what `init` is and asks for,
   plus a note that Discover can run before or after it; a repo that's already run
   `init` sees today's plain Discover-scan explanation. Either way the Run Discover
-  button itself is shared and unaffected — the split is guide copy only.
+  button itself is shared and unaffected — the split is guide copy only. A genuinely
+  greenfield repo also sees a workspace-root init offer (`workspace_root_offer_eligible`
+  — true only here, before `init` has scaffolded anything): **Preview**/**Initialize**
+  buttons (`POST /api/init/preview`/`POST /api/init`) run the mechanical half of `init`
+  — slot scaffolding, `project_layout`, optional `layout.workspace_root` — in-process,
+  same "wizard calls the deterministic script directly" posture as Discover above; a
+  **Skip** button dismisses it for the session. See
+  [`references/wizard-onboarding-state-machine.md`](references/wizard-onboarding-state-machine.md)
+  §6 and [`references/wizard-write-path.md`](references/wizard-write-path.md) §6a.
 - **`decisions_pending`** — an artifact exists with at least one field still
   pending/staged; today's existing Decisions UI, described above.
 - **`steady_state`** — everything is confirmed; the full boxes/decisions/picker

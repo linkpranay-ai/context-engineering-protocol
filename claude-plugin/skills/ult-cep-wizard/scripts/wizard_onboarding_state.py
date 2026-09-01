@@ -28,6 +28,16 @@ State table:
                        yet. Guide-only intro + a real "Run Discover" button.
   decisions_pending  - artifact exists, at least one field is still pending/staged.
   steady_state       - artifact exists, every field is confirmed.
+
+`workspace_root_offer_eligible` (ISSUES.md Round 2 finding 9, 2026-08-31): true only
+at `needs_discover` while D20 has not yet run (`not d20_initialized`) - the one moment
+before any slot has been scaffolded where offering `layout.workspace_root`
+namespacing is still meaningful. `run_init` (via wizard_init.py) already refuses
+unconditionally once D20-initialized (never-silently-reset), so this flag exists to
+let the frontend hide the offer entirely rather than show it and then surface that
+refusal after the fact. `workspace_root_current` carries the already-configured value
+(if any) so a repo that ran `init --workspace-root ...` through the CLI/agent flow
+still reports it here, even though the offer itself is not eligible any more.
 """
 
 from __future__ import annotations
@@ -36,7 +46,7 @@ import importlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wizard_layout_source  # noqa: E402
@@ -57,6 +67,8 @@ class OnboardingState:
         default_factory=lambda: {"pending": 0, "staged": 0, "confirmed": 0}
     )
     d20_initialized: bool = False  # informational only - never gates `name`
+    workspace_root_current: Optional[str] = None  # already-set layout.workspace_root, if any
+    workspace_root_offer_eligible: bool = False  # needs_discover AND not d20_initialized
 
 
 def _import_validate_layout(repo_root: Path):
@@ -101,6 +113,9 @@ def compute_state(repo_root) -> OnboardingState:
     validate_layout = _import_validate_layout(repo_root)
     d20_initialized = _is_d20_initialized(repo_root, validate_layout)
 
+    config = validate_layout.load_yaml_file(repo_root / "context-config.yaml") or {}
+    workspace_root_current = validate_layout._normalize_workspace_root(config)
+
     ok, report = validate_layout.validate(repo_root)
     if not ok:
         failures = [line for line in report if line.startswith("FAIL")]
@@ -110,6 +125,8 @@ def compute_state(repo_root) -> OnboardingState:
             validate_failures=failures,
             discovery_artifact_exists=False,
             d20_initialized=d20_initialized,
+            workspace_root_current=workspace_root_current,
+            workspace_root_offer_eligible=False,
         )
 
     # validate_ok is True, so LayoutSource's own constructor-time re-check of the
@@ -123,6 +140,10 @@ def compute_state(repo_root) -> OnboardingState:
             validate_failures=[],
             discovery_artifact_exists=False,
             d20_initialized=d20_initialized,
+            workspace_root_current=workspace_root_current,
+            # The one moment (before D20 has scaffolded anything) where offering
+            # namespacing is still meaningful - see module docstring.
+            workspace_root_offer_eligible=not d20_initialized,
         )
 
     counts = {"pending": 0, "staged": 0, "confirmed": 0}
@@ -137,6 +158,8 @@ def compute_state(repo_root) -> OnboardingState:
         discovery_artifact_exists=True,
         decision_counts=counts,
         d20_initialized=d20_initialized,
+        workspace_root_current=workspace_root_current,
+        workspace_root_offer_eligible=False,
     )
 
 
@@ -148,4 +171,6 @@ def to_json_dict(state: OnboardingState) -> dict:
         "discovery_artifact_exists": state.discovery_artifact_exists,
         "decision_counts": state.decision_counts,
         "d20_initialized": state.d20_initialized,
+        "workspace_root_current": state.workspace_root_current,
+        "workspace_root_offer_eligible": state.workspace_root_offer_eligible,
     }
