@@ -238,6 +238,31 @@ def resolve_external_target(repo_root, candidate_path) -> Path:
             "use the ordinary in-repo target picker instead of the external-target flow."
         )
 
+    # The 2026-08-31 Round-2 evaluation's finding on external retrofit-root
+    # breadth: nothing above rejects a root so broad that "every unit under
+    # it" is effectively "every file on the machine" - a filesystem root
+    # (`C:\`, `\\server\share\`, `/`) or the user's own home directory both
+    # pass every check above (absolute, not inside repo_root, no ancestors to
+    # walk or a harmless one, not itself a reparse point, and both really are
+    # directories that exist). Checked by identity against the resolved
+    # candidate, not by string/prefix matching, so this can't be defeated by
+    # a trailing slash or a differently-cased drive letter, and doesn't
+    # accidentally reject a deliberately narrow subdirectory that merely
+    # lives near the anchor or home directory.
+    resolved_candidate = candidate.resolve()
+    if resolved_candidate == Path(candidate.anchor):
+        raise ContainmentError(
+            f"'{candidate}' is a filesystem root ('{candidate.anchor}') - too broad "
+            "to use as an external retrofit target; point at a specific "
+            "already-cloned skill library directory instead."
+        )
+    if resolved_candidate == Path.home().resolve():
+        raise ContainmentError(
+            f"'{candidate}' is your home directory - too broad to use as an "
+            "external retrofit target; point at a specific already-cloned skill "
+            "library directory instead."
+        )
+
     # The 2026-08-31 Round-2 evaluation's finding on external (out-of-repo)
     # retrofit-target containment: the check below this comment only ever
     # looked at `candidate` itself - a reparse point one level higher (e.g.
@@ -273,4 +298,4 @@ def resolve_external_target(repo_root, candidate_path) -> Path:
             "the external skill library first, then point the wizard at its root."
         )
 
-    return candidate.resolve()
+    return resolved_candidate

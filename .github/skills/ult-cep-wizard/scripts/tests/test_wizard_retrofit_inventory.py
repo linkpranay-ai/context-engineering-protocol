@@ -599,6 +599,30 @@ class TestExternalRoot(RetrofitInventoryTestCase):
         )
         self.assertEqual(len(result.units), 1)
 
+    # the 2026-08-31 Round-2 evaluation's finding on external retrofit-root
+    # breadth: wizard_containment.resolve_external_target refuses a
+    # filesystem root or the user's home directory outright, but a
+    # legitimate-looking external root can still be enormous - this soft cap
+    # is the second, breadth-based gate, checked here at the build_inventory()
+    # layer since resolve_external_target has no way to know unit count.
+    def test_external_root_over_soft_cap_is_a_retrofit_inventory_error(self):
+        for i in range(wri.EXTERNAL_ROOT_UNIT_SOFT_CAP + 100):
+            _write(self.external_root / f"widget-{i:04d}.md", SECOND_WIDGET_MD)
+
+        with self.assertRaises(wri.RetrofitInventoryError):
+            wri.build_inventory(str(self.root), ".", external_root=str(self.external_root))
+
+    def test_in_repo_target_is_not_subject_to_the_external_soft_cap(self):
+        # The cap only applies when external_root is set - an ordinary
+        # in-repo target must not start failing merely because it happens to
+        # exceed the same unit count.
+        for i in range(wri.EXTERNAL_ROOT_UNIT_SOFT_CAP + 10):
+            _write(self.root / f"widget-{i:04d}.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+
+        self.assertGreater(len(result.units), wri.EXTERNAL_ROOT_UNIT_SOFT_CAP)
+
 
 if __name__ == "__main__":
     unittest.main()

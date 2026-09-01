@@ -292,6 +292,28 @@ class TestResolveExternalTarget(unittest.TestCase):
         resolved = wc.resolve_external_target(self.repo_root, self.external_root)
         self.assertEqual(resolved, self.external_root.resolve())
 
+    # the 2026-08-31 Round-2 evaluation's finding on external retrofit-root
+    # breadth: a filesystem root or the user's home directory both pass every
+    # check above this pair (absolute, not inside repo_root, no disqualifying
+    # ancestor, and a real existing directory) - these two are the ones the
+    # finding calls out by name.
+    def test_filesystem_root_anchor_is_rejected(self):
+        anchor = Path(self.external_root.anchor)
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, anchor)
+
+    def test_home_directory_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, Path.home())
+
+    def test_narrow_subdirectory_near_anchor_or_home_is_unaffected(self):
+        # The identity check must not overreach into rejecting a deliberately
+        # narrow, legitimate target merely because it is a sibling of (not
+        # equal to) the anchor or home directory.
+        resolved = wc.resolve_external_target(self.repo_root, self.external_root)
+        self.assertNotEqual(resolved, Path(self.external_root.anchor))
+        self.assertNotEqual(resolved, Path.home().resolve())
+
 
 class TestNormalizedForComparison(unittest.TestCase):
     def test_case_fold(self):

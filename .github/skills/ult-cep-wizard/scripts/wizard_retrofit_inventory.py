@@ -51,6 +51,17 @@ class RetrofitInventoryError(Exception):
 # subdirectory) buckets every such unit together instead.
 ROOT_BUCKET_NAME = "(target root)"
 
+# The 2026-08-31 Round-2 evaluation's finding on external retrofit-root breadth:
+# `wizard_containment.resolve_external_target` refuses a filesystem root or the
+# user's home directory outright, but a legitimate-looking external root can
+# still be enormous (a monorepo's checkout, a whole `~/dev/` tree one level
+# down from home) - unbounded here, `build_inventory()` would run describe()/
+# recommend() against every discovered unit and hand the frontend a
+# single-request payload with no ceiling. Only enforced for `external_root`
+# targets (below) - an in-repo target is already bounded by the project's own
+# size and doesn't need this second gate.
+EXTERNAL_ROOT_UNIT_SOFT_CAP = 200
+
 
 def _find_cep_retrofit_scripts_dir(repo_root) -> Path:
     """Same lookup shape (and same duplication rationale) as
@@ -254,6 +265,19 @@ def build_inventory(
         raw = cr.inventory(str(target))
     except (OSError, NotADirectoryError) as exc:
         raise RetrofitInventoryError(str(exc)) from exc
+
+    # The 2026-08-31 Round-2 evaluation's finding on external retrofit-root
+    # breadth: refused before describe()/recommend() ever run against a single
+    # unit, not after - so an oversized external root fails fast rather than
+    # paying the per-unit cost first and discarding the result.
+    if external_root is not None and len(raw["units"]) > EXTERNAL_ROOT_UNIT_SOFT_CAP:
+        raise RetrofitInventoryError(
+            f"'{target_rel_path}' under the external retrofit root contains "
+            f"{len(raw['units'])} discoverable units, over the "
+            f"{EXTERNAL_ROOT_UNIT_SOFT_CAP}-unit soft cap for external targets - "
+            "point at a narrower subdirectory of the external root instead of "
+            "its entire breadth."
+        )
 
     # cep_retrofit.inventory() returns path/primary_file relative to `target`
     # (the directory it was pointed at). Every downstream consumer of a unit
