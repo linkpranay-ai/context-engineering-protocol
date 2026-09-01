@@ -185,7 +185,7 @@ graphify update . --no-cluster
 # Verify the run actually produced a graph (the 2026-08-31 Round-2 evaluation's finding on the codegraph sanity-check invocation not being runnable as documented,
 # 2026-08-31) — see the paragraph below the "Together, these write..." note.
 # Treat a nonzero exit here the same as `graphify update` itself failing.
-python scripts/check_graphify_output.py .
+python .github/skills/ult-codegraph/scripts/check_graphify_output.py .
 
 # Optional: cluster into communities + generate the human-readable report.
 # Community *names* require GEMINI_API_KEY/GOOGLE_API_KEY — without one they
