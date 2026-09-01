@@ -695,7 +695,16 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
                 status_lines=["**Status:** enabled by default."],
                 table_header=["Candidate", "Category", "Name match", "Files", "Confidence"],
                 table=rows,
-                decision_lines=[f"decision: PENDING   # CONFIRM: {top_rel} | CUSTOM: <path> | SKIP"],
+                # the 2026-08-31 Round-2 evaluation's finding on What-L2 decision-line verb coverage: SKIP alone forces a
+                # false binary here - CONFIRM one of the found candidates, or type a
+                # CUSTOM path - with no vocabulary for "none of these are right, and
+                # this project genuinely has no requirements corpus", the same
+                # acknowledgment the no-candidates branch below already offers.
+                # apply_field() already treats any non-CONFIRM/CUSTOM/DISABLE verb
+                # identically (a no-op, same as SKIP) - this only names the option.
+                decision_lines=[
+                    f"decision: PENDING   # CONFIRM: {top_rel} | CUSTOM: <path> | SKIP | ACKNOWLEDGE"
+                ],
             )
             resolved_path = None  # proposal only, not yet confirmed
         elif rows:
@@ -709,8 +718,12 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
             other_candidates = _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=("Requirements",))
             if other_candidates:
                 rows2 = [[f"`{rel}`", cats, ev] for rel, cats, ev in other_candidates]
+                # Same ACKNOWLEDGE addition as the with-candidates template above -
+                # see its comment. Here it also covers "none of these other-category
+                # candidates are Requirements either", not just the single-candidate
+                # case.
                 decision_lines = [
-                    f"decision: PENDING   # CONFIRM: {rel} | SKIP  "
+                    f"decision: PENDING   # CONFIRM: {rel} | SKIP | ACKNOWLEDGE  "
                     f"(H-2: no Requirements match exists - pick which category match, "
                     f"if any, fills `what_l2.path`; every candidate not picked still "
                     f"becomes an include_roots candidate below)"

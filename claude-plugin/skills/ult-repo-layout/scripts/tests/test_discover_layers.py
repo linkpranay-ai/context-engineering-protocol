@@ -715,8 +715,8 @@ class TestDriftTracking(TempRepoTestCase):
         # sees zero remaining PENDING fields, same as a real human editing
         # every field on the artifact before confirming.
         text = artifact.replace(
-            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
-            f"decision: {verb}   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
+            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE",
+            f"decision: {verb}   # CONFIRM: specification/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE",
             1,
         )
         return text.replace(
@@ -730,6 +730,20 @@ class TestDriftTracking(TempRepoTestCase):
         artifact_path = self.repo_root / "context-layout-discovery.md"
         artifact_path.write_text(self._resolve_what_l2_pending(artifact, verb), encoding="utf-8")
         return cl.run_confirm(self.repo_root)
+
+    def test_acknowledge_with_candidates_present_is_accepted_and_writes_no_path(self):
+        # the 2026-08-31 Round-2 evaluation's finding on What-L2 decision-line verb
+        # coverage: with a genuine Requirements candidate on the board,
+        # ACKNOWLEDGE (added alongside CONFIRM/CUSTOM/SKIP) must resolve
+        # cleanly through confirm-layers, and - like SKIP - must leave
+        # layers.what_l2.path unset rather than silently confirming the
+        # candidate the human declined to pick.
+        self._make_what_l2_candidate()
+        code, msgs = self._run_discover_then_confirm("ACKNOWLEDGE")
+        self.assertEqual(code, 0, msgs)
+        config_path = self.repo_root / "context-config.yaml"
+        config = vl.load_yaml_file(config_path) if config_path.exists() else {}
+        self.assertNotIn("path", (config or {}).get("layers", {}).get("what_l2", {}))
 
     def test_confirmed_path_removed_appends_redisc_section_original_untouched(self):
         self._make_what_l2_candidate()
@@ -832,8 +846,8 @@ class TestPerCandidateDriftTracking(TempRepoTestCase):
 
     def _resolve_pending(self, artifact):
         text = artifact.replace(
-            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
-            "decision: CONFIRM   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
+            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE",
+            "decision: CONFIRM   # CONFIRM: specification/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE",
             1,
         )
         text = text.replace(
