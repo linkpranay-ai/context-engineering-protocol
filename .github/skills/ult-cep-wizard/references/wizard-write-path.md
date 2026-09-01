@@ -168,8 +168,7 @@ case it names exactly what was discarded so the UI can show a specific summary r
 than a silent state change. A `DiscoverError` not covered by either guard above (e.g.
 `discover_layers.run_discovery` itself failing) is HTTP 400 with `{"error": str(exc)}`.
 
-## 6a. The init step: `POST /api/init/preview` and `POST /api/init` (ISSUES.md Round 2
-finding 9, 2026-08-31)
+## 6a. The init step: `POST /api/init/preview` and `POST /api/init` (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init)
 
 A separate axis from §§2-5 above: D20 (slot scaffolding / `project_layout`), not D23
 (discovery decisions). Reachable only while `workspace_root_offer_eligible` is `true`

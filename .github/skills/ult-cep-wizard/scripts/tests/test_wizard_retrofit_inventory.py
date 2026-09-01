@@ -401,7 +401,7 @@ class TestDescribeErrorIsolation(RetrofitInventoryTestCase):
 
 
 class TestSourceDirectoryAndDirectoryCounts(RetrofitInventoryTestCase):
-    """ISSUES.md Round 2 finding 8 (2026-08-31): "grouped counts by source
+    """the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: "grouped counts by source
     directory" - covers source_directory assignment for all three unit
     shapes (skill-dir, manifest-dir, flat-file), root-level flat files
     (no "/" in their target-relative path), the target-subdirectory case
@@ -488,11 +488,11 @@ class TestSourceDirectoryAndDirectoryCounts(RetrofitInventoryTestCase):
 
 
 class TestExternalRoot(RetrofitInventoryTestCase):
-    """ISSUES.md Round 2 finding 7 (2026-08-31) - "Retrofit wizard cannot
+    """the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - "Retrofit wizard cannot
     operate on sibling or standalone skill library". `self.root` here plays
     ctx.repo_root (only ult-cep-retrofit's engine lives under it); a second,
     entirely separate temp dir plays the external retrofit target - mirrors a
-    cloned sibling library the way the ISSUES.md repro describes."""
+    cloned sibling library the way that evaluation's repro describes."""
 
     def setUp(self):
         super().setUp()

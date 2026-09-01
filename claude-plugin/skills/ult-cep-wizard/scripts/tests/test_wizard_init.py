@@ -1,4 +1,4 @@
-"""Regression suite for wizard_init.py (ISSUES.md Round 2 finding 9, 2026-08-31).
+"""Regression suite for wizard_init.py (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init).
 Stdlib unittest only. Run with:
 
     python -m unittest discover -s scripts/tests -v

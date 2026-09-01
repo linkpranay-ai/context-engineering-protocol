@@ -33,8 +33,9 @@
 > Step 3 below now says so explicitly. Gap found during the `ult-cep-retrofit`
 > design review, fixed here rather than deferred.
 >
-> **Context-availability policy (added 2026-08-31, ISSUES.md Round 2 finding
-> 6):** step 1's "Not found" branch used to say "proceed exactly as you
+> **Context-availability policy (added 2026-08-31, the 2026-08-31 Round-2
+> evaluation's finding on context-availability policy handling during
+> retrofit drafting):** step 1's "Not found" branch used to say "proceed exactly as you
 > normally would" unconditionally — a task-oriented skill (e.g. `implement`)
 > could then complete real work ungrounded, with the only disclosure arriving
 > in step 8's end-of-work attribution line, too late for the user to choose

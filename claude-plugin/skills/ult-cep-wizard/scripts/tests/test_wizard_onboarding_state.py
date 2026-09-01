@@ -235,7 +235,7 @@ class TestJsonDict(unittest.TestCase):
 
 
 class TestWorkspaceRootOffer(unittest.TestCase):
-    """ISSUES.md Round 2 finding 9 (2026-08-31): the wizard-UI workspace_root
+    """the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: the wizard-UI workspace_root
     namespacing offer must appear exactly at needs_discover-before-D20-init, and
     nowhere else."""
 

@@ -58,7 +58,7 @@
 // steady_state it only toggles the small dismissible banner. A separate
 // workspace_root_offer_eligible flag (true only at needs_discover, before D20 has
 // scaffolded anything) gates the init-offer block independently (renderInitOffer;
-// see ISSUES.md Round 2 finding 9, 2026-08-31).
+// see the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init).
 //
 // UI design pass adds the top-bar docs viewer, wired once at startup rather than
 // inside loadState() - these are CEP's own project docs, not part of the onboarding
@@ -562,7 +562,7 @@
   }
 
   // ------------------------------------------------------------------------
-  // Workspace-root init offer (ISSUES.md Round 2 finding 9, 2026-08-31) -
+  // Workspace-root init offer (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init) -
   // POST /api/init/preview + POST /api/init, wizard_init.py wrapping
   // validate_layout.run_init's mechanical half of `init` (scaffold slots,
   // write project_layout, optionally set layout.workspace_root). Shown only
@@ -922,14 +922,14 @@
   var CONTRACT_CODE = ["CONSUMING-COMPILED-GUIDELINES.md", "CONSUMING-CODE-GRAPH.md"];
   var CONTRACT_TASK = ["CONSUMING-CONTEXT-PACKAGE.md"];
   var ALL_CONTRACTS = CONTRACT_TASK.concat(CONTRACT_CODE);
-  // ISSUES.md Round 2 finding 6 (2026-08-31) - mirrors
+  // the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting - mirrors
   // wizard_retrofit_draft.CONTEXT_AVAILABILITY_POLICIES/
   // DEFAULT_CONTEXT_AVAILABILITY exactly; kept in this fixed order so "ask"
   // (the recommended default) is always the first/default <option>.
   var CONTEXT_AVAILABILITY_POLICIES = ["ask", "required", "optional"];
 
   var retrofitCurrentPath = ".";
-  // ISSUES.md Round 2 finding 7 (2026-08-31): null (the default) means "browse
+  // the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: null (the default) means "browse
   // repo_root", exactly today's only behavior. Once set (via the
   // #retrofit-external-root-panel "Browse external directory" button) it's an
   // absolute path threaded as external_root/target_root into every
@@ -981,7 +981,7 @@
   // renderRetrofitInventory() call, same as retrofitDraftPanelsByUnitId.
   var retrofitSelectDraftControls = [];
 
-  // ISSUES.md Round 2 finding 8 (2026-08-31): search/filter/group state for
+  // the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: search/filter/group state for
   // the retrofit inventory list. Reset to these defaults every time
   // loadRetrofitInventory() runs a fresh scan - same "no stale state carries
   // over" lifecycle as retrofitInventoryReviewed above, just extended to a
@@ -1017,7 +1017,7 @@
     retrofitSelectDraftControls.forEach(function (entry) {
       // A control on a row the current filters are hiding stays disabled
       // regardless of the reviewed checkbox - reviewing "the currently
-      // filtered selection" (per ISSUES.md finding 8) can't approve rows
+      // filtered selection" (per that evaluation's finding on retrofit-inventory grouping and filtering by source directory) can't approve rows
       // the reviewer can't currently see.
       var rowHidden = entry.row.classList.contains("retrofit-row-hidden");
       entry.control.disabled = rowHidden || !retrofitInventoryReviewed;
@@ -1052,7 +1052,7 @@
   // filtered-count / empty-filter-result messaging, and resets the review
   // gate - a filter change is exactly the "currently filtered selection"
   // changing underneath a possibly-already-ticked checkbox, so per
-  // ISSUES.md finding 8 that checkbox must not silently keep approving a
+  // that evaluation's finding on retrofit-inventory grouping and filtering by source directory that checkbox must not silently keep approving a
   // different set of units than the one the reviewer looked at.
   function applyRetrofitFilters() {
     var visibleCount = 0;
@@ -1142,7 +1142,7 @@
     updateActiveNav();
   }
 
-  // ISSUES.md Round 2 finding 7: reflects retrofitExternalRoot into the
+  // the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: reflects retrofitExternalRoot into the
   // status line, warning banner, and "Use this repo instead" button - one
   // place so loadRetrofitPicker's success/failure branches and the clear
   // button can't drift apart on what the human sees.
@@ -1407,7 +1407,7 @@
     // applyRetrofitReviewGate) - registered here, the draft button below
     // registers itself the same way once it exists.
     includeCheckbox.disabled = !retrofitInventoryReviewed;
-    // ISSUES.md Round 2 finding 8 (2026-08-31): paired with `details` (the
+    // the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: paired with `details` (the
     // row) so applyRetrofitReviewGate() can also account for filter-hidden
     // rows, not just the reviewed checkbox - see that function's comment.
     retrofitSelectDraftControls.push({ control: includeCheckbox, row: details });
@@ -1434,7 +1434,7 @@
     }
     modeWrap.appendChild(sameRepoLabel);
     modeWrap.appendChild(pluginLabel);
-    // ISSUES.md Round 2 finding 7 (2026-08-31): same-repo mode's relative
+    // the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: same-repo mode's relative
     // path is meaningless once the target is outside the repo (the server
     // refuses it - see wizard_retrofit_draft.py's _is_external_root check),
     // so plugin-qualified is forced here rather than left to fail later at
@@ -1500,7 +1500,7 @@
     });
     body.appendChild(contractsWrap);
 
-    // ISSUES.md Round 2 finding 6 (2026-08-31): per-skill context-availability
+    // the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting: per-skill context-availability
     // policy, only meaningful for CONSUMING-CONTEXT-PACKAGE.md (the other two
     // contracts' templates ignore the {context_availability} placeholder -
     // see wizard_retrofit_draft.py's _TEMPLATE_SENTENCES) but shown for any
@@ -1569,7 +1569,7 @@
         reference_args: referenceArgs,
         context_availability: availabilitySelect.value,
       };
-      // ISSUES.md Round 2 finding 7: re-sent (and re-validated server-side)
+      // the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: re-sent (and re-validated server-side)
       // on every select, not just the first - retrofitExternalRoot may have
       // been re-canonicalized since this unit's inventory was first scanned.
       if (retrofitExternalRoot) {
@@ -1853,7 +1853,7 @@
       );
     });
 
-    // ISSUES.md Round 2 finding 8 (2026-08-31): directory chips, sourced
+    // the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: directory chips, sourced
     // from the server's own recount (same reasoning as tier_counts above -
     // never re-derived client-side, so it can't drift from what filtering
     // by directory actually shows).
@@ -1911,7 +1911,7 @@
     // retrofitBatchExcludedUnitIds above.
     retrofitInventoryReviewed = false;
     document.getElementById("retrofit-inventory-reviewed").checked = false;
-    // ISSUES.md Round 2 finding 8 (2026-08-31): a fresh scan of a (possibly
+    // the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: a fresh scan of a (possibly
     // different) target also starts with fresh filters - a directory or
     // search term chosen for the previous target has no meaning here, same
     // "no carry-over" reasoning as retrofitInventoryReviewed above.
@@ -1988,7 +1988,7 @@
     document.getElementById("retrofit-picker-use-dir").addEventListener("click", function () {
       loadRetrofitInventory(retrofitCurrentPath);
     });
-    // ISSUES.md Round 2 finding 7 (2026-08-31): "Browse" sets
+    // the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: "Browse" sets
     // retrofitExternalRoot and re-roots the picker there; loadRetrofitPicker
     // itself handles both the success case (adopts the server's
     // canonicalized path) and the failure case (drops it, shows the error).
@@ -2020,7 +2020,7 @@
       retrofitInventoryReviewed = event.target.checked;
       applyRetrofitReviewGate();
     });
-    // ISSUES.md Round 2 finding 8 (2026-08-31): filter bar controls. Each
+    // the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: filter bar controls. Each
     // one just mutates retrofitFilters and re-runs applyRetrofitFilters(),
     // which resets the review gate itself - see that function's comment.
     document.getElementById("retrofit-filter-search").addEventListener("input", function (event) {

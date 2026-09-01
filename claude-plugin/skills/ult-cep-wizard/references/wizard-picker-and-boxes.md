@@ -99,8 +99,7 @@ supporting fields above.
   each entry's) is always relative to the affirmed root, never an absolute filesystem
   path — the client never needs to know (or send back) the real absolute path on disk,
   which also means a crafted absolute path from the client can't be used to request
-  something outside the root in the first place. `target_root` (ISSUES.md Round 2 finding
-  7, 2026-08-31) is `null` when the affirmed root is `ctx.repo_root` (the default,
+  something outside the root in the first place. `target_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment) is `null` when the affirmed root is `ctx.repo_root` (the default,
   unchanged from before this finding); it's the resolved, canonicalized absolute path
   when the caller opted into an external root via the optional `external_root` query
   param, re-validated on every request via `wizard_containment.resolve_external_target()`

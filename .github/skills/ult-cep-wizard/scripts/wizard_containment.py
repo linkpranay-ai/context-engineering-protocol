@@ -180,7 +180,7 @@ def check_containment(affirmed_root, candidate_path) -> Path:
 
 def resolve_external_target(repo_root, candidate_path) -> Path:
     """Validates a user-supplied absolute external retrofit-target root
-    (ISSUES.md Round 2 finding 7, 2026-08-31 - "Retrofit wizard cannot operate
+    (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - "Retrofit wizard cannot operate
     on sibling or standalone skill library"). Unlike check_containment, this
     function's whole job is to validate a root that is deliberately OUTSIDE
     repo_root, so it cannot reuse check_containment's "must be inside" test -
@@ -206,7 +206,7 @@ def resolve_external_target(repo_root, candidate_path) -> Path:
          real, unambiguous directory, exactly like every intermediate component
          check_containment already requires for in-repo paths.
       4. candidate_path must exist and be a real directory - nothing is created
-         on the caller's behalf; per the ISSUES.md finding's own repro steps,
+         on the caller's behalf; per that finding's own repro steps,
          the user has already cloned/checked out the library before pointing
          the wizard at it.
 

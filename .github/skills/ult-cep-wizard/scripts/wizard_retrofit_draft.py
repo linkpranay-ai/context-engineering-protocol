@@ -60,7 +60,7 @@ CONTRACT_ORDER = (
 )
 
 _TEMPLATE_SENTENCES = {
-    # ISSUES.md Round 2 finding 6 (2026-08-31): the retrofit-inserted pointer
+    # the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting: the retrofit-inserted pointer
     # used to only say "if a package exists, see `{ref}`" - silent on what
     # happens when one *doesn't* exist, which is exactly the gap the finding
     # flagged (a task skill quietly proceeding ungrounded with only an
@@ -89,7 +89,7 @@ _TEMPLATE_SENTENCES = {
     ),
 }
 
-# ISSUES.md Round 2 finding 6 (2026-08-31): the three context-availability
+# the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting: the three context-availability
 # policies CONSUMING-CONTEXT-PACKAGE.md's step 1 "Not found" branch now
 # recognizes. "ask" is the recommended default for implementation, design,
 # planning, review, and debugging skills - matches this module's own
@@ -146,7 +146,7 @@ def detect_contract_locations(repo_root) -> Dict[str, Optional[str]]:
 
 def _is_external_root(repo_root, containment_root) -> bool:
     """True only when `containment_root` names a root genuinely different
-    from `repo_root` (ISSUES.md Round 2 finding 7, 2026-08-31). None or an
+    from `repo_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment). None or an
     equal/unresolvable-to-equal root is treated as "in-repo" - the ordinary,
     unchanged case every existing caller and test already exercises."""
     if not containment_root:
@@ -177,7 +177,7 @@ def resolve_reference(
     malformed argument for the selected mode; never silently falls back to
     the other mode.
 
-    `containment_root` (ISSUES.md Round 2 finding 7, 2026-08-31) is the root
+    `containment_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment) is the root
     `unit_dir_rel_path` is actually relative to when it differs from
     `repo_root` - i.e. an external retrofit target
     (`wizard_containment.resolve_external_target`). same-repo mode is refused
@@ -249,7 +249,7 @@ def draft_insertion_text(
     `context_availability` isn't one of CONTEXT_AVAILABILITY_POLICIES.
 
     `context_availability` is passed to every template's `.format()` call
-    uniformly (ISSUES.md Round 2 finding 6, 2026-08-31) - `str.format()`
+    uniformly (the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting) - `str.format()`
     silently ignores unused named kwargs, so this is safe even though only
     the CONSUMING-CONTEXT-PACKAGE.md template currently references
     `{context_availability}`.
@@ -337,7 +337,7 @@ class DraftResult:
     target_file_hash: Optional[str]
     context_before: str
     context_after: str
-    # ISSUES.md Round 2 finding 6 (2026-08-31): echoed back so callers/tests
+    # the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting: echoed back so callers/tests
     # can confirm which policy actually got baked into draft_text, without
     # re-deriving it from the request.
     context_availability: str = DEFAULT_CONTEXT_AVAILABILITY
@@ -372,7 +372,7 @@ def build_draft(
     resolve_reference/draft_insertion_text failure - so callers need only
     one except clause.
 
-    `containment_root` (ISSUES.md Round 2 finding 7, 2026-08-31): the root
+    `containment_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment): the root
     `primary_file_rel_path`/`unit_dir_rel_path` are actually relative to,
     when it differs from `repo_root` - i.e. an external retrofit target. None
     (the default) keeps the original in-repo behavior byte-for-byte. Threaded

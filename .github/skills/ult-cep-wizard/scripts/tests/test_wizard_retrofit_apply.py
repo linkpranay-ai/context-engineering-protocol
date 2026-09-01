@@ -380,7 +380,7 @@ class TestApplyBatch(RetrofitApplyTestCase):
 
 
 class TestApplyUnitContainmentRoot(RetrofitApplyTestCase):
-    """ISSUES.md Round 2 finding 7 (2026-08-31) - `containment_root` is the
+    """the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - `containment_root` is the
     root `primary_file` is actually relative to when it differs from
     repo_root (an external retrofit target)."""
 

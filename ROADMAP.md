@@ -328,7 +328,7 @@ index. Wired as an explicit optional step in `references/what-l1-fallback-query.
 
 **Status: done.** ~40 sites across this repo (skills, scripts, tests, reference docs,
 `layout-slots-registry.yaml`, and even `CHANGELOG.md`/`ROADMAP.md` themselves) used to cite
-`CONTEXT-ENGINEERING-DESIGN.md`'s internal `D<N>`/`§<N>` labels by filename, or bare
+`CONTEXT-ENGINEERING-DESIGN.md`'s internal `D<N>`/`§<N>` labels by filename, or bare <!-- private-ref-allow: describing the pre-1.0 citation cleanup this item tracks, not a live citation -->
 `D-0NN`-style decision-log labels, or two uncovered sibling private docs
 (`WHAT-L1-AND-CONTEXT-REUSE-ASSESSMENT.md`, `ADVERSARIAL-REVIEW-OSS-AND-MD-MINING.md`), or
 internal `CEP-DP-001*` EngineeringOS work-package IDs that had no business being public. Every

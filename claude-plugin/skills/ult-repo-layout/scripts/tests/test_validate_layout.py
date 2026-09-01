@@ -1751,7 +1751,7 @@ class TestRunInit(unittest.TestCase):
 
 
 class TestRunInitDryRun(unittest.TestCase):
-    """ISSUES.md Round 2 finding 9 (2026-08-31): `dry_run=True` previews
+    """the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: `dry_run=True` previews
     exactly what a real `run_init(...)` call would do - same eligibility
     checks, same slot-resolution loop - without writing anything, so the
     wizard's first-run workspace_root offer can show a tree preview before

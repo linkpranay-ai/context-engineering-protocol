@@ -135,7 +135,7 @@
           directory" to scan it as a candidate skill library.
         </p>
 
-        <!-- ISSUES.md Round 2 finding 7 (2026-08-31): explicit external-target
+        <!-- the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: explicit external-target
              flow. Off by default - the repo_root browsing below is untouched
              until this is used. Typing an absolute path and clicking "Browse"
              re-roots the picker at that directory via GET /api/picker's
@@ -179,13 +179,13 @@
         <p id="retrofit-inventory-message" role="status"></p>
         <p id="retrofit-tier-summary" class="retrofit-tier-summary"></p>
 
-        <!-- ISSUES.md Round 2 finding 8 (2026-08-31): grouped counts by
+        <!-- the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: grouped counts by
              source directory, clickable as a filter. Populated from
              result.directory_counts - see renderRetrofitDirectorySummary()
              in wizard.js. -->
         <div id="retrofit-directory-summary" class="retrofit-directory-summary" role="group" aria-label="Filter by source directory"></div>
 
-        <!-- ISSUES.md Round 2 finding 8: search + canonical-only + code/task
+        <!-- the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: search + canonical-only + code/task
              filters, so a reviewer of a large inventory isn't forced to
              scan every card to find the ones that matter. Canonical-only
              defaults to checked - "canonical-only default view" per the
@@ -326,7 +326,7 @@
         </p>
       </div>
 
-      <!-- ISSUES.md Round 2 finding 9 (2026-08-31): shown only while
+      <!-- the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: shown only while
            workspace_root_offer_eligible is true (needs_discover, before D20 has
            scaffolded anything - see wizard_onboarding_state.py). Calls
            POST /api/init/preview then POST /api/init (wizard_init.py, wrapping

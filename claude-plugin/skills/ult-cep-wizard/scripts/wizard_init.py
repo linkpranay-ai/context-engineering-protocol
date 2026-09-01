@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """wizard_init.py - UI-driven `init` orchestration, including the first-run
-`workspace_root` namespacing offer (ISSUES.md Round 2 finding 9, 2026-08-31; see
+`workspace_root` namespacing offer (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init; see
 references/wizard-onboarding-state-machine.md for how this fits the four-state
 router).
 

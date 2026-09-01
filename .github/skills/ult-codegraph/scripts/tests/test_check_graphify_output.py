@@ -1,5 +1,4 @@
-"""Tests for check_graphify_output.py (ISSUES.md Round 2 finding 2,
-2026-08-31). Stdlib unittest only. Run with:
+"""Tests for check_graphify_output.py (the 2026-08-31 Round-2 evaluation's finding on the codegraph sanity-check invocation not being runnable as documented). Stdlib unittest only. Run with:
 
 python -m unittest discover -s scripts/tests -v
 """

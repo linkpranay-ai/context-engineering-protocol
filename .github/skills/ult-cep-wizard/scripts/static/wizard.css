@@ -809,7 +809,7 @@ main {
   color: var(--danger);
 }
 
-/* ISSUES.md Round 2 finding 9 (2026-08-31) - the needs_discover workspace_root
+/* the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init - the needs_discover workspace_root
    offer. Sits above the shared Run Discover button, same border/spacing family as
    the rest of #state-needs-discover. */
 #needs-discover-init-offer {
@@ -1050,7 +1050,7 @@ button.secondary:hover {
   opacity: 0.5;
 }
 
-/* ISSUES.md Round 2 finding 7 (2026-08-31) - external-target panel, sits
+/* the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - external-target panel, sits
    above the repo-relative path/entries it's an alternative to. */
 .retrofit-external-root-panel {
   margin: 0 0 0.85rem 0;
@@ -1175,7 +1175,7 @@ button.secondary:hover {
   color: var(--muted);
 }
 
-/* ISSUES.md Round 2 finding 8 (2026-08-31): directory chips, filter bar,
+/* the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: directory chips, filter bar,
    and the row-hidden state applyRetrofitFilters() toggles. */
 .retrofit-directory-summary {
   display: flex;
@@ -1435,7 +1435,7 @@ button.secondary:hover {
   gap: 0.35rem;
 }
 
-/* ISSUES.md Round 2 finding 7 (2026-08-31) - explains why same-repo is
+/* the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - explains why same-repo is
    disabled for a unit whose target is external (see renderRetrofitUnitRow). */
 .retrofit-reference-mode-note {
   flex-basis: 100%;
@@ -1464,7 +1464,7 @@ button.secondary:hover {
   color: var(--navy-900);
 }
 
-/* ISSUES.md Round 2 finding 6 (2026-08-31) - per-skill context-availability
+/* the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting - per-skill context-availability
    policy control, sits between the contract checkboxes and the draft panel. */
 .retrofit-context-availability {
   margin: 0.4rem 0 0.6rem 0;

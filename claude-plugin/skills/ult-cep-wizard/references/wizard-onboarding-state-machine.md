@@ -93,8 +93,7 @@ surfaces). Exact JSON (`wizard_onboarding_state.to_json_dict`):
 }
 ```
 
-`workspace_root_current`/`workspace_root_offer_eligible` are ISSUES.md Round 2 finding
-9 (2026-08-31) additions — see §6.
+`workspace_root_current`/`workspace_root_offer_eligible` are the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init additions — see §6.
 
 Note the dataclass field is `OnboardingState.name`, but the JSON key is `"state"` —
 `wizard.js`'s `loadState()` reads `view.state`, not `view.name`.
@@ -109,7 +108,7 @@ calls `self._try_layout_source()` fresh, per request, early-returning (503 alrea
 sent) on `None` rather than assuming one built once at startup is still valid. See
 `wizard-picker-and-boxes.md` §1 for the read-path side of this same change.
 
-## 6. Workspace-root init offer (ISSUES.md Round 2 finding 9, 2026-08-31)
+## 6. Workspace-root init offer (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init)
 
 Before this fix, the only way to opt into `layout.workspace_root` (§16.2 namespacing —
 re-rooting a project's slots under one directory, e.g. `.cep/` or `docs/`) was the

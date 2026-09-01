@@ -1,7 +1,7 @@
 # Design scratchpad glossary
 
 Several skill files, scripts, and config files in this repo carry citations like `(D14)`,
-`D20 §15.5`, or `CONTEXT-ENGINEERING-DESIGN.md D11`. These point at an internal build-time
+`D20 §15.5`, or `CONTEXT-ENGINEERING-DESIGN.md D11`. These point at an internal build-time <!-- private-ref-allow: naming the never-published scratchpad this glossary resolves citations for, not a live citation -->
 scratchpad document used while designing this protocol — it was never part of this repo, isn't
 published, and isn't going to be. The scratchpad itself doesn't matter; what matters is that none
 of those citations should be a dead end for a reader of this repo. This file is that resolution:

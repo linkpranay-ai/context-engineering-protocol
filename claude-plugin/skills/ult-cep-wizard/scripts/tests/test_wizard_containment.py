@@ -190,7 +190,7 @@ class TestComponentIsContainmentViolationMocked(unittest.TestCase):
 
 
 class TestResolveExternalTarget(unittest.TestCase):
-    """ISSUES.md Round 2 finding 7 (2026-08-31) - "Retrofit wizard cannot
+    """the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - "Retrofit wizard cannot
     operate on sibling or standalone skill library". resolve_external_target
     is the validation gate for a user-supplied external retrofit-target root;
     every requirement in its docstring gets its own failure-mode test here."""

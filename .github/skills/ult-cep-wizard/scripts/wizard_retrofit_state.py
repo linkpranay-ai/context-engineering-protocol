@@ -132,13 +132,13 @@ def upsert_selection(
     together, atomically, rather than this function guessing whether a stale
     draft is still valid.
 
-    `context_availability` (ISSUES.md Round 2 finding 6, 2026-08-31) is the
+    `context_availability` (the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting) is the
     per-unit policy - "ask"/"required"/"optional" per
     wizard_retrofit_draft.CONTEXT_AVAILABILITY_POLICIES, validated by the
     caller (wizard_server.py) before this function ever sees it - persisted
     here so a later draft() call for this unit doesn't need it re-supplied.
 
-    `target_root` (ISSUES.md Round 2 finding 7, 2026-08-31) is None for an
+    `target_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment) is None for an
     ordinary in-repo unit (unchanged default - every existing entry shape and
     test keeps working with no migration) or the absolute, already-validated
     external root `primary_file`/`unit_dir_rel_path` are relative to

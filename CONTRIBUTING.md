@@ -9,10 +9,10 @@ branch, and open a pull request on GitHub.
 ### A note on internal design-doc citations
 
 This repo's skills, scripts, and docs were built against an internal working
-scratchpad (`CONTEXT-ENGINEERING-DESIGN.md`) and two narrower internal
+scratchpad (`CONTEXT-ENGINEERING-DESIGN.md`) and two narrower internal <!-- private-ref-allow: naming the never-published scratchpad to explain the citation cleanup below, not a live citation -->
 review notes — the maintainer's own notes, never part of this repo and not
 published. Earlier releases had files citing those documents by filename
-(e.g. "see `CONTEXT-ENGINEERING-DESIGN.md` D16"), which was a dead end for
+(e.g. "see `CONTEXT-ENGINEERING-DESIGN.md` D16"), which was a dead end for <!-- private-ref-allow: quoting the old, now-fixed citation style as an example, not a live citation -->
 anyone reading this repo standalone; that's been cleaned up, so no file
 cites those documents by name anymore.
 

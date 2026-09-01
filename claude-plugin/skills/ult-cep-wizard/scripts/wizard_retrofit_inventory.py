@@ -8,8 +8,7 @@ skill's script rather than shelling out, so `recommend()`'s embedded-double-quot
 PowerShell-mangling bug (see cep_retrofit.py's own docstring) never has a shell in
 the path to trigger it in the first place.
 
-Containment: the retrofit target must be a subdirectory of ctx.repo_root, OR (ISSUES.md
-Round 2 finding 7, 2026-08-31 - "Retrofit wizard cannot operate on sibling or
+Containment: the retrofit target must be a subdirectory of ctx.repo_root, OR (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - "Retrofit wizard cannot operate on sibling or
 standalone skill library") a subdirectory of a separately-validated external root
 (`wizard_containment.resolve_external_target`), when the caller passes one via
 `external_root`. Either way `wizard_containment.check_containment` is reused directly,
@@ -83,7 +82,7 @@ class RetrofitUnit:
     matched_code_terms: List[str] = field(default_factory=list)
     matched_task_terms: List[str] = field(default_factory=list)
     describe_error: str = ""  # non-empty only when describe()/recommend() failed
-    # ISSUES.md Round 2 finding 8 (2026-08-31): first path segment of this
+    # the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: first path segment of this
     # unit's *target*-relative path (before the _repo_rel() rewrite below) -
     # "skills/foo" (a skill-dir) and "skills/foo/SKILL.md" (its primary_file)
     # both group under "skills", so this buckets by "which immediate child of
@@ -107,14 +106,14 @@ class RetrofitInventoryResult:
     # _repo_rel() note in build_inventory()).
     excluded_owned_paths: List[str] = field(default_factory=list)
     tier_counts: dict = field(default_factory=dict)  # {"canonical": N, "supplementary": M}
-    # ISSUES.md Round 2 finding 8 (2026-08-31): "grouped counts by source
+    # the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: "grouped counts by source
     # directory" - one entry per distinct RetrofitUnit.source_directory,
     # sorted by total descending then name ascending so the frontend can
     # render it directly with no re-sorting of its own. A list, not a dict,
     # so the wizard can render it in a stable, meaningful order rather than
     # whatever order a dict-of-counts happens to iterate in.
     directory_counts: List[dict] = field(default_factory=list)
-    # ISSUES.md Round 2 finding 7 (2026-08-31): absolute path of an external
+    # the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: absolute path of an external
     # (outside ctx.repo_root) retrofit target root, already validated via
     # wizard_containment.resolve_external_target - None for the ordinary
     # in-repo case (unchanged default, fully backward compatible). When set,
@@ -204,7 +203,7 @@ def build_inventory(
 ) -> RetrofitInventoryResult:
     """Containment-checks `target_rel_path` against `repo_root` (v1 in-repo
     scope) or, when `external_root` is given, against that root instead
-    (ISSUES.md Round 2 finding 7, 2026-08-31 - "Retrofit wizard cannot operate
+    (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - "Retrofit wizard cannot operate
     on sibling or standalone skill library"), then runs cep_retrofit's
     inventory()/describe()/recommend() against every discovered unit and
     returns one batched result.
@@ -304,7 +303,7 @@ def build_inventory(
         if unit.tier:
             tier_counts[unit.tier] = tier_counts.get(unit.tier, 0) + 1
 
-    # ISSUES.md Round 2 finding 8 (2026-08-31): "grouped counts by source
+    # the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: "grouped counts by source
     # directory" - one bucket per distinct unit.source_directory, each with
     # its own total/canonical/supplementary breakdown so the frontend's
     # directory chips can show e.g. "skills (12, 9 canonical)" without

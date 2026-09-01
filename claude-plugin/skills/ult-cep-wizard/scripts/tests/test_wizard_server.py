@@ -1005,8 +1005,7 @@ class TestDiscoverRoute(WizardServerTestCase):
 
 class TestApiInitRoutes(WizardServerTestCase):
     """POST /api/init/preview, POST /api/init - the first-run
-    `layout.workspace_root` namespacing offer (ISSUES.md Round 2 finding 9,
-    2026-08-31). The base fixture (_make_valid_target_repo) ships a real D20
+    `layout.workspace_root` namespacing offer (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init). The base fixture (_make_valid_target_repo) ships a real D20
     marker, which is not the shape this offer targets - setUp removes it to get a
     genuinely un-initialized repo, matching
     test_wizard_onboarding_state.py's own eligible-vs-not split."""
@@ -1283,7 +1282,7 @@ class TestRetrofitInventoryReviewGateMarkup(WizardServerTestCase):
         self.assertIn("excluded_owned_paths", js)
 
     def test_retrofit_search_filter_and_directory_summary_affordances_are_present(self):
-        # ISSUES.md Round 2 finding 8 (2026-08-31): same lightweight
+        # the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: same lightweight
         # static-source presence check as the other tests in this class -
         # confirms the search/filter/grouping markup and its JS wiring
         # actually reach the browser, not just backend field additions to
@@ -1309,7 +1308,7 @@ class TestRetrofitInventoryReviewGateMarkup(WizardServerTestCase):
         self.assertIn("source_directory", js)
 
     def test_retrofit_context_availability_control_is_wired_up(self):
-        # ISSUES.md Round 2 finding 6 (2026-08-31): the per-unit
+        # the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting: the per-unit
         # context-availability <select> is built dynamically inside
         # renderRetrofitUnitRow (not static index.html markup), so this
         # checks the JS source for the control and its payload wiring
@@ -1423,14 +1422,14 @@ class TestApiRetrofitSelect(WizardServerTestCase):
         self.assertEqual(resp.status, 200)
         payload = json.loads(resp.read().decode("utf-8"))
         self.assertTrue(payload["selection"]["include"])
-        # ISSUES.md Round 2 finding 6 (2026-08-31): not supplied -> default "ask".
+        # the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting: not supplied -> default "ask".
         self.assertEqual(payload["selection"]["context_availability"], "ask")
 
         state = json.loads(self._get("/api/retrofit/state", cookie=cookie).read().decode("utf-8"))
         self.assertIn("widget-reviewer", state["units"])
 
     def test_unknown_context_availability_is_400(self):
-        """ISSUES.md Round 2 finding 6 (2026-08-31)."""
+        """the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting."""
         cookie, csrf = self._authenticated_session()
         resp = self._post_json(
             "/api/retrofit/select",
@@ -1445,7 +1444,7 @@ class TestApiRetrofitSelect(WizardServerTestCase):
         self.assertEqual(resp.status, 400)
 
     def test_explicit_context_availability_is_persisted(self):
-        """ISSUES.md Round 2 finding 6 (2026-08-31)."""
+        """the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting."""
         _write(self.repo_root / "widget-reviewer" / "SKILL.md", RETROFIT_FIXTURE_SKILL_MD)
         cookie, csrf = self._authenticated_session()
         resp = self._post_json(
@@ -1526,7 +1525,7 @@ class TestApiRetrofitDraft(WizardServerTestCase):
         self.assertIn("Other docs.", entry["context_after"] + entry["context_before"])
 
     def test_selected_context_availability_policy_is_rendered_into_draft_text(self):
-        """ISSUES.md Round 2 finding 6 (2026-08-31): the policy chosen at
+        """the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting: the policy chosen at
         select-time must survive through to the drafted skill text, not just
         RETROFIT-STATE.json."""
         _write(
@@ -1764,7 +1763,7 @@ class TestApiRetrofitApply(WizardServerTestCase):
 
 
 # --------------------------------------------------------------------------
-# ISSUES.md Round 2 finding 7 (2026-08-31): external retrofit-target routes.
+# the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: external retrofit-target routes.
 # Route-wiring only - resolve_external_target()'s own validation-failure
 # modes are covered directly in test_wizard_containment.py, and
 # build_inventory()/build_draft()/apply_unit()'s external-root behavior in

@@ -57,7 +57,7 @@ whole point of step 1.
    route to whatever state that returns (`decisions_pending` on a repo with real
    pending fields).
 
-## 1a. Workspace-root init offer (ISSUES.md Round 2 finding 9, 2026-08-31)
+## 1a. Workspace-root init offer (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init)
 
 Run this against a **fresh** copy of the §1 fixture (before Discover has run, so
 `d20_initialized` is still false) — the offer disappears once D20 is initialized, by

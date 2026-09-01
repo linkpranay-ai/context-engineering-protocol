@@ -29,7 +29,7 @@ entry instead: reachable regardless of onboarding state, with its own state file
    an editable textarea (`wizard_retrofit_state.set_draft_override`) so a human supplies
    final wording. The draft is a starting point, never treated as final.
 2. **Target defaults to inside the project repo; an external target is an explicit,
-   separately-validated opt-in (ISSUES.md Round 2 finding 7, 2026-08-31).** The
+   separately-validated opt-in (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment).** The
    picker/containment machinery (`wizard_picker.py`/`wizard_containment.py`) is rooted at
    `ctx.repo_root` by default — `cep_retrofit.py`'s own Step 1 has no such constraint, but
    opening the picker to arbitrary absolute paths with no validation would be a real
@@ -97,7 +97,7 @@ Per-unit shape (`units.<unit_id>`): `primary_file`, `unit_dir_rel_path`, `includ
 `context_after` (from `set_draft`/`set_draft_override`, i.e.
 `POST /api/retrofit/draft`/`draft-override`).
 
-`context_availability` (ISSUES.md Round 2 finding 6, 2026-08-31) is one of
+`context_availability` (the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting) is one of
 `ask`/`required`/`optional` (`wizard_retrofit_draft.CONTEXT_AVAILABILITY_POLICIES`,
 default `ask`) — a per-unit UI control next to the contract checkboxes
 (`renderRetrofitUnitRow` in `wizard.js`), posted alongside `contracts` on
@@ -198,7 +198,7 @@ omitting the field (the default, unchanged from before this finding) means "use
 2. Inventory table: name/type/path/`via_symlink` badge per unit, an unclaimed-directories
    panel with a free-text "how should these be treated?" box (SKILL.md Step 2's "don't
    guess a fourth heuristic" — the wizard doesn't either). For medium-to-large inventories
-   (ISSUES.md Round 2 finding 8, 2026-08-31 — 85 mixed units from a single third-party repo
+   (the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory — 85 mixed units from a single third-party repo
    in the reported case), a filter bar sits above the list: text search (name/path), a
    canonical-only checkbox (checked by default — `build_inventory()`'s `tier_counts`
    already distinguishes canonical from supplementary; this just defaults the view to it),

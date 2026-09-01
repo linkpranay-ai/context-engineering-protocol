@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """check_graphify_output.py - post-`graphify update` sanity check
-(ISSUES.md Round 2 finding 2, 2026-08-31).
+(the 2026-08-31 Round-2 evaluation's finding on the codegraph sanity-check invocation not being runnable as documented).
 
 `graphify update` can fail on Windows in a way that gives a caller almost
 nothing to act on: its internal watch/rebuild step exits with
@@ -39,7 +39,7 @@ an empty container or a container of only-empty values. This is a check
 that *something* was produced, not a validator of graph correctness.
 
 The Windows troubleshooting text below is specific to the exact signature
-ISSUES.md's evaluator hit (`[WinError 5] Access is denied`, no path, no
+that evaluation run hit (`[WinError 5] Access is denied`, no path, no
 retry) rather than generic "permission denied" advice, because that's the
 one failure mode this project has an actual confirmed repro for.
 """
@@ -58,7 +58,7 @@ PARTIAL_FAILURE = "partial_failure"
 EMPTY_OR_CORRUPT = "empty_or_corrupt"
 OK = "ok"
 
-# The exact failure signature from ISSUES.md Round 2 finding 2 (2026-08-31) -
+# The exact failure signature from the 2026-08-31 Round-2 evaluation's finding on the codegraph sanity-check invocation not being runnable as documented -
 # `graphify update`'s own output gives no path or further detail beyond this
 # line, which is why the guidance below is written for this specific symptom
 # instead of generic "permission denied" advice.

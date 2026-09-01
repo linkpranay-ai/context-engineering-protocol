@@ -125,7 +125,7 @@ class TestUpsertSelection(unittest.TestCase):
         self.assertEqual(entry["target_file_hash"], "deadbeef")
 
     def test_context_availability_defaults_to_ask_and_is_persisted(self):
-        """ISSUES.md Round 2 finding 6 (2026-08-31)."""
+        """the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting."""
         state = {"schema_version": 1, "units": {}}
         wrs.upsert_selection(
             state, "widget-reviewer",
@@ -149,7 +149,7 @@ class TestUpsertSelection(unittest.TestCase):
         self.assertEqual(entry["context_availability"], "required")
 
     def test_target_root_defaults_to_none_and_is_persisted(self):
-        """ISSUES.md Round 2 finding 7 (2026-08-31) - None means "this unit's
+        """the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - None means "this unit's
         primary_file is relative to ctx.repo_root", the unchanged in-repo
         case every existing entry shape and caller keeps working with."""
         state = {"schema_version": 1, "units": {}}

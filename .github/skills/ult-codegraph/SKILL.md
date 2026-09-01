@@ -182,7 +182,7 @@ uv tool install graphifyy
 # ~300 KSLOC). Use your Step 0 directory in place of `.` if you scoped.
 graphify update . --no-cluster
 
-# Verify the run actually produced a graph (ISSUES.md Round 2 finding 2,
+# Verify the run actually produced a graph (the 2026-08-31 Round-2 evaluation's finding on the codegraph sanity-check invocation not being runnable as documented,
 # 2026-08-31) — see the paragraph below the "Together, these write..." note.
 # Treat a nonzero exit here the same as `graphify update` itself failing.
 python scripts/check_graphify_output.py .

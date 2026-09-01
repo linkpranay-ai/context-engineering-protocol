@@ -196,7 +196,7 @@ class TestWhatL2ScanAndScore(TempRepoTestCase):
         self.assertNotIn("contexts/", rendered)
 
     def test_examples_dir_with_per_example_readmes_is_not_a_requirements_candidate(self):
-        # ISSUES.md Round 2 finding (2026-08-31): a directory of runnable
+        # the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: a directory of runnable
         # sample code with one README.md per example crosses
         # MIN_DOC_COUNT_FOR_UNNAMED_MATCH (2) despite holding no requirements
         # prose at all - CODE_SAMPLE_DIR_NAMES excludes the un-named
@@ -331,7 +331,7 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         self.assertIn("CONFIRM: .github/", section.render())
 
     def test_ci_workflow_file_alone_does_not_inflate_github_candidacy(self):
-        # ISSUES.md Round 2 finding (2026-08-31): skills/prompts exclusion
+        # the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: skills/prompts exclusion
         # alone isn't enough - a bare CI workflow YAML (automation, not an
         # authored convention) is neither a doc nor a recognized
         # HOW_L2_GITHUB_SIGNAL_NAMES/_DIRS entry, and previously the "any

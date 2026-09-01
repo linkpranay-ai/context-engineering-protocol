@@ -266,7 +266,7 @@ class TestBuildDraftIdempotency(RetrofitDraftTestCase):
 
 
 class TestBuildDraftContextAvailability(RetrofitDraftTestCase):
-    """ISSUES.md Round 2 finding 6 (2026-08-31)."""
+    """the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting."""
 
     def setUp(self):
         super().setUp()
@@ -315,7 +315,7 @@ class TestBuildDraftContextAvailability(RetrofitDraftTestCase):
 
 
 class TestDraftInsertionTextContextAvailability(unittest.TestCase):
-    """ISSUES.md Round 2 finding 6 (2026-08-31)."""
+    """the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting."""
 
     def test_default_policy_is_ask_when_not_specified(self):
         text = wrd.draft_insertion_text(
@@ -419,7 +419,7 @@ class TestBuildDraftValidation(RetrofitDraftTestCase):
 
 
 class TestResolveReferenceContainmentRoot(RetrofitDraftTestCase):
-    """ISSUES.md Round 2 finding 7 (2026-08-31) - `containment_root` is the
+    """the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - `containment_root` is the
     root `unit_dir_rel_path` is actually relative to when it differs from
     repo_root (an external retrofit target). same-repo mode must be refused
     outright whenever containment_root is genuinely external - a relative

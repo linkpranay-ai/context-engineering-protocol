@@ -67,7 +67,7 @@ docs describe the CEP protocol itself, not whatever repo is being onboarded.
 `wizard_stub_content`'s previously-orphaned preview cards alongside the existing box
 view model.
 
-ISSUES.md Round 2 finding 9 (2026-08-31) adds the first-run `layout.workspace_root`
+the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init adds the first-run `layout.workspace_root`
 namespacing offer's write path: `POST /api/init/preview` (dry-run, zero disk writes,
 `wizard_init.preview_init`) and `POST /api/init` (the real commit,
 `wizard_init.run_init`) - same 3-gate mutating dispatch and `_try_layout_source()`
@@ -129,7 +129,7 @@ STATIC_ASSETS = {
 # Sentinel returned by _resolve_external_root_or_none() to distinguish "an
 # external_root was given and failed validation (a 400 is already sent)" from
 # the legitimate "no external_root was given at all" None case - see that
-# method's docstring (ISSUES.md Round 2 finding 7, 2026-08-31).
+# method's docstring (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment).
 _EXTERNAL_ROOT_INVALID = object()
 
 
@@ -347,7 +347,7 @@ def _make_handler(ctx: _ServerContext):
             return body
 
         def _resolve_external_root_or_none(self, raw: Optional[str]):
-            """Journey 3 (ISSUES.md Round 2 finding 7, 2026-08-31): validates
+            """Journey 3 (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment): validates
             an optional external retrofit-target root string via
             wizard_containment.resolve_external_target, shared by every
             picker/inventory/select/draft/apply route that can be pointed at
@@ -508,7 +508,7 @@ def _make_handler(ctx: _ServerContext):
             self._send_json(HTTPStatus.OK, wizard_onboarding_state.to_json_dict(state))
 
         def _handle_api_picker(self) -> None:
-            """`external_root` (ISSUES.md Round 2 finding 7, 2026-08-31,
+            """`external_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment,
             optional) browses subdirectories of an already-confirmed external
             retrofit target instead of ctx.repo_root - every other caller of
             this route (the onboarding/decision-staging pickers) never sends
@@ -546,7 +546,7 @@ def _make_handler(ctx: _ServerContext):
             `target` defaults to "." (the repo root itself) so a first load with
             no query string still returns something rather than erroring.
 
-            `external_root` (ISSUES.md Round 2 finding 7, 2026-08-31, optional):
+            `external_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment, optional):
             when given, `target` is scanned relative to this already-validated
             external root instead of ctx.repo_root - see
             `_resolve_external_root_or_none` and
@@ -629,7 +629,7 @@ def _make_handler(ctx: _ServerContext):
                     {"error": f"unknown contract(s): {', '.join(unknown)}"},
                 )
                 return
-            # ISSUES.md Round 2 finding 6 (2026-08-31): per-unit
+            # the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting: per-unit
             # context-availability policy - validated here, at the same
             # point contracts are validated, rather than deferred to
             # draft() time, so a bad value is rejected before it's ever
@@ -649,7 +649,7 @@ def _make_handler(ctx: _ServerContext):
                     },
                 )
                 return
-            # ISSUES.md Round 2 finding 7 (2026-08-31): re-validated on every
+            # the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: re-validated on every
             # request, per _resolve_external_root_or_none's own docstring -
             # never trusted merely because the client echoed back a value the
             # inventory response once returned.
@@ -720,7 +720,7 @@ def _make_handler(ctx: _ServerContext):
                 )
                 return
 
-            # ISSUES.md Round 2 finding 7 (2026-08-31): re-validated from the
+            # the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: re-validated from the
             # persisted entry, same defense-in-depth footing as the select
             # handler - never trusted merely because it was written by our
             # own earlier request.
@@ -850,7 +850,7 @@ def _make_handler(ctx: _ServerContext):
                         "contracts_skipped_idempotent": [],
                     }
                     continue
-                # ISSUES.md Round 2 finding 7 (2026-08-31): re-validated per
+                # the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: re-validated per
                 # unit, not once for the whole request - each unit already
                 # carries its own independent target_root (see
                 # wizard_retrofit_state.upsert_selection's docstring), and a
@@ -1175,7 +1175,7 @@ def _make_handler(ctx: _ServerContext):
             )
 
         def _handle_api_init_preview(self) -> None:
-            """ISSUES.md Round 2 finding 9 (2026-08-31): dry-run preview of the
+            """the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: dry-run preview of the
             first-run `layout.workspace_root` namespacing offer - the tree/messages
             shown before the human commits to a value. Defensive backstop
             `_try_layout_source()` gate matches every other mutating-adjacent route

@@ -101,7 +101,7 @@ CEP_BUCKET_DIR_NAMES = {"contexts", "inputs", "cache"}
 # elsewhere in the repo.
 HOW_L2_GITHUB_CANDIDATE_EXCLUDE = {"skills", "prompts"}
 
-# ISSUES.md Round 2 finding (2026-08-31, same report as above): excluding
+# the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: excluding
 # skills/prompts from the doc-count is not enough on its own - the
 # ranked-candidate loop below also falls back to "does `.github/` have *any*
 # file at all, once skills/prompts are pruned" for repos where `.github/`
@@ -181,8 +181,7 @@ MEDIUM_CONFIDENCE_FILE_FLOOR = 3
 # qualifies regardless of file count) or a genuinely well-populated one.
 MIN_DOC_COUNT_FOR_UNNAMED_MATCH = 2
 
-# ISSUES.md Round 2 finding (2026-08-31, "Wizard discovery proposes
-# unsuitable paths after CEP installation"): a directory of runnable
+# the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: a directory of runnable
 # sample/demo code routinely carries one README.md per example - enough on
 # its own to clear MIN_DOC_COUNT_FOR_UNNAMED_MATCH's low bar despite holding
 # no requirements prose at all. Two independent, additive checks gate
@@ -863,7 +862,7 @@ def discover_how_l2(repo_root, config):
         top_rel = ranked[0][0]
         github_caution = None
         if any(r[0] == ".github/" for r in ranked):
-            # ISSUES.md Round 2 finding: even after the exclusion/narrowing
+            # the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: even after the exclusion/narrowing
             # above, `.github/` may still legitimately rank (real CODEOWNERS,
             # a real CONTRIBUTING.md, etc.) - but confirming it as
             # how_l2.path still leaves this install's own `.github/skills/`

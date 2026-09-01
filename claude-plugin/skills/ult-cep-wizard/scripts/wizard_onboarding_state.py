@@ -29,7 +29,7 @@ State table:
   decisions_pending  - artifact exists, at least one field is still pending/staged.
   steady_state       - artifact exists, every field is confirmed.
 
-`workspace_root_offer_eligible` (ISSUES.md Round 2 finding 9, 2026-08-31): true only
+`workspace_root_offer_eligible` (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init): true only
 at `needs_discover` while D20 has not yet run (`not d20_initialized`) - the one moment
 before any slot has been scaffolded where offering `layout.workspace_root`
 namespacing is still meaningful. `run_init` (via wizard_init.py) already refuses

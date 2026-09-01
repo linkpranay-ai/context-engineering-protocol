@@ -39,6 +39,12 @@ jobs:
       - name: Check ult-cep-wizard and ult-autoscaffold-content for un-scrubbed Radisys/telecom references (D24 §18.9 Q-g)
         run: python catalog/check_radisys_scrub.py
 
+      - name: Run catalog script test suite
+        run: python -m unittest discover -s catalog/tests -p "test_*.py" -v
+
+      - name: Check for citations of private, unpublished documents
+        run: python catalog/check_private_refs.py
+
       - name: Check NOTICE is up to date with adapted_from frontmatter
         run: python catalog/generate_notice.py --check
 

@@ -1211,7 +1211,7 @@ def run_init(repo_root, workspace_root=None, ci_hook=False, dry_run=False):
     scaffolds the pre-commit hook alone and succeeds, since the hook is
     opt-in and would otherwise be unreachable after the first `init`.
 
-    `dry_run=True` (ISSUES.md Round 2 finding 9, 2026-08-31 - the wizard's
+    `dry_run=True` (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init - the wizard's
     first-run `workspace_root` preview, `/api/init/preview`) runs every
     eligibility check and the full slot-resolution loop exactly as a real
     call would, but performs none of the actual writes (`mkdir`, marker
@@ -1297,7 +1297,7 @@ def run_init(repo_root, workspace_root=None, ci_hook=False, dry_run=False):
     # then see that incidental directory and wrongly conclude there's
     # already content, silently skipping the disable. This also keeps
     # dry_run and real-run messages identical, since dry_run never runs the
-    # loop's mkdir at all (ISSUES.md Round 2 finding 9, 2026-08-31).
+    # loop's mkdir at all (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init).
     what_l2_default = None
     what_l2_existed_before_init = None
     if not resolve_what_l2_path_explicit(config):
@@ -1658,7 +1658,7 @@ def main(argv=None):
         "--dry-run", action="store_true",
         help="only with --init: preview what init would do (scaffolded paths, "
              "workspace_root/exclude/enabled changes) without writing anything "
-             "(ISSUES.md Round 2 finding 9, 2026-08-31)",
+             "(the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init)",
     )
     args = parser.parse_args(argv)
 

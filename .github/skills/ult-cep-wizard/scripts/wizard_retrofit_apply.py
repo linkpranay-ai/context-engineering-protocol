@@ -116,7 +116,7 @@ class ApplyUnitInput:
     draft_text: str
     contracts_included: List[str]
     target_file_hash: Optional[str]
-    # ISSUES.md Round 2 finding 7 (2026-08-31): the absolute, already-
+    # the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: the absolute, already-
     # validated external root `primary_file` is relative to, when this unit's
     # target isn't ctx.repo_root - None (the default) is the unchanged
     # in-repo case. Same "None means repo_root" convention as

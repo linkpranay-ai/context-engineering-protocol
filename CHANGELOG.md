@@ -774,7 +774,7 @@ external context-engineering prior art.
   `ult-context-generate/SKILL.md`'s Step 9 human-review-gate template. `CONFORMANCE.md` §4 records it
   as a SHOULD, not the enforcement mechanism itself.
 - **`references/design-scratchpad-glossary.md`**: a plain-English index of every
-  `CONTEXT-ENGINEERING-DESIGN.md` `D<N>`/`§<N>` label cited across this repo, so those citations
+  `CONTEXT-ENGINEERING-DESIGN.md` `D<N>`/`§<N>` label cited across this repo, so those citations <!-- private-ref-allow: recording the private doc's name to explain what this glossary resolves, not a live citation of it -->
   resolve without the private, unpublished source document. Linked from `CONTRIBUTING.md`'s existing
   citation note and from the two most heavily-cited skills (`ult-context-generate`, `ult-repo-layout`).
   At the time this glossary shipped, `ROADMAP.md` item 15 logged the fuller pre-1.0 citation cleanup
@@ -793,7 +793,7 @@ external context-engineering prior art.
 ### Fixed
 
 - **Private-document citation leak**: skills and scripts across the repo cited unpublished sibling
-  design docs by filename (`CONTEXT-ENGINEERING-DESIGN.md` and two others) or bare `D<N>`/`D-0NN`
+  design docs by filename (`CONTEXT-ENGINEERING-DESIGN.md` and two others) or bare `D<N>`/`D-0NN` <!-- private-ref-allow: describing the past citation-leak fix, not a live citation -->
   decision-log labels a reader has no way to resolve. Rewrote every site to state the substance
   inline instead of pointing at a document that doesn't exist in this repo, and updated
   `CONTRIBUTING.md`'s citation note to match. Closes out `ROADMAP.md` item 15. Also removed internal
