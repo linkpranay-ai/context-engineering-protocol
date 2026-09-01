@@ -189,6 +189,68 @@ class TestComponentIsContainmentViolationMocked(unittest.TestCase):
             self.assertFalse(wc.component_is_containment_violation(Path("C:/x")))
 
 
+class TestResolveExternalTarget(unittest.TestCase):
+    """ISSUES.md Round 2 finding 7 (2026-08-31) - "Retrofit wizard cannot
+    operate on sibling or standalone skill library". resolve_external_target
+    is the validation gate for a user-supplied external retrofit-target root;
+    every requirement in its docstring gets its own failure-mode test here."""
+
+    def setUp(self):
+        self._repo_tmp = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._repo_tmp.name)
+        (self.repo_root / "sub").mkdir()
+
+        self._ext_tmp = tempfile.TemporaryDirectory()
+        self.external_root = Path(self._ext_tmp.name)
+        (self.external_root / "skills").mkdir()
+
+    def tearDown(self):
+        self._repo_tmp.cleanup()
+        self._ext_tmp.cleanup()
+
+    def test_valid_external_root_resolves(self):
+        resolved = wc.resolve_external_target(self.repo_root, self.external_root)
+        self.assertEqual(resolved, self.external_root.resolve())
+
+    def test_blank_candidate_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, "")
+
+    def test_none_candidate_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, None)
+
+    def test_relative_candidate_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, "some/relative/path")
+
+    def test_candidate_already_inside_repo_root_is_rejected(self):
+        """This is just an ordinary in-repo target - callers should route it
+        through the existing picker, not the external-target flow."""
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, self.repo_root / "sub")
+
+    def test_nonexistent_candidate_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, self.external_root / "does-not-exist")
+
+    def test_candidate_that_is_a_file_not_a_directory_is_rejected(self):
+        a_file = self.external_root / "not-a-dir.txt"
+        a_file.write_text("x", encoding="utf-8")
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, a_file)
+
+    def test_symlinked_external_root_is_rejected(self):
+        link = self.external_root.parent / "link_to_external_root"
+        if not _try_make_symlink(link, self.external_root):
+            self.skipTest("process cannot create symlinks (no Developer Mode/admin)")
+        try:
+            with self.assertRaises(wc.ContainmentError):
+                wc.resolve_external_target(self.repo_root, link)
+        finally:
+            link.unlink(missing_ok=True)
+
+
 class TestNormalizedForComparison(unittest.TestCase):
     def test_case_fold(self):
         self.assertEqual(

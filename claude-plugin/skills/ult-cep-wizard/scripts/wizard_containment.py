@@ -176,3 +176,75 @@ def check_containment(affirmed_root, candidate_path) -> Path:
             )
 
     return resolved_target
+
+
+def resolve_external_target(repo_root, candidate_path) -> Path:
+    """Validates a user-supplied absolute external retrofit-target root
+    (ISSUES.md Round 2 finding 7, 2026-08-31 - "Retrofit wizard cannot operate
+    on sibling or standalone skill library"). Unlike check_containment, this
+    function's whole job is to validate a root that is deliberately OUTSIDE
+    repo_root, so it cannot reuse check_containment's "must be inside" test -
+    only its containment-violation machinery (component_is_containment_violation)
+    for the candidate root itself.
+
+    Requirements, all fail-closed:
+
+      1. candidate_path must be non-empty and, once turned into a Path, absolute -
+         a relative external root is meaningless (relative to what?) and is
+         rejected rather than silently resolved against cwd or repo_root.
+      2. candidate_path must NOT already be inside repo_root - if it is, this is
+         just an ordinary in-repo target and callers should route it through the
+         existing picker/containment_root=None path instead of this one.
+         is_contained() already proves this correctly without any new logic:
+         pathlib's join semantics mean `Path(repo_root, absolute_candidate)`
+         evaluates to `absolute_candidate` itself, so this reuses
+         check_containment's existing resolved-and-normalized comparison rather
+         than re-implementing it.
+      3. candidate_path itself must not be a symlink/junction/reparse point
+         (component_is_containment_violation) - the external root becomes the
+         new write boundary for every unit selected under it, so it must be a
+         real, unambiguous directory, exactly like every intermediate component
+         check_containment already requires for in-repo paths.
+      4. candidate_path must exist and be a real directory - nothing is created
+         on the caller's behalf; per the ISSUES.md finding's own repro steps,
+         the user has already cloned/checked out the library before pointing
+         the wizard at it.
+
+    Returns the resolved Path. Every downstream containment/write check for
+    this unit or session passes this Path as `containment_root` in place of
+    repo_root - the write boundary moves, but never widens: check_containment
+    still runs the exact same two checks against whichever root it's given.
+    Raises ContainmentError on any failure, the same exception type (and the
+    same "reason" surfacing convention) callers already handle for an in-repo
+    containment failure."""
+    if not candidate_path or not str(candidate_path).strip():
+        raise ContainmentError("An external retrofit target path is required.")
+
+    candidate = Path(candidate_path)
+    if not candidate.is_absolute():
+        raise ContainmentError(
+            f"'{candidate_path}' is not an absolute path - an external retrofit "
+            "target must be given as a full path (e.g. the root of an "
+            "already-cloned skill library)."
+        )
+
+    if is_contained(repo_root, candidate):
+        raise ContainmentError(
+            f"'{candidate_path}' is already inside the project root '{repo_root}' - "
+            "use the ordinary in-repo target picker instead of the external-target flow."
+        )
+
+    if component_is_containment_violation(candidate):
+        raise ContainmentError(
+            f"'{candidate}' is a symlink/junction/reparse point - not allowed as an "
+            "external retrofit target root (OneDrive cloud placeholders are exempt "
+            "from this check; this path is not one)."
+        )
+
+    if not candidate.is_dir():
+        raise ContainmentError(
+            f"'{candidate}' does not exist or is not a directory - clone/checkout "
+            "the external skill library first, then point the wizard at its root."
+        )
+
+    return candidate.resolve()
