@@ -195,6 +195,46 @@ class TestWhatL2ScanAndScore(TempRepoTestCase):
         rendered = section.render()
         self.assertNotIn("contexts/", rendered)
 
+    def test_examples_dir_with_per_example_readmes_is_not_a_requirements_candidate(self):
+        # ISSUES.md Round 2 finding (2026-08-31): a directory of runnable
+        # sample code with one README.md per example crosses
+        # MIN_DOC_COUNT_FOR_UNNAMED_MATCH (2) despite holding no requirements
+        # prose at all - CODE_SAMPLE_DIR_NAMES excludes the un-named
+        # fallback route for this exact directory-name convention.
+        write(self.repo_root / "examples" / "hello-world" / "README.md", "# Hello World example")
+        write(self.repo_root / "examples" / "hello-world" / "main.py", "print('hi')")
+        write(self.repo_root / "examples" / "advanced" / "README.md", "# Advanced example")
+        write(self.repo_root / "examples" / "advanced" / "main.py", "print('hi')")
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("examples/", rendered)
+        self.assertIsNone(path)
+
+    def test_code_dominant_unnamed_dir_is_not_a_requirements_candidate_regardless_of_name(self):
+        # Generalizes the examples/ fix beyond the named fast path: any
+        # directory whose code files outnumber its doc files by
+        # CODE_DOMINANCE_RATIO is read as "predominantly code, incidentally
+        # documented", whatever it happens to be named.
+        write(self.repo_root / "cookbook" / "recipe-one" / "README.md", "# Recipe one")
+        for i in range(8):
+            write(self.repo_root / "cookbook" / "recipe-one" / f"step{i}.py", "pass")
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("cookbook/", rendered)
+
+    def test_examples_dir_with_genuine_name_match_still_qualifies(self):
+        # A name match (REQUIREMENTS_NAME_RE) is untouched by
+        # CODE_SAMPLE_DIR_NAMES/CODE_EXTENSIONS - only the un-named generic
+        # fallback route is narrowed.
+        for i in range(12):
+            write(self.repo_root / "specs" / f"{i}.md", "# req")
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIn("CONFIRM: specs/", rendered)
+
 
 class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
     def test_populated_workspace_root_after_exclude_is_notice_only(self):
@@ -289,6 +329,48 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         config = self.config()
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_ci_workflow_file_alone_does_not_inflate_github_candidacy(self):
+        # ISSUES.md Round 2 finding (2026-08-31): skills/prompts exclusion
+        # alone isn't enough - a bare CI workflow YAML (automation, not an
+        # authored convention) is neither a doc nor a recognized
+        # HOW_L2_GITHUB_SIGNAL_NAMES/_DIRS entry, and previously the "any
+        # file at all" fallback let it single-handedly qualify .github/ once
+        # skills/prompts were excluded. Nearly every real repo has a CI
+        # workflow regardless of whether it has any authored conventions.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "prompts" / "do-thing.prompt.md", "# Do Thing")
+        write(self.repo_root / ".github" / "workflows" / "ci.yml", "name: CI\non: [push]\n")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_github_issue_template_dir_still_counts_as_a_signal(self):
+        write(self.repo_root / ".github" / "ISSUE_TEMPLATE" / "bug.md", "# Bug report")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_github_candidate_carries_caution_about_nested_cep_tooling(self):
+        # Even when .github/ legitimately ranks on real content, a human
+        # confirming it needs to know CEP's own skills/prompts stay nested
+        # inside that same path - discovery-time exclusion never carries
+        # forward into what "confirmed how_l2.path=.github/" means
+        # downstream.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "CODEOWNERS", "* @team")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIn("CONFIRM: .github/", rendered)
+        self.assertIn("WARNING", rendered)
+        self.assertIn(".github/skills/", rendered)
+
+    def test_no_caution_when_github_is_not_a_candidate_at_all(self):
+        write(self.repo_root / "docs" / "style-guide" / "a.md", "# style")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn("WARNING", section.render())
 
     def test_manifest_present_still_excludes_the_common_skills_and_prompts_pair(self):
         # Same fixture as test_cep_own_installed_skills_and_prompts_do_not_
