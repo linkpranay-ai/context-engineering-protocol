@@ -200,11 +200,15 @@ def resolve_external_target(repo_root, candidate_path) -> Path:
          evaluates to `absolute_candidate` itself, so this reuses
          check_containment's existing resolved-and-normalized comparison rather
          than re-implementing it.
-      3. candidate_path itself must not be a symlink/junction/reparse point
-         (component_is_containment_violation) - the external root becomes the
-         new write boundary for every unit selected under it, so it must be a
-         real, unambiguous directory, exactly like every intermediate component
-         check_containment already requires for in-repo paths.
+      3. candidate_path itself, AND every one of its ancestor directories
+         (component_is_containment_violation, walked over candidate.parents),
+         must not be a symlink/junction/reparse point - the external root
+         becomes the new write boundary for every unit selected under it, so
+         both it and the path leading to it must be real and unambiguous,
+         exactly like every intermediate component check_containment already
+         requires for in-repo paths. OneDrive cloud placeholders are exempt
+         (component_is_containment_violation's own distinction), so an
+         ancestor sitting under Files-On-Demand sync is still accepted.
       4. candidate_path must exist and be a real directory - nothing is created
          on the caller's behalf; per that finding's own repro steps,
          the user has already cloned/checked out the library before pointing
@@ -233,6 +237,28 @@ def resolve_external_target(repo_root, candidate_path) -> Path:
             f"'{candidate_path}' is already inside the project root '{repo_root}' - "
             "use the ordinary in-repo target picker instead of the external-target flow."
         )
+
+    # The 2026-08-31 Round-2 evaluation's finding on external (out-of-repo)
+    # retrofit-target containment: the check below this comment only ever
+    # looked at `candidate` itself - a reparse point one level higher (e.g.
+    # `candidate`'s parent is a junction, but `candidate` on disk is an
+    # ordinary directory once you're through it) walked straight past
+    # unnoticed, and the resolved Path returned from this function silently
+    # became a different real location than the literal path the user typed.
+    # That's exactly the "link-based indirection" ambiguity
+    # check_containment's own docstring already refuses for in-repo paths
+    # (see its component-by-component walk above) - an external root
+    # deserves the same guarantee along its own ancestor chain, checked
+    # before the candidate-itself check below so either one on its own is
+    # sufficient to reject.
+    for ancestor in candidate.parents:
+        if component_is_containment_violation(ancestor):
+            raise ContainmentError(
+                f"'{ancestor}' is a symlink/junction/reparse point in the path to "
+                f"'{candidate}' - not allowed as an ancestor of an external retrofit "
+                "target root (OneDrive cloud placeholders are exempt from this "
+                "check; this ancestor is not one)."
+            )
 
     if component_is_containment_violation(candidate):
         raise ContainmentError(

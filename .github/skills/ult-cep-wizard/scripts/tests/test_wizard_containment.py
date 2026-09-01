@@ -250,6 +250,48 @@ class TestResolveExternalTarget(unittest.TestCase):
         finally:
             link.unlink(missing_ok=True)
 
+    # the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-
+    # target containment: candidate.parents walk. Mocked (like
+    # TestComponentIsContainmentViolationMocked above) rather than built from a real
+    # reparse point on disk - a real junction ancestor here would have to be a system
+    # directory several levels above a tempdir, which a test process can't safely
+    # create/remove.
+    def test_mid_chain_junction_ancestor_is_rejected(self):
+        real_violation = wc.component_is_containment_violation
+
+        def fake_violation(path):
+            if Path(path) == self.external_root.resolve().parent:
+                return True
+            return real_violation(path)
+
+        with mock.patch.object(wc, "component_is_containment_violation", side_effect=fake_violation):
+            with self.assertRaises(wc.ContainmentError):
+                wc.resolve_external_target(self.repo_root, self.external_root)
+
+    def test_cloud_placeholder_tagged_ancestor_is_still_accepted(self):
+        """An ancestor that IS a reparse point but is specifically the OneDrive
+        cloud-placeholder kind must not be rejected - component_is_containment_violation
+        already encodes that distinction; this just confirms the new ancestor walk
+        actually calls through to it rather than treating "is a reparse point at all"
+        as automatically disqualifying."""
+        real_violation = wc.component_is_containment_violation
+        checked_ancestor = self.external_root.resolve().parent
+
+        def fake_violation(path):
+            if Path(path) == checked_ancestor:
+                return False  # cloud placeholder: not a violation
+            return real_violation(path)
+
+        with mock.patch.object(wc, "component_is_containment_violation", side_effect=fake_violation):
+            resolved = wc.resolve_external_target(self.repo_root, self.external_root)
+        self.assertEqual(resolved, self.external_root.resolve())
+
+    def test_clean_ancestor_chain_is_unchanged(self):
+        # No mocking at all - every real ancestor of a tempdir is an ordinary
+        # directory, so the new walk must not disturb the existing happy path.
+        resolved = wc.resolve_external_target(self.repo_root, self.external_root)
+        self.assertEqual(resolved, self.external_root.resolve())
+
 
 class TestNormalizedForComparison(unittest.TestCase):
     def test_case_fold(self):
