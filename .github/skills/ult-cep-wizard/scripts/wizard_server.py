@@ -66,6 +66,15 @@ docs describe the CEP protocol itself, not whatever repo is being onboarded.
 `_handle_api_status` also now wires in
 `wizard_stub_content`'s previously-orphaned preview cards alongside the existing box
 view model.
+
+ISSUES.md Round 2 finding 9 (2026-08-31) adds the first-run `layout.workspace_root`
+namespacing offer's write path: `POST /api/init/preview` (dry-run, zero disk writes,
+`wizard_init.preview_init`) and `POST /api/init` (the real commit,
+`wizard_init.run_init`) - same 3-gate mutating dispatch and `_try_layout_source()`
+defensive-backstop convention as `/api/discover`. `GET /api/state`'s response also
+gained `workspace_root_current`/`workspace_root_offer_eligible`
+(`wizard_onboarding_state`) so the frontend knows whether to show the offer at all
+before ever calling either new route.
 """
 
 from __future__ import annotations
@@ -92,6 +101,7 @@ import wizard_content_hash  # noqa: E402
 import wizard_decision_staging  # noqa: E402
 import wizard_discover  # noqa: E402
 import wizard_docs  # noqa: E402
+import wizard_init  # noqa: E402
 import wizard_markdown  # noqa: E402
 import wizard_layout_source  # noqa: E402
 import wizard_onboarding_state  # noqa: E402
@@ -115,6 +125,12 @@ STATIC_ASSETS = {
     "wizard.css": "text/css; charset=utf-8",
     "wizard.js": "application/javascript; charset=utf-8",
 }
+
+# Sentinel returned by _resolve_external_root_or_none() to distinguish "an
+# external_root was given and failed validation (a 400 is already sent)" from
+# the legitimate "no external_root was given at all" None case - see that
+# method's docstring (ISSUES.md Round 2 finding 7, 2026-08-31).
+_EXTERNAL_ROOT_INVALID = object()
 
 
 class _ServerContext:
@@ -289,6 +305,12 @@ def _make_handler(ctx: _ServerContext):
             if path == "/api/discover":
                 self._handle_api_discover()
                 return
+            if path == "/api/init/preview":
+                self._handle_api_init_preview()
+                return
+            if path == "/api/init":
+                self._handle_api_init()
+                return
             if path == "/api/retrofit/select":
                 self._handle_api_retrofit_select()
                 return
@@ -323,6 +345,37 @@ def _make_handler(ctx: _ServerContext):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "JSON body must be an object"})
                 return None
             return body
+
+        def _resolve_external_root_or_none(self, raw: Optional[str]):
+            """Journey 3 (ISSUES.md Round 2 finding 7, 2026-08-31): validates
+            an optional external retrofit-target root string via
+            wizard_containment.resolve_external_target, shared by every
+            picker/inventory/select/draft/apply route that can be pointed at
+            one. Three-way, not two-way, because a blank/omitted `raw` is a
+            legitimate "use ctx.repo_root" request, not a failure:
+
+              - `raw` blank/None -> returns None (no external root requested).
+              - `raw` given and valid -> returns the resolved absolute path
+                string.
+              - `raw` given and invalid -> already sent a 400 with the
+                ContainmentError's message; returns _EXTERNAL_ROOT_INVALID so
+                the caller can `return` without a second error path, mirroring
+                _require_session()/_read_json_body()'s own
+                already-responded-so-just-return contract.
+
+            Re-validates every time rather than trusting a previously-
+            persisted RETROFIT-STATE.json `target_root` value, on the same
+            fail-closed, defense-in-depth footing every other containment
+            check in this file already takes for `primary_file` - state on
+            disk is this wizard's own, but never assumed untamperable."""
+            if not raw or not str(raw).strip():
+                return None
+            try:
+                resolved = wizard_containment.resolve_external_target(ctx.repo_root, raw)
+            except wizard_containment.ContainmentError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return _EXTERNAL_ROOT_INVALID
+            return str(resolved)
 
         def _handle_exchange(self) -> None:
             query = urlsplit(self.path).query
@@ -455,12 +508,23 @@ def _make_handler(ctx: _ServerContext):
             self._send_json(HTTPStatus.OK, wizard_onboarding_state.to_json_dict(state))
 
         def _handle_api_picker(self) -> None:
+            """`external_root` (ISSUES.md Round 2 finding 7, 2026-08-31,
+            optional) browses subdirectories of an already-confirmed external
+            retrofit target instead of ctx.repo_root - every other caller of
+            this route (the onboarding/decision-staging pickers) never sends
+            it, so this stays a no-op for them."""
             if self._require_session() is None:
                 return
             query = urlsplit(self.path).query
-            rel_path = parse_qs(query).get("path", ["."])[0]
+            params = parse_qs(query)
+            rel_path = params.get("path", ["."])[0]
+            external_root = self._resolve_external_root_or_none(
+                params.get("external_root", [None])[0]
+            )
+            if external_root is _EXTERNAL_ROOT_INVALID:
+                return
             try:
-                result = wizard_picker.list_directory(ctx.repo_root, rel_path)
+                result = wizard_picker.list_directory(external_root or ctx.repo_root, rel_path)
             except wizard_picker.PickerError as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
@@ -472,6 +536,7 @@ def _make_handler(ctx: _ServerContext):
                     "entries": [
                         {"name": e.name, "rel_path": e.rel_path} for e in result.entries
                     ],
+                    "target_root": external_root,
                 },
             )
 
@@ -479,14 +544,29 @@ def _make_handler(ctx: _ServerContext):
             """Journey 3 Phase A - read-only, same session-gate-only posture as
             `_handle_api_picker` (no CSRF/mutating gate: nothing is written).
             `target` defaults to "." (the repo root itself) so a first load with
-            no query string still returns something rather than erroring."""
+            no query string still returns something rather than erroring.
+
+            `external_root` (ISSUES.md Round 2 finding 7, 2026-08-31, optional):
+            when given, `target` is scanned relative to this already-validated
+            external root instead of ctx.repo_root - see
+            `_resolve_external_root_or_none` and
+            `wizard_retrofit_inventory.build_inventory`'s own docstring. The
+            resulting `target_root` in the response is what the frontend must
+            echo back on every subsequent select/draft/apply call for units
+            discovered from this scan."""
             if self._require_session() is None:
                 return
             query = urlsplit(self.path).query
-            target_rel_path = parse_qs(query).get("target", ["."])[0]
+            params = parse_qs(query)
+            target_rel_path = params.get("target", ["."])[0]
+            external_root = self._resolve_external_root_or_none(
+                params.get("external_root", [None])[0]
+            )
+            if external_root is _EXTERNAL_ROOT_INVALID:
+                return
             try:
                 result = wizard_retrofit_inventory.build_inventory(
-                    ctx.repo_root, target_rel_path
+                    ctx.repo_root, target_rel_path, external_root=external_root
                 )
             except wizard_retrofit_inventory.RetrofitInventoryError as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
@@ -549,8 +629,35 @@ def _make_handler(ctx: _ServerContext):
                     {"error": f"unknown contract(s): {', '.join(unknown)}"},
                 )
                 return
+            # ISSUES.md Round 2 finding 6 (2026-08-31): per-unit
+            # context-availability policy - validated here, at the same
+            # point contracts are validated, rather than deferred to
+            # draft() time, so a bad value is rejected before it's ever
+            # persisted into RETROFIT-STATE.json.
+            context_availability = body.get(
+                "context_availability", wizard_retrofit_draft.DEFAULT_CONTEXT_AVAILABILITY
+            )
+            if context_availability not in wizard_retrofit_draft.CONTEXT_AVAILABILITY_POLICIES:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "error": (
+                            f"unknown context_availability {context_availability!r} "
+                            f"(expected one of "
+                            f"{', '.join(wizard_retrofit_draft.CONTEXT_AVAILABILITY_POLICIES)})"
+                        )
+                    },
+                )
+                return
+            # ISSUES.md Round 2 finding 7 (2026-08-31): re-validated on every
+            # request, per _resolve_external_root_or_none's own docstring -
+            # never trusted merely because the client echoed back a value the
+            # inventory response once returned.
+            target_root = self._resolve_external_root_or_none(body.get("target_root"))
+            if target_root is _EXTERNAL_ROOT_INVALID:
+                return
             try:
-                wizard_containment.check_containment(ctx.repo_root, primary_file)
+                wizard_containment.check_containment(target_root or ctx.repo_root, primary_file)
             except wizard_containment.ContainmentError as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
@@ -571,6 +678,8 @@ def _make_handler(ctx: _ServerContext):
                 contracts=contracts,
                 reference_mode=body.get("reference_mode", "same-repo"),
                 reference_args=body.get("reference_args") or {},
+                context_availability=context_availability,
+                target_root=target_root,
             )
             wizard_retrofit_state.save_state(ctx.repo_root, state)
             self._send_json(HTTPStatus.OK, {"unit_id": unit_id, "selection": entry})
@@ -611,6 +720,13 @@ def _make_handler(ctx: _ServerContext):
                 )
                 return
 
+            # ISSUES.md Round 2 finding 7 (2026-08-31): re-validated from the
+            # persisted entry, same defense-in-depth footing as the select
+            # handler - never trusted merely because it was written by our
+            # own earlier request.
+            target_root = self._resolve_external_root_or_none(entry.get("target_root"))
+            if target_root is _EXTERNAL_ROOT_INVALID:
+                return
             try:
                 result = wizard_retrofit_draft.build_draft(
                     ctx.repo_root,
@@ -619,6 +735,11 @@ def _make_handler(ctx: _ServerContext):
                     contracts,
                     entry.get("reference_mode", "same-repo"),
                     entry.get("reference_args") or {},
+                    context_availability=entry.get(
+                        "context_availability",
+                        wizard_retrofit_draft.DEFAULT_CONTEXT_AVAILABILITY,
+                    ),
+                    containment_root=target_root,
                 )
             except wizard_retrofit_draft.RetrofitDraftError as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
@@ -729,6 +850,32 @@ def _make_handler(ctx: _ServerContext):
                         "contracts_skipped_idempotent": [],
                     }
                     continue
+                # ISSUES.md Round 2 finding 7 (2026-08-31): re-validated per
+                # unit, not once for the whole request - each unit already
+                # carries its own independent target_root (see
+                # wizard_retrofit_state.upsert_selection's docstring), and a
+                # revalidation failure for one unit (e.g. its external root
+                # vanished between draft and apply) must fail only that unit,
+                # matching this same handler's own "one failure never aborts
+                # the batch" contract for every other per-unit problem above.
+                raw_target_root = entry.get("target_root")
+                target_root = None
+                if raw_target_root:
+                    try:
+                        target_root = str(
+                            wizard_containment.resolve_external_target(
+                                ctx.repo_root, raw_target_root
+                            )
+                        )
+                    except wizard_containment.ContainmentError as exc:
+                        results_by_id[unit_id] = {
+                            "unit_id": unit_id,
+                            "status": "failed",
+                            "reason": str(exc),
+                            "contracts_applied": [],
+                            "contracts_skipped_idempotent": [],
+                        }
+                        continue
                 inputs.append(
                     wizard_retrofit_apply.ApplyUnitInput(
                         unit_id=unit_id,
@@ -737,6 +884,7 @@ def _make_handler(ctx: _ServerContext):
                         draft_text=entry.get("draft_text") or "",
                         contracts_included=list(entry.get("contracts_included") or []),
                         target_file_hash=entry.get("target_file_hash"),
+                        containment_root=target_root,
                     )
                 )
 
@@ -1025,6 +1173,49 @@ def _make_handler(ctx: _ServerContext):
                     "discarded_staged_sections": result.discarded_staged_sections,
                 },
             )
+
+        def _handle_api_init_preview(self) -> None:
+            """ISSUES.md Round 2 finding 9 (2026-08-31): dry-run preview of the
+            first-run `layout.workspace_root` namespacing offer - the tree/messages
+            shown before the human commits to a value. Defensive backstop
+            `_try_layout_source()` gate matches every other mutating-adjacent route
+            here (frontend is expected to have already routed past `layout_broken`
+            via `/api/state`); this route itself never mutates anything regardless,
+            since `wizard_init.preview_init` always calls `dry_run=True`."""
+            body = self._read_json_body()
+            if body is None:
+                return
+            workspace_root = body.get("workspace_root")
+
+            if self._try_layout_source() is None:
+                return
+            try:
+                result = wizard_init.preview_init(ctx.repo_root, workspace_root=workspace_root)
+            except wizard_init.InitError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+
+            self._send_json(HTTPStatus.OK, {"messages": result.messages})
+
+        def _handle_api_init(self) -> None:
+            """The real, committing call - identical body shape to
+            `/api/init/preview`. The frontend is expected to have already shown the
+            human the matching preview output for the same `workspace_root` value
+            before calling this (see wizard_init.run_init's own docstring)."""
+            body = self._read_json_body()
+            if body is None:
+                return
+            workspace_root = body.get("workspace_root")
+
+            if self._try_layout_source() is None:
+                return
+            try:
+                result = wizard_init.run_init(ctx.repo_root, workspace_root=workspace_root)
+            except wizard_init.InitError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+
+            self._send_json(HTTPStatus.OK, {"messages": result.messages})
 
     return WizardRequestHandler
 

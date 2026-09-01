@@ -400,5 +400,171 @@ class TestDescribeErrorIsolation(RetrofitInventoryTestCase):
         self.assertTrue(healthy.code_related)
 
 
+class TestSourceDirectoryAndDirectoryCounts(RetrofitInventoryTestCase):
+    """ISSUES.md Round 2 finding 8 (2026-08-31): "grouped counts by source
+    directory" - covers source_directory assignment for all three unit
+    shapes (skill-dir, manifest-dir, flat-file), root-level flat files
+    (no "/" in their target-relative path), the target-subdirectory case
+    (source_directory must be target-relative, not repo-root-relative), and
+    directory_counts' total/canonical/supplementary sort order."""
+
+    def setUp(self):
+        super().setUp()
+        _install_ult_cep_retrofit(self.root)
+
+    def test_source_directory_for_skill_dir_and_flat_file_units(self):
+        _write(self.root / "skills" / "widget-reviewer" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "skills" / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+        by_id = {u.unit_id: u for u in result.units}
+
+        self.assertEqual(by_id["skills/widget-reviewer"].source_directory, "skills")
+        self.assertEqual(by_id["skills/second-widget.md"].source_directory, "skills")
+
+    def test_source_directory_for_root_level_flat_file_is_its_own_name(self):
+        # No "/" in the target-relative path at all - split("/", 1)[0] on a
+        # bare filename returns the filename itself, which is exactly the
+        # "this unit's own bucket, nothing else in it" behavior wanted here.
+        _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+        unit = result.units[0]
+        self.assertEqual(unit.source_directory, "second-widget.md")
+
+    def test_source_directory_is_target_relative_not_repo_root_relative(self):
+        # Same distinction test_inventory_against_a_library_subdirectory
+        # draws for primary_file/path: source_directory must bucket by the
+        # first segment *below the target*, not repo root, or grouping a
+        # vendored subdirectory would show one giant "library" bucket
+        # instead of the useful per-unit-directory breakdown.
+        _write(self.root / "library" / "skills" / "widget-reviewer" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "library" / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), "library")
+        by_id = {u.unit_id: u for u in result.units}
+
+        self.assertEqual(by_id["skills/widget-reviewer"].source_directory, "skills")
+        self.assertEqual(by_id["second-widget.md"].source_directory, "second-widget.md")
+
+    def test_directory_counts_aggregates_and_sorts_by_total_desc_then_name(self):
+        # "skills" gets 2 units (1 canonical, 1 supplementary); "docs" and
+        # "z-notes" each get 1 supplementary unit. Expected order: "skills"
+        # first (total=2), then "docs" before "z-notes" on name ascending
+        # since both have total=1.
+        _write(self.root / "skills" / "widget-reviewer" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "skills" / "widget-reviewer.md", SECOND_WIDGET_MD)
+        _write(self.root / "z-notes" / "second-widget.md", SECOND_WIDGET_MD)
+        _write(self.root / "docs" / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+
+        self.assertEqual(
+            [b["directory"] for b in result.directory_counts],
+            ["skills", "docs", "z-notes"],
+        )
+        skills_bucket = result.directory_counts[0]
+        self.assertEqual(skills_bucket["total"], 2)
+        self.assertEqual(skills_bucket["canonical"], 1)
+        self.assertEqual(skills_bucket["supplementary"], 1)
+
+        docs_bucket = result.directory_counts[1]
+        self.assertEqual(docs_bucket, {"directory": "docs", "total": 1, "canonical": 0, "supplementary": 1})
+
+    def test_directory_counts_reflect_all_units_including_flagged_duplicates(self):
+        # Mirrors test_result_reports_tier_counts_reflecting_all_units_
+        # including_flagged_duplicates above - nothing _flag_stray_duplicate_
+        # flat_files() flags gets dropped, so directory_counts must still
+        # sum to len(result.units).
+        _write(self.root / "skills" / "widget" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.root / "skills" / "widget.md", SECOND_WIDGET_MD)
+        _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(str(self.root), ".")
+
+        total_from_buckets = sum(b["total"] for b in result.directory_counts)
+        self.assertEqual(total_from_buckets, len(result.units))
+        self.assertEqual(total_from_buckets, 3)
+
+
+class TestExternalRoot(RetrofitInventoryTestCase):
+    """ISSUES.md Round 2 finding 7 (2026-08-31) - "Retrofit wizard cannot
+    operate on sibling or standalone skill library". `self.root` here plays
+    ctx.repo_root (only ult-cep-retrofit's engine lives under it); a second,
+    entirely separate temp dir plays the external retrofit target - mirrors a
+    cloned sibling library the way the ISSUES.md repro describes."""
+
+    def setUp(self):
+        super().setUp()
+        _install_ult_cep_retrofit(self.root)
+        self._ext_tmp = tempfile.TemporaryDirectory()
+        self.external_root = Path(self._ext_tmp.name)
+
+    def tearDown(self):
+        self._ext_tmp.cleanup()
+        super().tearDown()
+
+    def test_inventory_scans_external_root_not_repo_root(self):
+        _write(self.external_root / "widget-reviewer" / "SKILL.md", WIDGET_REVIEWER_SKILL_MD)
+        _write(self.external_root / "second-widget.md", SECOND_WIDGET_MD)
+        # Nothing under self.root (repo_root) except ult-cep-retrofit itself -
+        # if build_inventory scanned repo_root instead of external_root by
+        # mistake, this would come back empty.
+
+        result = wri.build_inventory(
+            str(self.root), ".", external_root=str(self.external_root)
+        )
+
+        self.assertEqual(result.target_root, str(self.external_root))
+        by_id = {u.unit_id: u for u in result.units}
+        self.assertEqual(set(by_id), {"widget-reviewer", "second-widget.md"})
+
+    def test_unit_paths_are_relative_to_external_root_not_repo_root(self):
+        # Same regression shape as test_inventory_against_a_library_
+        # subdirectory above, but for the external-root axis: a select/apply
+        # call must be able to resolve primary_file against external_root.
+        _write(self.external_root / "library" / "second-widget.md", SECOND_WIDGET_MD)
+
+        result = wri.build_inventory(
+            str(self.root), "library", external_root=str(self.external_root)
+        )
+
+        self.assertEqual(result.target_rel_path, "library")
+        unit = result.units[0]
+        self.assertEqual(unit.primary_file, "library/second-widget.md")
+        self.assertTrue((self.external_root / unit.primary_file).is_file())
+        # And NOT resolvable against repo_root - proves this is really
+        # external-root-relative, not accidentally repo-root-relative too.
+        self.assertFalse((self.root / unit.primary_file).is_file())
+
+    def test_target_outside_external_root_is_a_containment_error(self):
+        with self.assertRaises(wri.RetrofitInventoryError):
+            wri.build_inventory(
+                str(self.root), "../escaped", external_root=str(self.external_root)
+            )
+
+    def test_no_external_root_keeps_target_root_none(self):
+        # Backward-compatibility check: the ordinary in-repo call (no
+        # external_root argument at all) must still report target_root=None,
+        # not silently start requiring the new argument.
+        _write(self.root / "second-widget.md", SECOND_WIDGET_MD)
+        result = wri.build_inventory(str(self.root), ".")
+        self.assertIsNone(result.target_root)
+
+    def test_cep_retrofit_engine_is_still_imported_from_repo_root(self):
+        # The engine import must stay anchored at repo_root even when
+        # scanning an external target - it's a CEP-project asset, never part
+        # of the target being retrofitted. Proven here by *not* installing
+        # ult-cep-retrofit under external_root at all; if build_inventory
+        # tried to import it from there instead, this would raise
+        # RetrofitInventoryError("is ult-cep-retrofit installed") instead of
+        # succeeding.
+        _write(self.external_root / "second-widget.md", SECOND_WIDGET_MD)
+        result = wri.build_inventory(
+            str(self.root), ".", external_root=str(self.external_root)
+        )
+        self.assertEqual(len(result.units), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

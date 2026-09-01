@@ -124,6 +124,71 @@ class TestUpsertSelection(unittest.TestCase):
         self.assertEqual(entry["draft_text"], "See `../CONSUMING-CONTEXT-PACKAGE.md`.")
         self.assertEqual(entry["target_file_hash"], "deadbeef")
 
+    def test_context_availability_defaults_to_ask_and_is_persisted(self):
+        """ISSUES.md Round 2 finding 6 (2026-08-31)."""
+        state = {"schema_version": 1, "units": {}}
+        wrs.upsert_selection(
+            state, "widget-reviewer",
+            primary_file="widget-reviewer/SKILL.md", unit_dir_rel_path="widget-reviewer",
+            include=True, contracts=["CONSUMING-CONTEXT-PACKAGE.md"],
+            reference_mode="same-repo", reference_args={},
+        )
+        entry = wrs.find_unit(state, "widget-reviewer")
+        self.assertEqual(entry["context_availability"], "ask")
+
+    def test_explicit_context_availability_is_persisted(self):
+        state = {"schema_version": 1, "units": {}}
+        wrs.upsert_selection(
+            state, "widget-reviewer",
+            primary_file="widget-reviewer/SKILL.md", unit_dir_rel_path="widget-reviewer",
+            include=True, contracts=["CONSUMING-CONTEXT-PACKAGE.md"],
+            reference_mode="same-repo", reference_args={},
+            context_availability="required",
+        )
+        entry = wrs.find_unit(state, "widget-reviewer")
+        self.assertEqual(entry["context_availability"], "required")
+
+    def test_target_root_defaults_to_none_and_is_persisted(self):
+        """ISSUES.md Round 2 finding 7 (2026-08-31) - None means "this unit's
+        primary_file is relative to ctx.repo_root", the unchanged in-repo
+        case every existing entry shape and caller keeps working with."""
+        state = {"schema_version": 1, "units": {}}
+        wrs.upsert_selection(
+            state, "widget-reviewer",
+            primary_file="widget-reviewer/SKILL.md", unit_dir_rel_path="widget-reviewer",
+            include=True, contracts=["CONSUMING-CONTEXT-PACKAGE.md"],
+            reference_mode="same-repo", reference_args={},
+        )
+        entry = wrs.find_unit(state, "widget-reviewer")
+        self.assertIn("target_root", entry)
+        self.assertIsNone(entry["target_root"])
+
+    def test_explicit_target_root_is_persisted_per_unit(self):
+        state = {"schema_version": 1, "units": {}}
+        wrs.upsert_selection(
+            state, "external-widget",
+            primary_file="widget-reviewer/SKILL.md", unit_dir_rel_path="widget-reviewer",
+            include=True, contracts=["CONSUMING-CODE-GRAPH.md"],
+            reference_mode="plugin",
+            reference_args={"CONSUMING-CODE-GRAPH.md": "/context-engineering-oss:ult-cep-wizard"},
+            target_root="C:/clones/mattpocock-skills",
+        )
+        # A second, ordinary in-repo unit selected in the same session must
+        # keep its own independent (None) target_root - proves this is a
+        # per-unit field, not a session-global toggle.
+        wrs.upsert_selection(
+            state, "in-repo-widget",
+            primary_file="second-widget.md", unit_dir_rel_path=".",
+            include=True, contracts=["CONSUMING-CONTEXT-PACKAGE.md"],
+            reference_mode="same-repo",
+            reference_args={"CONSUMING-CONTEXT-PACKAGE.md": "context-engineering/CONSUMING-CONTEXT-PACKAGE.md"},
+        )
+        self.assertEqual(
+            wrs.find_unit(state, "external-widget")["target_root"],
+            "C:/clones/mattpocock-skills",
+        )
+        self.assertIsNone(wrs.find_unit(state, "in-repo-widget")["target_root"])
+
 
 class TestSetDraft(unittest.TestCase):
     def setUp(self):

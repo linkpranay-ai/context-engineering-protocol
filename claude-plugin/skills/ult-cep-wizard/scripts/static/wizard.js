@@ -36,16 +36,29 @@
 //                        -not-yet-Applied decision that a bare re-run would silently
 //                        discard (409 with at_risk_sections; force:true proceeds and
 //                        discards them, only after the user explicitly confirms).
+//   POST /api/init/preview,
+//   POST /api/init      - preview/run the mechanical half of ult-repo-layout's
+//                        `init` (wizard_init.py wrapping validate_layout.run_init):
+//                        scaffold each installed slot, write project_layout, and
+//                        optionally set layout.workspace_root - never the
+//                        project_name/description half of `init`, which stays a
+//                        conversational step with the coding agent (see the
+//                        needs-discover-greenfield copy in index.html). Both take
+//                        an optional {workspace_root} body field.
 //
 // loadState()'s four screens: layout_broken (validation failed - minimal FAIL-lines
 // screen, nothing else attempted), needs_discover (guide-only intro + a real Run
-// Discover button), decisions_pending/steady_state (today's existing
-// boxes/decisions/picker experience, unchanged - just reachable now). A
-// d20_initialized=false flag is carried on every state but never picks the screen -
-// on needs_discover it only swaps which of two guide-copy variants intros the
-// (always-shared) Run Discover button (renderNeedsDiscover, greenfield vs.
-// brownfield copy - see references/wizard-onboarding-state-machine.md), and on
-// decisions_pending/steady_state it only toggles the small dismissible banner.
+// Discover button, plus the workspace_root init offer below when eligible),
+// decisions_pending/steady_state (today's existing boxes/decisions/picker
+// experience, unchanged - just reachable now). A d20_initialized=false flag is
+// carried on every state but never picks the screen - on needs_discover it only
+// swaps which of two guide-copy variants intros the (always-shared) Run Discover
+// button (renderNeedsDiscover, greenfield vs. brownfield copy - see
+// references/wizard-onboarding-state-machine.md), and on decisions_pending/
+// steady_state it only toggles the small dismissible banner. A separate
+// workspace_root_offer_eligible flag (true only at needs_discover, before D20 has
+// scaffolded anything) gates the init-offer block independently (renderInitOffer;
+// see ISSUES.md Round 2 finding 9, 2026-08-31).
 //
 // UI design pass adds the top-bar docs viewer, wired once at startup rather than
 // inside loadState() - these are CEP's own project docs, not part of the onboarding
@@ -545,6 +558,56 @@
     var isGreenfield = !state.d20_initialized;
     greenfield.style.display = isGreenfield ? "" : "none";
     brownfield.style.display = isGreenfield ? "none" : "";
+    renderInitOffer(state);
+  }
+
+  // ------------------------------------------------------------------------
+  // Workspace-root init offer (ISSUES.md Round 2 finding 9, 2026-08-31) -
+  // POST /api/init/preview + POST /api/init, wizard_init.py wrapping
+  // validate_layout.run_init's mechanical half of `init` (scaffold slots,
+  // write project_layout, optionally set layout.workspace_root). Shown only
+  // while state.workspace_root_offer_eligible is true - that server-computed
+  // flag (needs_discover, before D20 has scaffolded anything) is the single
+  // source of truth here, not re-derived from d20_initialized client-side.
+  // ------------------------------------------------------------------------
+
+  // Session-only, mirrors d20BannerDismissed: "not now", not "never" - a
+  // reload re-shows the offer as long as it's still eligible.
+  var initOfferDismissed = false;
+
+  function renderInitOffer(state) {
+    var offer = document.getElementById("needs-discover-init-offer");
+    if (!offer) {
+      return;
+    }
+    offer.style.display = state.workspace_root_offer_eligible && !initOfferDismissed ? "" : "none";
+  }
+
+  function readWorkspaceRootInput() {
+    var input = document.getElementById("init-workspace-root-input");
+    var value = input ? input.value.trim() : "";
+    return value === "" ? null : value;
+  }
+
+  function setInitMessage(text, isError) {
+    var message = document.getElementById("init-message");
+    if (!message) {
+      return;
+    }
+    message.textContent = text || "";
+    message.classList.toggle("error", Boolean(isError));
+  }
+
+  function renderInitPreviewMessages(messages) {
+    var list = document.getElementById("init-preview-messages");
+    if (!list) {
+      return;
+    }
+    list.innerHTML = "";
+    (messages || []).forEach(function (line) {
+      list.appendChild(el("li", { text: line }));
+    });
+    list.style.display = messages && messages.length ? "" : "none";
   }
 
   // Dismissed for the life of this page load only - reloading the page (or a
@@ -643,6 +706,13 @@
   // /exchange URL can't use (see the module docstring).
   var docsCurrentView = null;
   var docsBackStack = [];
+  // Populated from /api/docs's case_studies_external_url (see wizard_docs.py)
+  // - always CEP's own published repo, independent of which target repo this
+  // wizard instance is running against. Used only as a fallback for the
+  // "Case Studies" nav button below when case-studies-readme wasn't found
+  // locally (the overwhelmingly common case: install.ps1/install.sh
+  // deliberately don't bundle case-studies/ into a real install).
+  var caseStudiesExternalUrl = null;
 
   function setDocsNavAvailability() {
     var byId = {};
@@ -651,19 +721,39 @@
     });
 
     [
-      ["nav-doc-concept", !!byId.concept],
-      ["nav-doc-protocol", !!byId.protocol],
-      ["nav-doc-readme", !!byId.readme],
-      // "Case Studies" now navigates straight to case-studies/README.md's
-      // rendered content (see nav-doc-case-studies's click handler below),
-      // not an auto-generated list - so its availability tracks that one
-      // doc, the same way the other two nav buttons track theirs.
-      ["nav-doc-case-studies", !!byId["case-studies-readme"]],
-      ["nav-doc-faq", !!byId.faq],
+      ["nav-doc-concept", !!byId.concept, false],
+      ["nav-doc-protocol", !!byId.protocol, false],
+      ["nav-doc-readme", !!byId.readme, false],
+      // "Case Studies" navigates to case-studies/README.md's own rendered
+      // content when it's bundled locally (rare - self-test root or a
+      // deliberately-bundled install). When it isn't (the normal case),
+      // rather than a dead disabled control with a generic "Not available"
+      // tooltip, this stays enabled and opens the real content on GitHub
+      // instead - see the click handler below and wizard_docs.py's
+      // CASE_STUDIES_EXTERNAL_URL comment for why that's always safe to
+      // link to regardless of install size.
+      ["nav-doc-case-studies", !!byId["case-studies-readme"], !!caseStudiesExternalUrl],
+      ["nav-doc-faq", !!byId.faq, false],
     ].forEach(function (pair) {
-      var button = document.getElementById(pair[0]);
-      button.disabled = !pair[1];
-      button.title = pair[1] ? "" : "Not available in this install.";
+      var id = pair[0];
+      var available = pair[1];
+      var externalFallback = pair[2];
+      var button = document.getElementById(id);
+      button.disabled = !available && !externalFallback;
+      if (available) {
+        button.title = "";
+      } else if (externalFallback) {
+        button.title = "Not bundled with this install - opens on GitHub instead.";
+      } else {
+        button.title = "Not available in this install.";
+      }
+      // Only the Case Studies button ever has an external-link fallback -
+      // its label gets the "↗" hint precisely when that fallback is what a
+      // click will actually do, and reverts if a future install ever does
+      // bundle case-studies/ locally.
+      if (id === "nav-doc-case-studies") {
+        button.textContent = !available && externalFallback ? "Case Studies ↗" : "Case Studies";
+      }
     });
   }
 
@@ -673,6 +763,7 @@
         return;
       }
       docsList = result.body.docs || [];
+      caseStudiesExternalUrl = result.body.case_studies_external_url || null;
       setDocsNavAvailability();
     });
   }
@@ -831,8 +922,22 @@
   var CONTRACT_CODE = ["CONSUMING-COMPILED-GUIDELINES.md", "CONSUMING-CODE-GRAPH.md"];
   var CONTRACT_TASK = ["CONSUMING-CONTEXT-PACKAGE.md"];
   var ALL_CONTRACTS = CONTRACT_TASK.concat(CONTRACT_CODE);
+  // ISSUES.md Round 2 finding 6 (2026-08-31) - mirrors
+  // wizard_retrofit_draft.CONTEXT_AVAILABILITY_POLICIES/
+  // DEFAULT_CONTEXT_AVAILABILITY exactly; kept in this fixed order so "ask"
+  // (the recommended default) is always the first/default <option>.
+  var CONTEXT_AVAILABILITY_POLICIES = ["ask", "required", "optional"];
 
   var retrofitCurrentPath = ".";
+  // ISSUES.md Round 2 finding 7 (2026-08-31): null (the default) means "browse
+  // repo_root", exactly today's only behavior. Once set (via the
+  // #retrofit-external-root-panel "Browse external directory" button) it's an
+  // absolute path threaded as external_root/target_root into every
+  // picker/inventory/select call below - the server re-validates and
+  // canonicalizes it on every request, so this is always overwritten with
+  // that canonical value on the first successful response rather than kept
+  // as whatever the human originally typed.
+  var retrofitExternalRoot = null;
   // Last GET /api/retrofit/state response - the durable source of truth for
   // what's staged, refreshed at the top of every loadRetrofitInventory() and
   // updated in place after every select/draft/draft-override so a re-render
@@ -876,9 +981,145 @@
   // renderRetrofitInventory() call, same as retrofitDraftPanelsByUnitId.
   var retrofitSelectDraftControls = [];
 
+  // ISSUES.md Round 2 finding 8 (2026-08-31): search/filter/group state for
+  // the retrofit inventory list. Reset to these defaults every time
+  // loadRetrofitInventory() runs a fresh scan - same "no stale state carries
+  // over" lifecycle as retrofitInventoryReviewed above, just extended to a
+  // second trigger (changing a filter) per the Recommendation text: "The
+  // confirmation gate should summarize the currently filtered selection
+  // rather than ask for a global acknowledgement of every discovered unit."
+  // canonicalOnly defaults to true - "canonical-only default view" is the
+  // Recommendation's first ask.
+  function defaultRetrofitFilters() {
+    return {
+      search: "",
+      canonicalOnly: true,
+      codeOnly: false,
+      taskOnly: false,
+      directory: null,
+    };
+  }
+  var retrofitFilters = defaultRetrofitFilters();
+  // One entry per rendered row: {unit, row, matchText}. Populated fresh in
+  // renderRetrofitInventory(), consumed by applyRetrofitFilters() to decide
+  // which rows to hide - kept separate from retrofitSelectDraftControls
+  // because that array is keyed by *control*, this one by *row*, and a row
+  // can be hidden without touching its controls' disabled state directly
+  // (applyRetrofitReviewGate() does that part, driven off the same rows).
+  var retrofitUnitRows = [];
+  // Last result.directory_counts seen, kept only so the "Clear directory
+  // filter" button can re-render the chip bar (to un-highlight the
+  // previously-active chip) without needing its own reference to the
+  // current inventory result.
+  var retrofitLastDirectoryCounts = [];
+
   function applyRetrofitReviewGate() {
-    retrofitSelectDraftControls.forEach(function (control) {
-      control.disabled = !retrofitInventoryReviewed;
+    retrofitSelectDraftControls.forEach(function (entry) {
+      // A control on a row the current filters are hiding stays disabled
+      // regardless of the reviewed checkbox - reviewing "the currently
+      // filtered selection" (per ISSUES.md finding 8) can't approve rows
+      // the reviewer can't currently see.
+      var rowHidden = entry.row.classList.contains("retrofit-row-hidden");
+      entry.control.disabled = rowHidden || !retrofitInventoryReviewed;
+    });
+  }
+
+  function retrofitUnitMatchesFilters(entry) {
+    var unit = entry.unit;
+    var f = retrofitFilters;
+    if (f.canonicalOnly && unit.tier !== "canonical") {
+      return false;
+    }
+    if (f.codeOnly && !unit.code_related) {
+      return false;
+    }
+    if (f.taskOnly && !unit.task_related) {
+      return false;
+    }
+    if (f.directory !== null && unit.source_directory !== f.directory) {
+      return false;
+    }
+    if (f.search) {
+      var needle = f.search.toLowerCase();
+      if (entry.matchText.indexOf(needle) === -1) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Applies retrofitFilters to every row in retrofitUnitRows, updates the
+  // filtered-count / empty-filter-result messaging, and resets the review
+  // gate - a filter change is exactly the "currently filtered selection"
+  // changing underneath a possibly-already-ticked checkbox, so per
+  // ISSUES.md finding 8 that checkbox must not silently keep approving a
+  // different set of units than the one the reviewer looked at.
+  function applyRetrofitFilters() {
+    var visibleCount = 0;
+    retrofitUnitRows.forEach(function (entry) {
+      var matches = retrofitUnitMatchesFilters(entry);
+      entry.row.classList.toggle("retrofit-row-hidden", !matches);
+      if (matches) {
+        visibleCount += 1;
+      }
+    });
+
+    var countEl = document.getElementById("retrofit-filter-count");
+    if (countEl) {
+      countEl.textContent = visibleCount + " of " + retrofitUnitRows.length + " units shown";
+    }
+    var emptyMessage = document.getElementById("retrofit-filter-empty-message");
+    if (emptyMessage) {
+      emptyMessage.style.display = visibleCount === 0 && retrofitUnitRows.length > 0 ? "" : "none";
+    }
+    var reviewText = document.getElementById("retrofit-review-gate-text");
+    if (reviewText) {
+      reviewText.textContent =
+        "I have reviewed the " +
+        visibleCount +
+        " currently filtered unit" +
+        (visibleCount === 1 ? "" : "s") +
+        ", including which are flagged supplementary and why.";
+    }
+    var clearDirectoryBtn = document.getElementById("retrofit-filter-clear-directory");
+    if (clearDirectoryBtn) {
+      clearDirectoryBtn.style.display = retrofitFilters.directory === null ? "none" : "";
+    }
+
+    // Every filter change re-scopes "the currently filtered selection", so
+    // any prior approval is stale - same reasoning loadRetrofitInventory()
+    // already applies to a fresh target scan.
+    retrofitInventoryReviewed = false;
+    var reviewCheckbox = document.getElementById("retrofit-inventory-reviewed");
+    if (reviewCheckbox) {
+      reviewCheckbox.checked = false;
+    }
+    applyRetrofitReviewGate();
+  }
+
+  // Renders the directory chips from result.directory_counts. Each chip is
+  // clickable to set retrofitFilters.directory - a second, independent way
+  // to narrow the list beyond the search/canonical/code/task controls,
+  // matching the Recommendation's "grouped counts by source directory"
+  // alongside (not instead of) search and canonical/code/task filters.
+  function renderRetrofitDirectorySummary(directoryCounts) {
+    var container = document.getElementById("retrofit-directory-summary");
+    if (!container) {
+      return;
+    }
+    container.innerHTML = "";
+    directoryCounts.forEach(function (bucket) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "retrofit-directory-chip";
+      chip.textContent = bucket.directory + " (" + bucket.total + ", " + bucket.canonical + " canonical)";
+      chip.setAttribute("aria-pressed", String(retrofitFilters.directory === bucket.directory));
+      chip.addEventListener("click", function () {
+        retrofitFilters.directory = retrofitFilters.directory === bucket.directory ? null : bucket.directory;
+        renderRetrofitDirectorySummary(directoryCounts);
+        applyRetrofitFilters();
+      });
+      container.appendChild(chip);
     });
   }
 
@@ -901,8 +1142,41 @@
     updateActiveNav();
   }
 
+  // ISSUES.md Round 2 finding 7: reflects retrofitExternalRoot into the
+  // status line, warning banner, and "Use this repo instead" button - one
+  // place so loadRetrofitPicker's success/failure branches and the clear
+  // button can't drift apart on what the human sees.
+  function setRetrofitExternalRootUi(state) {
+    var status = document.getElementById("retrofit-external-root-status");
+    var warning = document.getElementById("retrofit-external-root-warning");
+    var warningPath = document.getElementById("retrofit-external-root-warning-path");
+    var clearButton = document.getElementById("retrofit-external-root-clear");
+    if (!state) {
+      status.textContent = "";
+      status.classList.remove("error");
+      warning.style.display = "none";
+      clearButton.style.display = "none";
+      return;
+    }
+    if (state.error) {
+      status.textContent = state.error;
+      status.classList.add("error");
+      warning.style.display = "none";
+      return;
+    }
+    status.textContent = "Browsing: " + state.path;
+    status.classList.remove("error");
+    warningPath.textContent = state.path;
+    warning.style.display = "";
+    clearButton.style.display = "";
+  }
+
   function loadRetrofitPicker(relPath) {
-    fetchJson("/api/picker?path=" + encodeURIComponent(relPath)).then(function (result) {
+    var query = "path=" + encodeURIComponent(relPath);
+    if (retrofitExternalRoot) {
+      query += "&external_root=" + encodeURIComponent(retrofitExternalRoot);
+    }
+    fetchJson("/api/picker?" + query).then(function (result) {
       var pathLabel = document.getElementById("retrofit-picker-current-path");
       var upButton = document.getElementById("retrofit-picker-up");
       var list = document.getElementById("retrofit-picker-entries");
@@ -914,11 +1188,30 @@
         list.appendChild(
           el("li", { text: (result.body && result.body.error) || "Could not list this directory." })
         );
+        if (retrofitExternalRoot) {
+          // The typed path didn't resolve - drop it rather than keep
+          // re-sending an external_root the server already rejected. The
+          // input field itself is left alone so the human can fix and retry.
+          retrofitExternalRoot = null;
+          setRetrofitExternalRootUi({
+            error: (result.body && result.body.error) || "Could not resolve that directory.",
+          });
+        }
         return;
       }
 
       var data = result.body;
       retrofitCurrentPath = data.rel_path;
+      if (retrofitExternalRoot) {
+        // Adopt the server's own canonicalized copy (see
+        // wizard_containment.resolve_external_target) so later calls send
+        // back exactly what was already validated, not whatever variant was
+        // originally typed.
+        retrofitExternalRoot = data.target_root || retrofitExternalRoot;
+        setRetrofitExternalRootUi({ path: retrofitExternalRoot });
+      } else {
+        setRetrofitExternalRootUi(null);
+      }
       pathLabel.textContent = data.rel_path;
       upButton.disabled = data.parent_rel_path === null;
       upButton.onclick = function () {
@@ -1114,7 +1407,10 @@
     // applyRetrofitReviewGate) - registered here, the draft button below
     // registers itself the same way once it exists.
     includeCheckbox.disabled = !retrofitInventoryReviewed;
-    retrofitSelectDraftControls.push(includeCheckbox);
+    // ISSUES.md Round 2 finding 8 (2026-08-31): paired with `details` (the
+    // row) so applyRetrofitReviewGate() can also account for filter-hidden
+    // rows, not just the reviewed checkbox - see that function's comment.
+    retrofitSelectDraftControls.push({ control: includeCheckbox, row: details });
 
     // Step 5's exactly-two-shapes reference resolution: same-repo (this
     // wizard computes a relative-path default, always editable) or
@@ -1138,6 +1434,26 @@
     }
     modeWrap.appendChild(sameRepoLabel);
     modeWrap.appendChild(pluginLabel);
+    // ISSUES.md Round 2 finding 7 (2026-08-31): same-repo mode's relative
+    // path is meaningless once the target is outside the repo (the server
+    // refuses it - see wizard_retrofit_draft.py's _is_external_root check),
+    // so plugin-qualified is forced here rather than left to fail later at
+    // draft time. Read once per row: this inventory was itself scanned
+    // against whatever retrofitExternalRoot was set at load time, so it
+    // can't change out from under an already-rendered row.
+    if (retrofitExternalRoot) {
+      sameRepoRadio.checked = false;
+      sameRepoRadio.disabled = true;
+      pluginRadio.checked = true;
+      modeWrap.appendChild(
+        el("p", {
+          class: "retrofit-reference-mode-note",
+          text:
+            "Same-repo reference mode is unavailable: this unit's target is " +
+            "outside the repo, so contract references must be plugin-qualified.",
+        })
+      );
+    }
     body.appendChild(modeWrap);
 
     var preChecked = {};
@@ -1184,6 +1500,36 @@
     });
     body.appendChild(contractsWrap);
 
+    // ISSUES.md Round 2 finding 6 (2026-08-31): per-skill context-availability
+    // policy, only meaningful for CONSUMING-CONTEXT-PACKAGE.md (the other two
+    // contracts' templates ignore the {context_availability} placeholder -
+    // see wizard_retrofit_draft.py's _TEMPLATE_SENTENCES) but shown for any
+    // selection so a human sets it once here rather than needing to already
+    // know that dependency. Defaults to "ask" (CONTEXT_AVAILABILITY_POLICIES'
+    // recommended default), matching the server's own default when the field
+    // is never supplied at all.
+    var availabilityWrap = el("div", { class: "retrofit-context-availability" });
+    var availabilityLabel = el("label", { class: "retrofit-context-availability-label" });
+    availabilityLabel.appendChild(document.createTextNode("Context-availability policy: "));
+    var availabilitySelect = el("select");
+    CONTEXT_AVAILABILITY_POLICIES.forEach(function (policy) {
+      var option = el("option", { value: policy, text: policy });
+      availabilitySelect.appendChild(option);
+    });
+    availabilitySelect.value =
+      (priorEntry && priorEntry.context_availability) || "ask";
+    availabilityLabel.appendChild(availabilitySelect);
+    availabilityWrap.appendChild(availabilityLabel);
+    availabilityWrap.appendChild(
+      el("p", {
+        class: "retrofit-context-availability-hint",
+        text:
+          "Applies to CONSUMING-CONTEXT-PACKAGE.md: what the retrofitted " +
+          "skill does when no approved context package is found.",
+      })
+    );
+    body.appendChild(availabilityWrap);
+
     // Prefills empty same-repo reference fields with the detected default -
     // never overwrites a field a human already typed or a prior save
     // already recorded (the `!row.refInput.value` guard).
@@ -1214,15 +1560,24 @@
       });
       var referenceMode = pluginRadio.checked ? "plugin" : "same-repo";
 
-      draftMessage.textContent = "Saving…";
-      postJson("/api/retrofit/select", {
+      var selectPayload = {
         unit_id: unit.unit_id,
         primary_file: unit.primary_file,
         include: includeCheckbox.checked,
         contracts: contracts,
         reference_mode: referenceMode,
         reference_args: referenceArgs,
-      }).then(function (selectResult) {
+        context_availability: availabilitySelect.value,
+      };
+      // ISSUES.md Round 2 finding 7: re-sent (and re-validated server-side)
+      // on every select, not just the first - retrofitExternalRoot may have
+      // been re-canonicalized since this unit's inventory was first scanned.
+      if (retrofitExternalRoot) {
+        selectPayload.target_root = retrofitExternalRoot;
+      }
+
+      draftMessage.textContent = "Saving…";
+      postJson("/api/retrofit/select", selectPayload).then(function (selectResult) {
         if (!selectResult.ok) {
           draftMessage.textContent =
             (selectResult.body && selectResult.body.error) || "Could not save selection.";
@@ -1254,7 +1609,7 @@
     // Review gate: this row's "draft" control, same starting-disabled
     // treatment as includeCheckbox above.
     draftButton.disabled = !retrofitInventoryReviewed;
-    retrofitSelectDraftControls.push(draftButton);
+    retrofitSelectDraftControls.push({ control: draftButton, row: details });
 
     body.appendChild(draftButton);
     body.appendChild(draftMessage);
@@ -1468,7 +1823,8 @@
 
   function renderRetrofitInventory(result) {
     document.getElementById("retrofit-inventory-target").textContent =
-      "Target: " + result.target_rel_path;
+      "Target: " + result.target_rel_path +
+      (result.target_root ? "  (external: " + result.target_root + ")" : "");
 
     // tier_counts header line, sourced straight from the server's own
     // recount (see wizard_retrofit_inventory.py's tier_counts comment) so it
@@ -1497,6 +1853,13 @@
       );
     });
 
+    // ISSUES.md Round 2 finding 8 (2026-08-31): directory chips, sourced
+    // from the server's own recount (same reasoning as tier_counts above -
+    // never re-derived client-side, so it can't drift from what filtering
+    // by directory actually shows).
+    retrofitLastDirectoryCounts = result.directory_counts || [];
+    renderRetrofitDirectorySummary(retrofitLastDirectoryCounts);
+
     var unitsList = document.getElementById("retrofit-units-list");
     unitsList.innerHTML = "";
     // Every existing row is about to be discarded - drop the stale handles
@@ -1507,15 +1870,26 @@
     // applyRetrofitReviewGate/loadRetrofitInventory for the reset of
     // retrofitInventoryReviewed itself.
     retrofitSelectDraftControls = [];
+    retrofitUnitRows = [];
     if (result.units.length === 0) {
       unitsList.appendChild(
         el("li", { class: "retrofit-units-empty", text: "No candidate skill units found here." })
       );
+      applyRetrofitFilters();
       return;
     }
     result.units.forEach(function (unit) {
-      unitsList.appendChild(renderRetrofitUnitRow(unit));
+      var row = renderRetrofitUnitRow(unit);
+      unitsList.appendChild(row);
+      // Search matches name and both path fields - lower-cased once here
+      // rather than per-keystroke in retrofitUnitMatchesFilters().
+      var matchText = [unit.name, unit.path, unit.primary_file, unit.unit_id]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      retrofitUnitRows.push({ unit: unit, row: row, matchText: matchText });
     });
+    applyRetrofitFilters();
   }
 
   function setRetrofitInventoryMessage(text, isError) {
@@ -1537,8 +1911,21 @@
     // retrofitBatchExcludedUnitIds above.
     retrofitInventoryReviewed = false;
     document.getElementById("retrofit-inventory-reviewed").checked = false;
+    // ISSUES.md Round 2 finding 8 (2026-08-31): a fresh scan of a (possibly
+    // different) target also starts with fresh filters - a directory or
+    // search term chosen for the previous target has no meaning here, same
+    // "no carry-over" reasoning as retrofitInventoryReviewed above.
+    retrofitFilters = defaultRetrofitFilters();
+    document.getElementById("retrofit-filter-search").value = "";
+    document.getElementById("retrofit-filter-canonical-only").checked = true;
+    document.getElementById("retrofit-filter-code").checked = false;
+    document.getElementById("retrofit-filter-task").checked = false;
     loadRetrofitState().then(function () {
-      fetchJson("/api/retrofit/inventory?target=" + encodeURIComponent(targetRelPath)).then(
+      var query = "target=" + encodeURIComponent(targetRelPath);
+      if (retrofitExternalRoot) {
+        query += "&external_root=" + encodeURIComponent(retrofitExternalRoot);
+      }
+      fetchJson("/api/retrofit/inventory?" + query).then(
         function (result) {
           if (!result.ok) {
             setRetrofitInventoryMessage(
@@ -1570,7 +1957,17 @@
       navigateDocs({ kind: "doc", id: "readme" });
     });
     document.getElementById("nav-doc-case-studies").addEventListener("click", function () {
-      navigateDocs({ kind: "doc", id: "case-studies-readme" });
+      var haveLocal = docsList.some(function (d) {
+        return d.id === "case-studies-readme";
+      });
+      if (haveLocal) {
+        navigateDocs({ kind: "doc", id: "case-studies-readme" });
+      } else if (caseStudiesExternalUrl) {
+        // rel="noopener" equivalent for window.open: omit the opener window
+        // reference so the newly-opened GitHub tab can't reach back into
+        // this wizard page.
+        window.open(caseStudiesExternalUrl, "_blank", "noopener");
+      }
     });
     document.getElementById("nav-doc-faq").addEventListener("click", function () {
       navigateDocs({ kind: "doc", id: "faq" });
@@ -1591,9 +1988,61 @@
     document.getElementById("retrofit-picker-use-dir").addEventListener("click", function () {
       loadRetrofitInventory(retrofitCurrentPath);
     });
+    // ISSUES.md Round 2 finding 7 (2026-08-31): "Browse" sets
+    // retrofitExternalRoot and re-roots the picker there; loadRetrofitPicker
+    // itself handles both the success case (adopts the server's
+    // canonicalized path) and the failure case (drops it, shows the error).
+    document.getElementById("retrofit-external-root-browse").addEventListener("click", function () {
+      var input = document.getElementById("retrofit-external-root-input");
+      var value = input.value.trim();
+      if (!value) {
+        setRetrofitExternalRootUi({ error: "Enter an absolute path first." });
+        return;
+      }
+      retrofitExternalRoot = value;
+      retrofitCurrentPath = ".";
+      loadRetrofitPicker(".");
+    });
+    document.getElementById("retrofit-external-root-input").addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        document.getElementById("retrofit-external-root-browse").click();
+      }
+    });
+    document.getElementById("retrofit-external-root-clear").addEventListener("click", function () {
+      retrofitExternalRoot = null;
+      retrofitCurrentPath = ".";
+      document.getElementById("retrofit-external-root-input").value = "";
+      setRetrofitExternalRootUi(null);
+      loadRetrofitPicker(".");
+    });
     document.getElementById("retrofit-inventory-reviewed").addEventListener("change", function (event) {
       retrofitInventoryReviewed = event.target.checked;
       applyRetrofitReviewGate();
+    });
+    // ISSUES.md Round 2 finding 8 (2026-08-31): filter bar controls. Each
+    // one just mutates retrofitFilters and re-runs applyRetrofitFilters(),
+    // which resets the review gate itself - see that function's comment.
+    document.getElementById("retrofit-filter-search").addEventListener("input", function (event) {
+      retrofitFilters.search = event.target.value || "";
+      applyRetrofitFilters();
+    });
+    document.getElementById("retrofit-filter-canonical-only").addEventListener("change", function (event) {
+      retrofitFilters.canonicalOnly = event.target.checked;
+      applyRetrofitFilters();
+    });
+    document.getElementById("retrofit-filter-code").addEventListener("change", function (event) {
+      retrofitFilters.codeOnly = event.target.checked;
+      applyRetrofitFilters();
+    });
+    document.getElementById("retrofit-filter-task").addEventListener("change", function (event) {
+      retrofitFilters.taskOnly = event.target.checked;
+      applyRetrofitFilters();
+    });
+    document.getElementById("retrofit-filter-clear-directory").addEventListener("click", function () {
+      retrofitFilters.directory = null;
+      renderRetrofitDirectorySummary(retrofitLastDirectoryCounts);
+      applyRetrofitFilters();
     });
     document.getElementById("retrofit-batch-apply-button").addEventListener("click", function () {
       applyRetrofitBatch();
@@ -1621,6 +2070,39 @@
         id: link.dataset.docId,
         fragment: link.dataset.docFragment || null,
       });
+    });
+
+    document.getElementById("init-preview-button").addEventListener("click", function () {
+      setInitMessage("");
+      postJson("/api/init/preview", { workspace_root: readWorkspaceRootInput() }).then(function (result) {
+        if (!result.ok) {
+          renderInitPreviewMessages([]);
+          setInitMessage((result.body && result.body.error) || "Preview failed.", true);
+          return;
+        }
+        renderInitPreviewMessages(result.body.messages);
+      });
+    });
+
+    document.getElementById("init-run-button").addEventListener("click", function () {
+      setInitMessage("Initializing…");
+      postJson("/api/init", { workspace_root: readWorkspaceRootInput() }).then(function (result) {
+        if (!result.ok) {
+          setInitMessage((result.body && result.body.error) || "Initialize failed.", true);
+          return;
+        }
+        renderInitPreviewMessages(result.body.messages);
+        setInitMessage("Initialized.");
+        // d20_initialized is now true, so the next loadState() naturally
+        // stops offering this again (workspace_root_offer_eligible flips to
+        // false server-side) and switches the intro to brownfield copy.
+        loadState();
+      });
+    });
+
+    document.getElementById("init-skip-button").addEventListener("click", function () {
+      initOfferDismissed = true;
+      document.getElementById("needs-discover-init-offer").style.display = "none";
     });
 
     document.getElementById("discover-button").addEventListener("click", function () {

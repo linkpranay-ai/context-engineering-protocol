@@ -379,5 +379,73 @@ class TestApplyBatch(RetrofitApplyTestCase):
         self.assertEqual(by_id["unit-b"].status, "applied")
 
 
+class TestApplyUnitContainmentRoot(RetrofitApplyTestCase):
+    """ISSUES.md Round 2 finding 7 (2026-08-31) - `containment_root` is the
+    root `primary_file` is actually relative to when it differs from
+    repo_root (an external retrofit target)."""
+
+    def setUp(self):
+        super().setUp()
+        self._ext_tmp = tempfile.TemporaryDirectory()
+        self.external_root = Path(self._ext_tmp.name)
+
+    def tearDown(self):
+        self._ext_tmp.cleanup()
+        super().tearDown()
+
+    def test_applies_against_containment_root_not_repo_root(self):
+        target = self.external_root / "widget-reviewer" / "SKILL.md"
+        _write(target, "# Widget Reviewer\n\n## See Also\n\nSome other doc.\n")
+        # Nothing under self.root (repo_root) at this path - only used here
+        # for locating the ult-cep-retrofit engine, per build_draft's own
+        # containment_root contract.
+        draft = wrd.build_draft(
+            str(self.root), "widget-reviewer/SKILL.md", "widget-reviewer",
+            ["CONSUMING-CONTEXT-PACKAGE.md"], "plugin",
+            {"CONSUMING-CONTEXT-PACKAGE.md": "/context-engineering-oss:ult-cep-wizard"},
+            containment_root=str(self.external_root),
+        )
+        unit_input = wra.ApplyUnitInput(
+            unit_id="unit-1",
+            primary_file="widget-reviewer/SKILL.md",
+            insertion_point=draft.insertion_point,
+            draft_text=draft.draft_text,
+            contracts_included=draft.contracts_included,
+            target_file_hash=draft.target_file_hash,
+            containment_root=str(self.external_root),
+        )
+
+        result = wra.apply_unit(str(self.root), unit_input)
+
+        self.assertEqual(result.status, "applied")
+        new_text = target.read_text(encoding="utf-8")
+        self.assertIn("CONSUMING-CONTEXT-PACKAGE.md", new_text)
+
+    def test_containment_root_none_is_the_unchanged_in_repo_default(self):
+        target = self.root / "widget-reviewer" / "SKILL.md"
+        _write(target, "# Widget Reviewer\n\n## See Also\n\nSome other doc.\n")
+        unit_input = self._draft("widget-reviewer/SKILL.md", "widget-reviewer", ["CONSUMING-CONTEXT-PACKAGE.md"])
+        self.assertIsNone(unit_input.containment_root)
+
+        result = wra.apply_unit(str(self.root), unit_input)
+
+        self.assertEqual(result.status, "applied")
+
+    def test_escaping_containment_root_is_a_failed_result_not_an_exception(self):
+        unit_input = wra.ApplyUnitInput(
+            unit_id="unit-1",
+            primary_file="../escaped/SKILL.md",
+            insertion_point={"line": 0, "method": "top"},
+            draft_text="some text",
+            contracts_included=["CONSUMING-CONTEXT-PACKAGE.md"],
+            target_file_hash=None,
+            containment_root=str(self.external_root),
+        )
+
+        result = wra.apply_unit(str(self.root), unit_input)
+
+        self.assertEqual(result.status, "failed")
+
+
 if __name__ == "__main__":
     unittest.main()

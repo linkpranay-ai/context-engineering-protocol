@@ -8,11 +8,13 @@ skill's script rather than shelling out, so `recommend()`'s embedded-double-quot
 PowerShell-mangling bug (see cep_retrofit.py's own docstring) never has a shell in
 the path to trigger it in the first place.
 
-Containment: the retrofit target must be a subdirectory of ctx.repo_root (Journey 3
-plan's v1 scope decision - see the plan file's "no LLM in the loop" / "in-repo-only
-target" section). `wizard_containment.check_containment` is reused directly, same as
-wizard_picker.py and wizard_decision_staging.py, rather than opening a new, less-
-constrained path input.
+Containment: the retrofit target must be a subdirectory of ctx.repo_root, OR (ISSUES.md
+Round 2 finding 7, 2026-08-31 - "Retrofit wizard cannot operate on sibling or
+standalone skill library") a subdirectory of a separately-validated external root
+(`wizard_containment.resolve_external_target`), when the caller passes one via
+`external_root`. Either way `wizard_containment.check_containment` is reused directly,
+same as wizard_picker.py and wizard_decision_staging.py, rather than opening a new,
+less-constrained path input - only *which* root it checks against changes.
 
 One HTTP round-trip, not N: `build_inventory()` batches inventory() + describe() +
 recommend() for every discovered unit into one RetrofitInventoryResult, so the
@@ -28,7 +30,7 @@ import importlib
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wizard_containment as wc  # noqa: E402
@@ -81,11 +83,22 @@ class RetrofitUnit:
     matched_code_terms: List[str] = field(default_factory=list)
     matched_task_terms: List[str] = field(default_factory=list)
     describe_error: str = ""  # non-empty only when describe()/recommend() failed
+    # ISSUES.md Round 2 finding 8 (2026-08-31): first path segment of this
+    # unit's *target*-relative path (before the _repo_rel() rewrite below) -
+    # "skills/foo" (a skill-dir) and "skills/foo/SKILL.md" (its primary_file)
+    # both group under "skills", so this buckets by "which immediate child of
+    # the retrofit target this unit came from" regardless of unit type. Set
+    # once in build_inventory() and reused for both this field and
+    # RetrofitInventoryResult.directory_counts below, so the frontend's
+    # directory filter buttons and the counts rendered above them can never
+    # drift apart - one computation, two consumers, not two independent ones.
+    source_directory: str = ""
 
 
 @dataclass
 class RetrofitInventoryResult:
     target_rel_path: str  # retrofit target, relative to ctx.repo_root, POSIX-style
+    # (or relative to target_root below, when that's set - see its comment)
     units: List[RetrofitUnit] = field(default_factory=list)
     unclaimed_dirs: List[str] = field(default_factory=list)
     # Paths cep_retrofit.inventory() pruned because the target's
@@ -94,6 +107,22 @@ class RetrofitInventoryResult:
     # _repo_rel() note in build_inventory()).
     excluded_owned_paths: List[str] = field(default_factory=list)
     tier_counts: dict = field(default_factory=dict)  # {"canonical": N, "supplementary": M}
+    # ISSUES.md Round 2 finding 8 (2026-08-31): "grouped counts by source
+    # directory" - one entry per distinct RetrofitUnit.source_directory,
+    # sorted by total descending then name ascending so the frontend can
+    # render it directly with no re-sorting of its own. A list, not a dict,
+    # so the wizard can render it in a stable, meaningful order rather than
+    # whatever order a dict-of-counts happens to iterate in.
+    directory_counts: List[dict] = field(default_factory=list)
+    # ISSUES.md Round 2 finding 7 (2026-08-31): absolute path of an external
+    # (outside ctx.repo_root) retrofit target root, already validated via
+    # wizard_containment.resolve_external_target - None for the ordinary
+    # in-repo case (unchanged default, fully backward compatible). When set,
+    # target_rel_path and every unit's path/primary_file are relative to
+    # *this* root instead of ctx.repo_root - every downstream consumer
+    # (RETROFIT-STATE.json, build_draft, apply_batch) must resolve them
+    # against target_root when present, ctx.repo_root otherwise.
+    target_root: Optional[str] = None
 
 
 def _flag_stray_duplicate_flat_files(raw_units: list, double_suffix: str = ".prompt.md") -> list:
@@ -170,17 +199,36 @@ def _flag_stray_duplicate_flat_files(raw_units: list, double_suffix: str = ".pro
     return raw_units
 
 
-def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
-    """Containment-checks `target_rel_path` against `repo_root` (v1 in-repo-only
-    scope), then runs cep_retrofit's inventory()/describe()/recommend() against
-    every discovered unit and returns one batched result.
+def build_inventory(
+    repo_root, target_rel_path: str, external_root: Optional[str] = None
+) -> RetrofitInventoryResult:
+    """Containment-checks `target_rel_path` against `repo_root` (v1 in-repo
+    scope) or, when `external_root` is given, against that root instead
+    (ISSUES.md Round 2 finding 7, 2026-08-31 - "Retrofit wizard cannot operate
+    on sibling or standalone skill library"), then runs cep_retrofit's
+    inventory()/describe()/recommend() against every discovered unit and
+    returns one batched result.
+
+    `external_root` must already be an absolute path validated by the caller
+    via `wizard_containment.resolve_external_target(repo_root, ...)` - this
+    function does not re-derive or re-validate it, only uses it as the
+    containment root for `target_rel_path` and as the base every unit's
+    path/primary_file is made relative to. `repo_root` is still used
+    regardless of `external_root` for exactly one thing: locating
+    ult-cep-retrofit's own cep_retrofit.py engine, which is always a
+    CEP-project asset under `repo_root`, never part of the target being
+    retrofitted (see module docstring). The resolved result's `target_root`
+    carries `external_root` back to the caller unchanged (None for the
+    in-repo case), so downstream consumers know which root to resolve
+    path/primary_file against.
 
     A single unit failing describe() (e.g. a race-deleted file, an unreadable
     primary_file) does not abort the whole inventory - that unit is still included,
     with `describe_error` set and the rest of its fields at their empty defaults,
     so the frontend can surface it rather than silently dropping it."""
+    containment_root = external_root if external_root else repo_root
     try:
-        target = wc.check_containment(repo_root, target_rel_path)
+        target = wc.check_containment(containment_root, target_rel_path)
     except wc.ContainmentError as exc:
         raise RetrofitInventoryError(str(exc)) from exc
 
@@ -196,16 +244,17 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
 
     # cep_retrofit.inventory() returns path/primary_file relative to `target`
     # (the directory it was pointed at). Every downstream consumer of a unit
-    # (POST /api/retrofit/select's check_containment(repo_root, primary_file),
+    # (POST /api/retrofit/select's check_containment(containment_root, primary_file),
     # wizard_retrofit_draft.build_draft(), wizard_retrofit_apply.apply_batch())
-    # instead treats primary_file as relative to repo_root - the same
+    # instead treats primary_file as relative to containment_root - the same
     # convention wizard_picker.py's rel_path already uses everywhere else in
     # this wizard. So every unit's path/primary_file is rewritten here, once,
-    # to be repo_root-relative before it ever reaches the frontend, rather
-    # than leaving each downstream caller to reconstruct target_rel_path +
-    # primary_file itself. Computed up front (not after the loop, as this used
-    # to be written) since the loop below needs it for every unit.
-    target_rel = target.relative_to(Path(repo_root).resolve()).as_posix()
+    # to be containment_root-relative before it ever reaches the frontend,
+    # rather than leaving each downstream caller to reconstruct
+    # target_rel_path + primary_file itself. Computed up front (not after the
+    # loop, as this used to be written) since the loop below needs it for
+    # every unit.
+    target_rel = target.relative_to(Path(containment_root).resolve()).as_posix()
 
     def _repo_rel(child_rel: str) -> str:
         if target_rel == ".":
@@ -214,6 +263,10 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
 
     units: List[RetrofitUnit] = []
     for raw_unit in _flag_stray_duplicate_flat_files(raw["units"], cr._FLAT_FILE_DOUBLE_SUFFIX):
+        # Computed from the *target*-relative path, before _repo_rel() below
+        # prefixes it with target_rel - see RetrofitUnit.source_directory's
+        # own comment for why this is the bucketing key.
+        source_directory = raw_unit["path"].split("/", 1)[0]
         unit = RetrofitUnit(
             unit_id=raw_unit["unit_id"],
             type=raw_unit["type"],
@@ -223,6 +276,7 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
             real_path=raw_unit["real_path"],
             tier=raw_unit.get("tier", ""),
             note=raw_unit.get("note", ""),
+            source_directory=source_directory,
         )
         # describe() still needs the original target-relative value, since it
         # reads straight off disk via `target`, not repo_root.
@@ -250,6 +304,29 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
         if unit.tier:
             tier_counts[unit.tier] = tier_counts.get(unit.tier, 0) + 1
 
+    # ISSUES.md Round 2 finding 8 (2026-08-31): "grouped counts by source
+    # directory" - one bucket per distinct unit.source_directory, each with
+    # its own total/canonical/supplementary breakdown so the frontend's
+    # directory chips can show e.g. "skills (12, 9 canonical)" without
+    # re-deriving anything from the unit list itself.
+    directory_buckets: dict = {}
+    for unit in units:
+        bucket = directory_buckets.setdefault(
+            unit.source_directory,
+            {"directory": unit.source_directory, "total": 0, "canonical": 0, "supplementary": 0},
+        )
+        bucket["total"] += 1
+        if unit.tier == "canonical":
+            bucket["canonical"] += 1
+        elif unit.tier == "supplementary":
+            bucket["supplementary"] += 1
+    # Sorted by total descending then name ascending, per the comment on
+    # RetrofitInventoryResult.directory_counts, so the frontend renders this
+    # directly with no re-sorting of its own.
+    directory_counts = sorted(
+        directory_buckets.values(), key=lambda b: (-b["total"], b["directory"])
+    )
+
     return RetrofitInventoryResult(
         target_rel_path=target_rel,
         units=units,
@@ -259,6 +336,8 @@ def build_inventory(repo_root, target_rel_path: str) -> RetrofitInventoryResult:
         # only those are consumed downstream as repo-root paths.
         excluded_owned_paths=raw["excluded_owned_paths"],
         tier_counts=tier_counts,
+        directory_counts=directory_counts,
+        target_root=external_root,
     )
 
 

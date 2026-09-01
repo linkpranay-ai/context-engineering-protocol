@@ -60,9 +60,23 @@ CONTRACT_ORDER = (
 )
 
 _TEMPLATE_SENTENCES = {
+    # ISSUES.md Round 2 finding 6 (2026-08-31): the retrofit-inserted pointer
+    # used to only say "if a package exists, see `{ref}`" - silent on what
+    # happens when one *doesn't* exist, which is exactly the gap the finding
+    # flagged (a task skill quietly proceeding ungrounded with only an
+    # end-of-work disclosure). The extra sentence below makes the selected
+    # context_availability policy visible in the retrofitted skill file
+    # itself, not just in this module's own default - see
+    # CONSUMING-CONTEXT-PACKAGE.md's "Context-availability policy" callout
+    # for what each policy value means and CONTEXT_AVAILABILITY_POLICIES
+    # below for the enforced set of valid values.
     "CONSUMING-CONTEXT-PACKAGE.md": (
         "If a CEP context package exists for this work, see `{ref}` for how "
-        "to detect, load, and apply it before proceeding."
+        "to detect, load, and apply it before proceeding. "
+        "**Context-availability policy: `{context_availability}`** — if no "
+        "approved matching package is found, follow `{ref}`'s "
+        "\"Context-availability policy\" callout for the `{context_availability}` "
+        "branch before proceeding with the work."
     ),
     "CONSUMING-COMPILED-GUIDELINES.md": (
         "If compiled project guidelines exist for this codebase, see `{ref}` "
@@ -74,6 +88,16 @@ _TEMPLATE_SENTENCES = {
         "changes."
     ),
 }
+
+# ISSUES.md Round 2 finding 6 (2026-08-31): the three context-availability
+# policies CONSUMING-CONTEXT-PACKAGE.md's step 1 "Not found" branch now
+# recognizes. "ask" is the recommended default for implementation, design,
+# planning, review, and debugging skills - matches this module's own
+# DEFAULT_CONTEXT_AVAILABILITY below, so a retrofit that never sets the
+# field explicitly still gets the safer, non-silent behavior rather than
+# reverting to the old always-proceed-silently gap.
+CONTEXT_AVAILABILITY_POLICIES = ("ask", "required", "optional")
+DEFAULT_CONTEXT_AVAILABILITY = "ask"
 
 # Purpose-scoped ignore list for detect_contract_locations()'s walk only,
 # following this repo's convention of each filesystem-scanning helper
@@ -120,6 +144,19 @@ def detect_contract_locations(repo_root) -> Dict[str, Optional[str]]:
     return found
 
 
+def _is_external_root(repo_root, containment_root) -> bool:
+    """True only when `containment_root` names a root genuinely different
+    from `repo_root` (ISSUES.md Round 2 finding 7, 2026-08-31). None or an
+    equal/unresolvable-to-equal root is treated as "in-repo" - the ordinary,
+    unchanged case every existing caller and test already exercises."""
+    if not containment_root:
+        return False
+    try:
+        return Path(containment_root).resolve() != Path(repo_root).resolve()
+    except OSError:
+        return True
+
+
 def resolve_reference(
     repo_root,
     unit_dir_rel_path: str,
@@ -128,6 +165,7 @@ def resolve_reference(
     *,
     same_repo_contract_rel_path: Optional[str] = None,
     plugin_qualifier: Optional[str] = None,
+    containment_root: Optional[str] = None,
 ) -> str:
     """Resolves what string to substitute into the drafted sentence for one
     contract - see module docstring for the two supported modes.
@@ -137,11 +175,32 @@ def resolve_reference(
     compute this once from the unit's `path`, not this function - it has no
     opinion on unit "type"). Raises RetrofitDraftError on any missing or
     malformed argument for the selected mode; never silently falls back to
-    the other mode."""
+    the other mode.
+
+    `containment_root` (ISSUES.md Round 2 finding 7, 2026-08-31) is the root
+    `unit_dir_rel_path` is actually relative to when it differs from
+    `repo_root` - i.e. an external retrofit target
+    (`wizard_containment.resolve_external_target`). same-repo mode is refused
+    outright whenever `containment_root` is genuinely external: the contract
+    doc it points at always lives under `repo_root`, while the unit's own
+    directory lives under an unrelated root, so a relative path between them
+    is either meaningless (different drives) or would require exactly the
+    kind of cross-boundary `..`-escape containment exists to prevent. Only
+    plugin-qualified mode - purely lexical, no filesystem-root dependency -
+    is offered for an external unit, both here and mirrored in the frontend
+    (the same-repo radio is disabled client-side when a unit's target is
+    external)."""
     if contract_filename not in CONTRACT_ORDER:
         raise RetrofitDraftError(f"unknown contract {contract_filename!r}")
 
     if mode == "same-repo":
+        if _is_external_root(repo_root, containment_root):
+            raise RetrofitDraftError(
+                "same-repo reference mode isn't available for an external "
+                "retrofit target - the contract doc lives in this project's "
+                "repo, but this unit lives under a different root. Use "
+                "plugin-qualified reference mode instead."
+            )
         if not same_repo_contract_rel_path or not same_repo_contract_rel_path.strip():
             raise RetrofitDraftError(
                 "same-repo mode requires same_repo_contract_rel_path"
@@ -176,21 +235,44 @@ def resolve_reference(
     )
 
 
-def draft_insertion_text(contracts: List[str], references: Dict[str, str]) -> str:
+def draft_insertion_text(
+    contracts: List[str],
+    references: Dict[str, str],
+    *,
+    context_availability: str = DEFAULT_CONTEXT_AVAILABILITY,
+) -> str:
     """Combined block for every contract in `contracts` (any input order),
     rendered in CONTRACT_ORDER's fixed stable order per SKILL.md Step 6.4,
     one template sentence per contract with its resolved reference
     substituted. Raises RetrofitDraftError if a contract isn't a known
-    CONTRACT_ORDER member or has no entry in `references`."""
+    CONTRACT_ORDER member, has no entry in `references`, or
+    `context_availability` isn't one of CONTEXT_AVAILABILITY_POLICIES.
+
+    `context_availability` is passed to every template's `.format()` call
+    uniformly (ISSUES.md Round 2 finding 6, 2026-08-31) - `str.format()`
+    silently ignores unused named kwargs, so this is safe even though only
+    the CONSUMING-CONTEXT-PACKAGE.md template currently references
+    `{context_availability}`.
+    """
     unknown = [c for c in contracts if c not in CONTRACT_ORDER]
     if unknown:
         raise RetrofitDraftError(f"unknown contract(s): {', '.join(unknown)}")
     missing_ref = [c for c in contracts if c not in references]
     if missing_ref:
         raise RetrofitDraftError(f"no resolved reference for: {', '.join(missing_ref)}")
+    if context_availability not in CONTEXT_AVAILABILITY_POLICIES:
+        raise RetrofitDraftError(
+            f"unknown context_availability {context_availability!r} "
+            f"(expected one of {', '.join(CONTEXT_AVAILABILITY_POLICIES)})"
+        )
 
     ordered = [c for c in CONTRACT_ORDER if c in contracts]
-    sentences = [_TEMPLATE_SENTENCES[c].format(ref=references[c]) for c in ordered]
+    sentences = [
+        _TEMPLATE_SENTENCES[c].format(
+            ref=references[c], context_availability=context_availability
+        )
+        for c in ordered
+    ]
     return "\n\n".join(sentences)
 
 
@@ -255,6 +337,10 @@ class DraftResult:
     target_file_hash: Optional[str]
     context_before: str
     context_after: str
+    # ISSUES.md Round 2 finding 6 (2026-08-31): echoed back so callers/tests
+    # can confirm which policy actually got baked into draft_text, without
+    # re-deriving it from the request.
+    context_availability: str = DEFAULT_CONTEXT_AVAILABILITY
 
 
 def build_draft(
@@ -264,6 +350,9 @@ def build_draft(
     contracts: List[str],
     reference_mode: str,
     reference_args: Dict[str, str],
+    *,
+    context_availability: str = DEFAULT_CONTEXT_AVAILABILITY,
+    containment_root: Optional[str] = None,
 ) -> DraftResult:
     """Orchestrates the full Phase B draft computation for one unit:
 
@@ -282,9 +371,19 @@ def build_draft(
     ult-cep-retrofit install, containment violation, non-file target, or a
     resolve_reference/draft_insertion_text failure - so callers need only
     one except clause.
+
+    `containment_root` (ISSUES.md Round 2 finding 7, 2026-08-31): the root
+    `primary_file_rel_path`/`unit_dir_rel_path` are actually relative to,
+    when it differs from `repo_root` - i.e. an external retrofit target. None
+    (the default) keeps the original in-repo behavior byte-for-byte. Threaded
+    straight through to `resolve_reference` unchanged; see that function's
+    docstring for why same-repo mode is refused when this is genuinely
+    external. `repo_root` itself is still used regardless, for locating
+    ult-cep-retrofit's own engine (see wizard_retrofit_inventory.py's module
+    docstring for the same invariant on the inventory side).
     """
     try:
-        target = wc.check_containment(repo_root, primary_file_rel_path)
+        target = wc.check_containment(containment_root or repo_root, primary_file_rel_path)
     except wc.ContainmentError as exc:
         raise RetrofitDraftError(str(exc)) from exc
     if not target.is_file():
@@ -300,6 +399,12 @@ def build_draft(
     remaining = [c for c in contracts if not already_present.get(c)]
     skipped_idempotent = [c for c in contracts if already_present.get(c)]
 
+    if context_availability not in CONTEXT_AVAILABILITY_POLICIES:
+        raise RetrofitDraftError(
+            f"unknown context_availability {context_availability!r} "
+            f"(expected one of {', '.join(CONTEXT_AVAILABILITY_POLICIES)})"
+        )
+
     if not remaining:
         return DraftResult(
             all_satisfied=True,
@@ -310,6 +415,7 @@ def build_draft(
             target_file_hash=target_file_hash,
             context_before="",
             context_after="",
+            context_availability=context_availability,
         )
 
     try:
@@ -324,11 +430,13 @@ def build_draft(
             references[contract] = resolve_reference(
                 repo_root, unit_dir_rel_path, contract, "same-repo",
                 same_repo_contract_rel_path=ref_value,
+                containment_root=containment_root,
             )
         elif reference_mode == "plugin":
             references[contract] = resolve_reference(
                 repo_root, unit_dir_rel_path, contract, "plugin",
                 plugin_qualifier=ref_value,
+                containment_root=containment_root,
             )
         else:
             raise RetrofitDraftError(
@@ -336,7 +444,9 @@ def build_draft(
                 f"(expected 'same-repo' or 'plugin')"
             )
 
-    draft_text = draft_insertion_text(remaining, references)
+    draft_text = draft_insertion_text(
+        remaining, references, context_availability=context_availability
+    )
     context_before, context_after = _extract_context(target, insertion_point)
 
     return DraftResult(
@@ -348,4 +458,5 @@ def build_draft(
         target_file_hash=target_file_hash,
         context_before=context_before,
         context_after=context_after,
+        context_availability=context_availability,
     )

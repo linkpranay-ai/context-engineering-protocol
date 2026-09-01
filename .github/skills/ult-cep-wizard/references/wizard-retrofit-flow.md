@@ -7,7 +7,7 @@ vendoring or rewriting that library. Journey-3 analogue of
 which together document Journey 1 (brownfield-layout onboarding). Read alongside
 `wizard-security-model.md` §7 (gates every mutating route described here) and
 `wizard-picker-and-boxes.md` (the `GET /api/picker` route this flow's target picker
-reuses unmodified).
+reuses, now with an additional optional `external_root` param — see §1.2).
 
 ## 0. Why this is its own journey, not a fifth onboarding box
 
@@ -28,14 +28,30 @@ entry instead: reachable regardless of onboarding state, with its own state file
    substituted in — never generated text — and the frontend always renders the result into
    an editable textarea (`wizard_retrofit_state.set_draft_override`) so a human supplies
    final wording. The draft is a starting point, never treated as final.
-2. **v1 target must be inside the project repo.** The picker/containment machinery
-   (`wizard_picker.py`/`wizard_containment.py`) is rooted at `ctx.repo_root`;
-   `cep_retrofit.py`'s own Step 1 has no such constraint. Opening the picker to arbitrary
-   absolute paths would be a real containment regression, so v1 requires the retrofit
-   target to be a subdirectory of the project being onboarded (a vendored library, a git
-   submodule, etc.) — an out-of-repo target is a flagged future extension, not built now.
-   This is also what makes same-repo the wizard-computed reference default and
-   plugin-qualified an explicit manual override (§2 below), never auto-detected.
+2. **Target defaults to inside the project repo; an external target is an explicit,
+   separately-validated opt-in (ISSUES.md Round 2 finding 7, 2026-08-31).** The
+   picker/containment machinery (`wizard_picker.py`/`wizard_containment.py`) is rooted at
+   `ctx.repo_root` by default — `cep_retrofit.py`'s own Step 1 has no such constraint, but
+   opening the picker to arbitrary absolute paths with no validation would be a real
+   containment regression. Rather than leave that as a permanent same-repo-only limit, the
+   frontend's `#retrofit-external-root-panel` lets a human type an absolute path and
+   "Browse" it; every request that touches it re-resolves and canonicalizes that path via
+   `wizard_containment.resolve_external_target()` (must be absolute, not already inside
+   `repo_root`, not a symlink/junction, and an existing real directory) — the server never
+   trusts a client-supplied or previously-persisted value at face value, including reads
+   from its own `RETROFIT-STATE.json`. The resolved root threads through as `external_root`
+   (`GET /api/picker`, `GET /api/retrofit/inventory`) or `target_root` (`POST
+   /api/retrofit/select`, persisted per-unit, then re-read for `draft`/`apply`) — see §5.
+   `cep_retrofit.py` itself is still always imported from *this* repo's
+   `ult-cep-retrofit` regardless of the retrofit target, and `RETROFIT-STATE.json` still
+   lives under `ctx.repo_root` always; only the containment/write boundary for
+   target-side paths moves. Same-repo reference mode is refused for a genuinely external
+   target (`RetrofitDraftError` server-side; the same-repo radio is disabled client-side
+   with an explanatory note) — plugin-qualified is the only reference shape that makes
+   sense once the target isn't this repo, so it's forced there instead of left to fail
+   later at draft time. For an in-repo target, nothing here changes: same-repo stays the
+   wizard-computed default, plugin-qualified stays an explicit manual override, never
+   auto-detected.
 
 ## 2. Module map
 
@@ -47,7 +63,7 @@ entry instead: reachable regardless of onboarding state, with its own state file
 | `wizard_retrofit_state.py` (Phase B) | Owns `cache/cep-retrofit/RETROFIT-STATE.json` under `ctx.repo_root` — durable per-unit selection/draft state, see §3. |
 | `wizard_retrofit_apply.py` (Phase C) | `apply_unit()`/`apply_batch()` — the write path, see §4. |
 | `wizard_server.py` | `do_GET`/`do_POST` route dispatch for every `/api/retrofit/*` route (§5), each mutating route behind the same three-gate chain every other write route uses (`wizard-security-model.md` §7). |
-| `static/wizard.js` | Target picker (reuses `GET /api/picker` unmodified) → inventory table → per-row draft panel (reference-mode radio, editable draft textarea, three-`<pre>`-zone context-before/inserted-block/context-after preview) → batch preview → "Apply changes" with a live per-unit result list and summary. |
+| `static/wizard.js` | Target picker (reuses `GET /api/picker`, plus `#retrofit-external-root-panel` for an explicit external target — §1.2) → inventory table → per-row draft panel (reference-mode radio, disabled to plugin-only for an external target, editable draft textarea, three-`<pre>`-zone context-before/inserted-block/context-after preview) → batch preview → "Apply changes" with a live per-unit result list and summary. |
 
 ## 3. Durable state: `cache/cep-retrofit/RETROFIT-STATE.json`
 
@@ -74,11 +90,22 @@ project's own `.gitignore` — this is wizard scratch data, never meant to be co
 the project being onboarded.
 
 Per-unit shape (`units.<unit_id>`): `primary_file`, `unit_dir_rel_path`, `include`,
-`contracts`, `reference_mode`, `reference_args` (from `upsert_selection`, i.e.
-`POST /api/retrofit/select`) plus `draft_text`, `draft_overridden`, `insertion_point`,
-`contracts_included`, `contracts_skipped_idempotent`, `target_file_hash`,
-`context_before`, `context_after` (from `set_draft`/`set_draft_override`, i.e.
+`contracts`, `reference_mode`, `reference_args`, `context_availability` (from
+`upsert_selection`, i.e. `POST /api/retrofit/select`) plus `draft_text`,
+`draft_overridden`, `insertion_point`, `contracts_included`,
+`contracts_skipped_idempotent`, `target_file_hash`, `context_before`,
+`context_after` (from `set_draft`/`set_draft_override`, i.e.
 `POST /api/retrofit/draft`/`draft-override`).
+
+`context_availability` (ISSUES.md Round 2 finding 6, 2026-08-31) is one of
+`ask`/`required`/`optional` (`wizard_retrofit_draft.CONTEXT_AVAILABILITY_POLICIES`,
+default `ask`) — a per-unit UI control next to the contract checkboxes
+(`renderRetrofitUnitRow` in `wizard.js`), posted alongside `contracts` on
+select, and rendered into the drafted CONSUMING-CONTEXT-PACKAGE.md pointer
+sentence by `draft_insertion_text()` so the policy is visible in the
+retrofitted skill file itself, not only in wizard state. See
+`CONSUMING-CONTEXT-PACKAGE.md`'s "Context-availability policy" callout for
+what each value means to the consuming skill at runtime.
 
 ## 4. The write path: `wizard_retrofit_apply.py`
 
@@ -133,13 +160,14 @@ filesystem again.
 
 | Route | Gate | Handler |
 | --- | --- | --- |
-| `GET /api/retrofit/inventory?path=<rel>` | session only (read-only) | `_handle_api_retrofit_inventory` → `wizard_retrofit_inventory.build_inventory` |
+| `GET /api/picker?path=<rel>[&external_root=<abs>]` | session only (read-only) | `_handle_api_picker` → `wizard_picker.list_directory`, rooted at `external_root` once resolved, `repo_root` otherwise |
+| `GET /api/retrofit/inventory?target=<rel>[&external_root=<abs>]` | session only (read-only) | `_handle_api_retrofit_inventory` → `wizard_retrofit_inventory.build_inventory` |
 | `GET /api/retrofit/state` | session only (read-only) | `_handle_api_retrofit_state` → `wizard_retrofit_state.load_state` |
 | `GET /api/retrofit/contract-locations` | session only (read-only) | `_handle_api_retrofit_contract_locations` → `wizard_retrofit_draft.detect_contract_locations` |
-| `POST /api/retrofit/select` | origin/host → session → CSRF | `_handle_api_retrofit_select` → `wizard_retrofit_state.upsert_selection` |
-| `POST /api/retrofit/draft` | origin/host → session → CSRF | `_handle_api_retrofit_draft` → `wizard_retrofit_draft.build_draft`, persisted via `wizard_retrofit_state.set_draft` |
+| `POST /api/retrofit/select` (body may include `target_root`) | origin/host → session → CSRF | `_handle_api_retrofit_select` → `wizard_retrofit_state.upsert_selection` |
+| `POST /api/retrofit/draft` | origin/host → session → CSRF | `_handle_api_retrofit_draft` → `wizard_retrofit_draft.build_draft` (re-reads/re-validates `target_root` from the persisted state entry, never from the request body), persisted via `wizard_retrofit_state.set_draft` |
 | `POST /api/retrofit/draft-override` | origin/host → session → CSRF | `_handle_api_retrofit_draft_override` → `wizard_retrofit_state.set_draft_override` |
-| `POST /api/retrofit/apply` | origin/host → session → CSRF | `_handle_api_retrofit_apply` → `wizard_retrofit_apply.apply_batch`, per-unit state reset per §4 |
+| `POST /api/retrofit/apply` | origin/host → session → CSRF | `_handle_api_retrofit_apply` → `wizard_retrofit_apply.apply_batch`, per-unit state reset per §4; per-unit `target_root` (from state) is re-validated inline so one unit's vanished/invalid external root fails only that unit, never the batch |
 
 `select`/`draft` are kept as two separate steps (rather than one combined call) so a
 change to contracts or reference config can be re-staged without forcing a redraft in the
@@ -151,17 +179,45 @@ recomputes and overwrites those fields together, atomically.
 partial batch failure is a normal outcome, not a request-level error; only a structural
 failure (e.g. a vanished repo root) would 500 the whole route.
 
+`external_root`/`target_root` are always optional and always re-validated server-side via
+`wizard_containment.resolve_external_target()` on every request that carries one —
+omitting the field (the default, unchanged from before this finding) means "use
+`ctx.repo_root`," matching every prior version of this flow exactly; see §1.2.
+
 ## 6. UI walk
 
-1. Target picker (reuses `GET /api/picker` unmodified) → "Use directory" stages the
-   retrofit target, containment-checked the same way every other picker consumer is.
+1. Target picker (reuses `GET /api/picker`) → "Use directory" stages the retrofit target,
+   containment-checked the same way every other picker consumer is. `#retrofit-external-
+   root-panel`, above the repo-relative picker, is an alternative entry point for an
+   explicit external target (§1.2): typing an absolute path and clicking "Browse" re-roots
+   the same picker UI at that directory (via `external_root`) once the server resolves and
+   canonicalizes it; a resolution failure clears the attempt and shows the error inline
+   rather than silently falling back to `repo_root`. Once active, a warning banner names the
+   resolved external path so it's never ambiguous which root subsequent writes will target,
+   and "Use this repo instead" clears it.
 2. Inventory table: name/type/path/`via_symlink` badge per unit, an unclaimed-directories
    panel with a free-text "how should these be treated?" box (SKILL.md Step 2's "don't
-   guess a fourth heuristic" — the wizard doesn't either).
+   guess a fourth heuristic" — the wizard doesn't either). For medium-to-large inventories
+   (ISSUES.md Round 2 finding 8, 2026-08-31 — 85 mixed units from a single third-party repo
+   in the reported case), a filter bar sits above the list: text search (name/path), a
+   canonical-only checkbox (checked by default — `build_inventory()`'s `tier_counts`
+   already distinguishes canonical from supplementary; this just defaults the view to it),
+   code-related/task-related checkboxes, and clickable directory chips sourced from
+   `RetrofitInventoryResult.directory_counts` (one bucket per unit's first path segment
+   below the retrofit target, computed once server-side as `RetrofitUnit.source_directory`
+   so the frontend never re-derives its own grouping). Changing any filter re-scopes what
+   "reviewed" means: the review-gate checkbox and its label text
+   (`#retrofit-review-gate-text`) both reset to describe only the currently-visible count,
+   not a global "I reviewed everything" acknowledgement — the exact behavior the finding's
+   Recommendation asked for.
 3. Per-row expand: `recommend()`'s two badges (code-related/task-related) + matched terms,
    the 3 contract checkboxes pre-checked per SKILL.md's exact code/task → contract rule,
    always editable; a reference-mode radio (same-repo default, computed via
-   `detect_contract_locations`, or plugin-qualified manual override).
+   `detect_contract_locations`, or plugin-qualified manual override) — disabled to
+   plugin-qualified only, with an inline note explaining why, whenever this inventory's
+   target is external (§1.2; same-repo's relative-path math is meaningless once the
+   target isn't this repo, so the row forces the only mode that still makes sense rather
+   than letting the human pick one the server will refuse at draft time).
 4. Draft panel: editable textarea seeded from `build_draft()`'s template output, with the
    three-`<pre>`-zone context-before / inserted-block / context-after preview (pure
    string-slicing around `insertion_point.line` — no diff algorithm needed, every change
@@ -181,8 +237,6 @@ failure (e.g. a vanished repo root) would 500 the whole route.
 
 ## 7. What this plan deliberately leaves out
 
-- **Out-of-repo retrofit targets** — v1 scope decision (§1.2); a real future extension, not
-  a silent gap.
 - **LLM-assisted drafting** — v1 scope decision (§1.1); every draft is a fixed template,
   always human-reviewed in an editable textarea before it can be applied.
 - **A fourth unclaimed-directory heuristic** — SKILL.md's own stance, carried forward
