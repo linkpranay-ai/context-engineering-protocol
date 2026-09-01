@@ -755,6 +755,7 @@ def _make_handler(ctx: _ServerContext):
                 target_file_hash=result.target_file_hash,
                 context_before=result.context_before,
                 context_after=result.context_after,
+                policy_drifted=result.policy_drifted,
             )
             wizard_retrofit_state.save_state(ctx.repo_root, state)
             self._send_json(

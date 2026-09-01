@@ -1280,20 +1280,32 @@
       }
       var included = entry.contracts_included || [];
       var skipped = entry.contracts_skipped_idempotent || [];
-      if (included.length === 0 && skipped.length > 0) {
+      // The 2026-08-31 evaluation's finding on policy drift going undetected
+      // on already-retrofitted units: build_draft() found a contract
+      // pointer already present but embedding a stale context-availability
+      // policy value, and produced a policy-line-replacement-only
+      // draft_text instead of the normal "nothing left to do" empty draft.
+      // That still needs to reach the batch preview and get applied like
+      // any other draft, so this branch is labeled distinctly but must NOT
+      // early-return the way the plain already-retrofitted case below does.
+      if (entry.policy_drifted) {
+        info.textContent =
+          "Policy change only: " + skipped.join(", ") + " needs its context-availability policy line updated.";
+      } else if (included.length === 0 && skipped.length > 0) {
         info.textContent = "Already retrofitted: " + skipped.join(", ") + ".";
         return;
+      } else {
+        var pieces = [];
+        if (entry.insertion_point) {
+          pieces.push(
+            "Insertion method: " + entry.insertion_point.method + " (line " + entry.insertion_point.line + ")"
+          );
+        }
+        if (skipped.length > 0) {
+          pieces.push("Already present, skipped: " + skipped.join(", "));
+        }
+        info.textContent = pieces.join(" — ");
       }
-      var pieces = [];
-      if (entry.insertion_point) {
-        pieces.push(
-          "Insertion method: " + entry.insertion_point.method + " (line " + entry.insertion_point.line + ")"
-        );
-      }
-      if (skipped.length > 0) {
-        pieces.push("Already present, skipped: " + skipped.join(", "));
-      }
-      info.textContent = pieces.join(" — ");
       if (typeof entry.draft_text === "string" && entry.draft_text) {
         textarea.value = entry.draft_text;
         textarea.style.display = "";
@@ -1653,7 +1665,13 @@
     ]);
 
     var insertionPoint = entry.insertion_point || {};
-    var methodText = insertionPoint.method
+    // policy_drifted units have no insertion_point (the draft is a
+    // policy-line replacement in already-present text, not a new
+    // insertion) - label the card so this diff isn't mistaken for freshly
+    // inserted content. See the matching branch in renderResult() above.
+    var methodText = entry.policy_drifted
+      ? "Policy change only — updating an already-embedded context-availability policy line"
+      : insertionPoint.method
       ? "Insert via " + insertionPoint.method +
         (insertionPoint.heading ? " (“" + insertionPoint.heading + "”)" : "")
       : "";

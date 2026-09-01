@@ -1544,6 +1544,41 @@ class TestApiRetrofitDraft(WizardServerTestCase):
             "Context-availability policy: `required`", payload["selection"]["draft_text"]
         )
 
+    def test_drifted_policy_on_an_already_retrofitted_unit_is_flagged(self):
+        """the 2026-08-31 Round-2 evaluation's finding on policy drift going
+        undetected on already-retrofitted units: a unit whose file already
+        carries a pointer drafted under the old "ask" policy, re-drafted
+        after the project moves to "required", must come back flagged so
+        wizard.js can render a "policy change only" label instead of
+        silently reporting all_satisfied."""
+        _write(
+            self.repo_root / "widget-reviewer" / "SKILL.md",
+            RETROFIT_FIXTURE_SKILL_MD + "\n\n"
+            "If a CEP context package exists for this work, see "
+            "`context-engineering/CONSUMING-CONTEXT-PACKAGE.md` for how "
+            "to detect, load, and apply it before proceeding. "
+            "**Context-availability policy: `ask`** — if no "
+            "approved matching package is found, follow "
+            "`context-engineering/CONSUMING-CONTEXT-PACKAGE.md`'s "
+            "\"Context-availability policy\" callout for the `ask` "
+            "branch before proceeding with the work.\n",
+        )
+        cookie, csrf = self._authenticated_session()
+        self._select(cookie, csrf, context_availability="required")
+
+        resp = self._post_json(
+            "/api/retrofit/draft", {"unit_id": "widget-reviewer"}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+        self.assertFalse(payload["all_satisfied"])
+        self.assertTrue(payload["selection"]["policy_drifted"])
+        self.assertIn("Context-availability policy: `required`", payload["selection"]["draft_text"])
+        self.assertNotIn("`ask`", payload["selection"]["draft_text"])
+
+        state = json.loads(self._get("/api/retrofit/state", cookie=cookie).read().decode("utf-8"))
+        self.assertTrue(state["units"]["widget-reviewer"]["policy_drifted"])
+
 
 class TestApiRetrofitDraftOverride(WizardServerTestCase):
     EXTRA_SKILLS = (("ult-cep-retrofit", ("cep_retrofit.py",)),)

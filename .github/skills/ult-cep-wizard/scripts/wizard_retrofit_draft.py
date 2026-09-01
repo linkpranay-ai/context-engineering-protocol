@@ -99,6 +99,22 @@ _TEMPLATE_SENTENCES = {
 CONTEXT_AVAILABILITY_POLICIES = ("ask", "required", "optional")
 DEFAULT_CONTEXT_AVAILABILITY = "ask"
 
+# The 2026-08-31 Round-2 evaluation's finding on policy drift going undetected on
+# already-retrofitted units: `cep_retrofit.check_pointer` treats a contract as
+# "already present" on a bare substring match of the contract filename (see its own
+# docstring, "matched by identity not literal path") - it has no idea what
+# context_availability value was actually baked into that pointer when it was
+# drafted. A unit retrofitted under the old "ask" default, later re-run after the
+# project reconfigures to "required", would be reported all_satisfied=True with no
+# signal at all that the file's own text still promises the stale policy. This regex
+# locates that already-embedded policy line so build_draft can compare it against
+# the currently-requested value and flag the drift instead of silently skipping it -
+# see _current_policy_in_file and the policy_drifted check below.
+POLICY_LINE_RE = re.compile(
+    r"^.*\*\*Context-availability policy: `(ask|required|optional)`\*\*.*$",
+    re.MULTILINE,
+)
+
 # Purpose-scoped ignore list for detect_contract_locations()'s walk only,
 # following this repo's convention of each filesystem-scanning helper
 # keeping its own local set rather than importing one. Deliberately its own
@@ -341,6 +357,38 @@ class DraftResult:
     # can confirm which policy actually got baked into draft_text, without
     # re-deriving it from the request.
     context_availability: str = DEFAULT_CONTEXT_AVAILABILITY
+    # True when a contract already reported as idempotent-skipped
+    # (cr.check_pointer said "present") turns out to carry a stale
+    # context_availability value in its own embedded policy line - see
+    # _current_policy_in_file and POLICY_LINE_RE above. When this is True and
+    # all_satisfied is False with an otherwise-empty contracts_included,
+    # draft_text carries the policy-line replacement only (no contract
+    # insertion needed) - wizard.js renders this case with a
+    # "policy change only" label rather than the normal insertion diff.
+    policy_drifted: bool = False
+
+
+def _current_policy_in_file(target: Path):
+    """Returns (existing_policy_value, existing_full_line) for the
+    CONSUMING-CONTEXT-PACKAGE.md context-availability-policy line already
+    embedded in `target`, or (None, None) if no such line is present - either
+    the unit was never retrofitted with that contract at all, or it was
+    retrofitted before this policy sentence existed (an older, unmigrated
+    pointer is not "drifted", it's simply out of scope for this check, same
+    as it always was). Read failures also return (None, None): a target this
+    module already opened once via cr.check_pointer's own read is not
+    expected to become unreadable in between, and drift detection is a
+    best-effort signal, not a correctness gate - not being able to read it
+    again is not itself the drift.
+    """
+    try:
+        text = target.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None, None
+    m = POLICY_LINE_RE.search(text)
+    if not m:
+        return None, None
+    return m.group(1), m.group(0)
 
 
 def build_draft(
@@ -405,7 +453,35 @@ def build_draft(
             f"(expected one of {', '.join(CONTEXT_AVAILABILITY_POLICIES)})"
         )
 
+    # the 2026-08-31 Round-2 evaluation's finding on policy drift going undetected
+    # on already-retrofitted units: check every skipped-idempotent contract's own
+    # embedded policy line against the currently-requested value, not just whether
+    # a pointer is present. Only CONSUMING-CONTEXT-PACKAGE.md ever carries this
+    # sentence, so this is a no-op for every other contract.
+    policy_drifted = False
+    policy_replacement_text = ""
+    if "CONSUMING-CONTEXT-PACKAGE.md" in skipped_idempotent:
+        existing_policy, existing_line = _current_policy_in_file(target)
+        if existing_policy is not None and existing_policy != context_availability:
+            policy_drifted = True
+            policy_replacement_text = existing_line.replace(
+                f"`{existing_policy}`", f"`{context_availability}`"
+            )
+
     if not remaining:
+        if policy_drifted:
+            return DraftResult(
+                all_satisfied=False,
+                contracts_included=[],
+                contracts_skipped_idempotent=skipped_idempotent,
+                insertion_point=None,
+                draft_text=policy_replacement_text,
+                target_file_hash=target_file_hash,
+                context_before="",
+                context_after="",
+                context_availability=context_availability,
+                policy_drifted=True,
+            )
         return DraftResult(
             all_satisfied=True,
             contracts_included=[],
@@ -459,4 +535,10 @@ def build_draft(
         context_before=context_before,
         context_after=context_after,
         context_availability=context_availability,
+        # Surfaced here too (not just the not-remaining branch above): a unit can
+        # simultaneously still need a different contract inserted (CONSUMING-CODE-
+        # GRAPH.md, say) while its already-present CONSUMING-CONTEXT-PACKAGE.md
+        # pointer has drifted - wizard.js can flag both, even though draft_text
+        # here is still the normal insertion text for `remaining` only.
+        policy_drifted=policy_drifted,
     )

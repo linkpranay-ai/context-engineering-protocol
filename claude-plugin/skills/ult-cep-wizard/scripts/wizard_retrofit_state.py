@@ -174,6 +174,7 @@ def set_draft(
     target_file_hash: Optional[str],
     context_before: str = "",
     context_after: str = "",
+    policy_drifted: bool = False,
 ) -> Dict[str, Any]:
     entry = find_unit(state, unit_id)
     entry["draft_text"] = draft_text
@@ -184,6 +185,12 @@ def set_draft(
     entry["target_file_hash"] = target_file_hash
     entry["context_before"] = context_before
     entry["context_after"] = context_after
+    # True when build_draft() found a contract pointer already present in the
+    # target file but embedding a stale context-availability policy value -
+    # the draft_text above is a policy-line replacement only, not a fresh
+    # contract insertion. wizard.js reads this to render a "policy change
+    # only" label instead of the normal insertion-diff view.
+    entry["policy_drifted"] = policy_drifted
     return entry
 
 

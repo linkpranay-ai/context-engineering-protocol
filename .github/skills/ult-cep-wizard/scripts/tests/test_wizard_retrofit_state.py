@@ -230,6 +230,27 @@ class TestSetDraft(unittest.TestCase):
         self.assertEqual(entry["context_before"], "")
         self.assertEqual(entry["context_after"], "")
 
+    def test_set_draft_defaults_policy_drifted_to_false(self):
+        entry = wrs.set_draft(
+            self.state, "widget-reviewer",
+            draft_text="x", insertion_point=None, contracts_included=[],
+            contracts_skipped_idempotent=[], target_file_hash=None,
+        )
+        self.assertFalse(entry["policy_drifted"])
+
+    def test_set_draft_persists_an_explicit_policy_drifted_flag(self):
+        # the 2026-08-31 Round-2 evaluation's finding on policy drift going
+        # undetected on already-retrofitted units: wizard.js needs this flag
+        # on the persisted entry to render a "policy change only" label.
+        entry = wrs.set_draft(
+            self.state, "widget-reviewer",
+            draft_text="**Context-availability policy: `required`**",
+            insertion_point=None, contracts_included=[],
+            contracts_skipped_idempotent=["CONSUMING-CONTEXT-PACKAGE.md"],
+            target_file_hash="deadbeef", policy_drifted=True,
+        )
+        self.assertTrue(entry["policy_drifted"])
+
     def test_set_draft_resets_a_prior_override_flag(self):
         wrs.set_draft(
             self.state, "widget-reviewer",

@@ -227,7 +227,11 @@ class TestBuildDraftIdempotency(RetrofitDraftTestCase):
     def test_all_contracts_already_present_short_circuits_without_insertion_point(self):
         _write(
             self.root / "widget-reviewer" / "SKILL.md",
-            "# Widget Reviewer\n\nSee `CONSUMING-CONTEXT-PACKAGE.md` for details.\n",
+            "# Widget Reviewer\n\nSee `CONSUMING-CONTEXT-PACKAGE.md` for details. "
+            "**Context-availability policy: `ask`** — if no approved matching "
+            "package is found, follow `CONSUMING-CONTEXT-PACKAGE.md`'s "
+            "\"Context-availability policy\" callout for the `ask` branch before "
+            "proceeding with the work.\n",
         )
         result = wrd.build_draft(
             str(self.root), "widget-reviewer/SKILL.md", "widget-reviewer",
@@ -242,6 +246,10 @@ class TestBuildDraftIdempotency(RetrofitDraftTestCase):
         self.assertEqual(result.context_before, "")
         self.assertEqual(result.context_after, "")
         self.assertIsNotNone(result.target_file_hash)
+        # The embedded policy line matches the requested (default "ask") policy,
+        # so this is genuinely satisfied, not drifted - the 2026-08-31 Round-2
+        # evaluation's finding on policy drift going undetected.
+        self.assertFalse(result.policy_drifted)
 
     def test_partial_overlap_drafts_only_the_remaining_contracts(self):
         _write(
@@ -312,6 +320,47 @@ class TestBuildDraftContextAvailability(RetrofitDraftTestCase):
         result = self._build(context_availability="optional")
         self.assertTrue(result.all_satisfied)
         self.assertEqual(result.context_availability, "optional")
+
+    def test_drifted_policy_on_already_present_contract_still_produces_a_draft(self):
+        # The 2026-08-31 Round-2 evaluation's finding on policy drift going
+        # undetected on already-retrofitted units: this unit was retrofitted
+        # under the "ask" policy (embedded in its own text); the project has
+        # since reconfigured to "required". cr.check_pointer only sees the
+        # contract filename is present and would otherwise report
+        # all_satisfied=True with nothing further to review.
+        _write(
+            self.root / "widget-reviewer" / "SKILL.md",
+            "# Widget Reviewer\n\nSee `CONSUMING-CONTEXT-PACKAGE.md` for details. "
+            "**Context-availability policy: `ask`** — if no approved matching "
+            "package is found, follow `CONSUMING-CONTEXT-PACKAGE.md`'s "
+            "\"Context-availability policy\" callout for the `ask` branch before "
+            "proceeding with the work.\n",
+        )
+        result = self._build(context_availability="required")
+        self.assertFalse(result.all_satisfied)
+        self.assertTrue(result.policy_drifted)
+        self.assertEqual(result.contracts_included, [])
+        self.assertEqual(result.contracts_skipped_idempotent, ["CONSUMING-CONTEXT-PACKAGE.md"])
+        self.assertIsNone(result.insertion_point)
+        # Policy-line replacement only - not a full contract re-insertion, and
+        # the old policy value must not survive anywhere in the draft.
+        self.assertIn("Context-availability policy: `required`", result.draft_text)
+        self.assertIn("the `required` branch", result.draft_text)
+        self.assertNotIn("`ask`", result.draft_text)
+
+    def test_matching_policy_on_already_present_contract_is_not_drifted(self):
+        _write(
+            self.root / "widget-reviewer" / "SKILL.md",
+            "# Widget Reviewer\n\nSee `CONSUMING-CONTEXT-PACKAGE.md` for details. "
+            "**Context-availability policy: `required`** — if no approved matching "
+            "package is found, follow `CONSUMING-CONTEXT-PACKAGE.md`'s "
+            "\"Context-availability policy\" callout for the `required` branch "
+            "before proceeding with the work.\n",
+        )
+        result = self._build(context_availability="required")
+        self.assertTrue(result.all_satisfied)
+        self.assertFalse(result.policy_drifted)
+        self.assertEqual(result.draft_text, "")
 
 
 class TestDraftInsertionTextContextAvailability(unittest.TestCase):
