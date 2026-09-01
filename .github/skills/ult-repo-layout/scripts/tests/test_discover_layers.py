@@ -235,6 +235,33 @@ class TestWhatL2ScanAndScore(TempRepoTestCase):
         rendered = section.render()
         self.assertIn("CONFIRM: specs/", rendered)
 
+    def test_manifest_owned_requirements_named_dir_is_excluded_from_candidacy(self):
+        # the 2026-09-01 evaluation's finding on top-level candidacy: a
+        # manifest-owned top-level directory outside SCAN_IGNORED_DIR_NAMES/
+        # CEP_BUCKET_DIR_NAMES still surfaced as a What-L2 Requirements
+        # candidate even when CEP's own manifest names it as owned -
+        # _top_level_candidate_dirs never received manifest data at all
+        # before this fix, unlike How-L2's already-manifest-aware
+        # `.github/` scan (see _manifest_extra_ignored).
+        for i in range(12):
+            write(self.repo_root / "specification" / f"{i}.md", "# x")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["specification"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("specification/", rendered)
+        self.assertIsNone(path)
+
 
 class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
     def test_populated_workspace_root_after_exclude_is_notice_only(self):
@@ -257,6 +284,37 @@ class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
         section, path, roots = dl.discover_what_l2(self.repo_root, config)
         self.assertIn("openapi/", roots)
         self.assertIn("include_roots_decision: PENDING   # ADD: openapi/", section.render())
+
+    def test_manifest_owned_sibling_is_excluded_from_include_roots(self):
+        # the 2026-09-01 evaluation's finding on top-level candidacy:
+        # manifest data was already threaded into How-L2's `.github/` scan
+        # but never into What-L2's outside-workspace_root sibling scan
+        # (_composite_sibling_scan/_top_level_candidate_dirs) - a
+        # manifest-owned sibling directory used to still surface as an
+        # include_roots candidate on the strength of CEP's own installed
+        # content. Same fixture as
+        # test_sibling_composite_scan_runs_outside_workspace_root above,
+        # but with a manifest naming `openapi/` as CEP-owned.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "openapi" / "openapi.yaml", "openapi: 3.0.0")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["openapi"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("openapi/", roots)
+        self.assertNotIn("openapi/", section.render())
 
     def test_sibling_examples_dir_with_proto_file_is_not_an_api_candidate(self):
         # Gap 3.1: categorize_candidate's Design/API signals were never gated

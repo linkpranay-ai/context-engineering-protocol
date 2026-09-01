@@ -346,14 +346,26 @@ def _has_content(repo_root, rel_path):
     return any(True for _ in _iter_files(target))
 
 
-def _top_level_candidate_dirs(repo_root, base=None):
+def _top_level_candidate_dirs(repo_root, base=None, manifest_owned=None):
     """Immediate subdirectories of `base` (default: repo_root), pruned of
-    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES. §17.4's "sibling
-    directories" scan operates one level down from `base`."""
+    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES, and of any manifest-owned
+    top-level directory when `manifest_owned` (see `_read_cep_manifest`) is
+    supplied - the 2026-09-01 evaluation's finding on top-level candidacy: a
+    CEP-owned top-level directory outside those two hardcoded name sets
+    (e.g. an install that lands its own directory at repo root rather than
+    nesting everything under `.github/`) was never excluded from What-L2
+    sibling-directory candidacy the way `.github/`'s own manifest-owned
+    subdirectories already are for How-L2 (see `_manifest_extra_ignored`,
+    reused here against `base` itself rather than a `.github/`-style fixed
+    candidate). §17.4's "sibling directories" scan operates one level down
+    from `base`."""
     base = Path(base) if base is not None else Path(repo_root)
     if not base.is_dir():
         return []
-    names = _prune_ignored([p.name for p in base.iterdir() if p.is_dir()])
+    manifest_names = (
+        _manifest_extra_ignored(base, manifest_owned) if manifest_owned is not None else set()
+    )
+    names = _prune_ignored([p.name for p in base.iterdir() if p.is_dir()], manifest_names)
     return sorted(base / n for n in names)
 
 
@@ -587,11 +599,19 @@ def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
     section_title = WHAT_L2_TITLE
     exclude = set(e.rstrip("/") for e in vl.resolve_what_l2_exclude(config))
     wr_dir = Path(repo_root) / wr
+    # Threaded into every _composite_sibling_scan/_top_level_candidate_dirs
+    # call below so a CEP-owned top-level directory is excluded from
+    # What-L2 candidacy the same way SCAN_IGNORED_DIR_NAMES/
+    # CEP_BUCKET_DIR_NAMES already are - the 2026-09-01 evaluation's
+    # finding on top-level candidacy.
+    manifest_owned = _read_cep_manifest(repo_root)
 
     # Outside-workspace_root composite scan always runs (Founder
     # clarification on C1) - proposed as include_roots regardless of
     # whether `path` itself resolved.
-    outside_candidates = _composite_sibling_scan(repo_root, exclude_base=wr_dir)
+    outside_candidates = _composite_sibling_scan(
+        repo_root, exclude_base=wr_dir, manifest_owned=manifest_owned
+    )
 
     # Step 2: does {workspace_root}/ exist and have content after
     # exclusions?
@@ -628,7 +648,7 @@ def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
     # if it also equals another layer's hand-configured path.
     exclude_rows = []
     exclude_lines = []
-    for cand in _top_level_candidate_dirs(repo_root, base=wr_dir):
+    for cand in _top_level_candidate_dirs(repo_root, base=wr_dir, manifest_owned=manifest_owned):
         rel = cand.relative_to(repo_root).as_posix() + "/"
         if _looks_vendor_or_generated(cand):
             other_layer = _matches_other_hand_configured_path(config, rel)
@@ -661,6 +681,12 @@ def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
 
 def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
     section_title = WHAT_L2_TITLE
+    # Threaded into every _composite_sibling_scan/_top_level_candidate_dirs
+    # call below so a CEP-owned top-level directory is excluded from
+    # What-L2 candidacy the same way SCAN_IGNORED_DIR_NAMES/
+    # CEP_BUCKET_DIR_NAMES already are - the 2026-09-01 evaluation's
+    # finding on top-level candidacy.
+    manifest_owned = _read_cep_manifest(repo_root)
 
     if _has_content(repo_root, default_path):
         section = LayerSection(
@@ -673,7 +699,7 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
         )
         resolved_path = default_path
     else:
-        candidates = _top_level_candidate_dirs(repo_root)
+        candidates = _top_level_candidate_dirs(repo_root, manifest_owned=manifest_owned)
         req_candidates = []
         for cand in candidates:
             name_match, doc_count = _requirements_signal(cand)
@@ -715,7 +741,9 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
             # H-2: no Requirements match at all. List every surviving
             # other-category candidate and require an explicit decision -
             # never auto-assign `path` to another category's best score.
-            other_candidates = _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=("Requirements",))
+            other_candidates = _composite_sibling_scan(
+                repo_root, exclude_base=None, exclude_categories=("Requirements",), manifest_owned=manifest_owned
+            )
             if other_candidates:
                 rows2 = [[f"`{rel}`", cats, ev] for rel, cats, ev in other_candidates]
                 # Same ACKNOWLEDGE addition as the with-candidates template above -
@@ -753,7 +781,9 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
 
     # Composite sibling scan for every OTHER category always runs,
     # independent of whether `path` resolved (fixes H-1).
-    other_candidates = _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=("Requirements",))
+    other_candidates = _composite_sibling_scan(
+        repo_root, exclude_base=None, exclude_categories=("Requirements",), manifest_owned=manifest_owned
+    )
     include_rows = [[f"`{rel}`", cats, ev] for rel, cats, ev in other_candidates]
     include_lines = [f"include_roots_decision: PENDING   # ADD: {rel} | SKIP" for rel, _c, _e in other_candidates]
     if include_rows:
@@ -796,13 +826,17 @@ def _matches_other_hand_configured_path(config, rel):
     return None
 
 
-def _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=()):
+def _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=(), manifest_owned=None):
     """Scan top-level directories (outside `exclude_base` if given) for
     every §17.4 category match, dedup by unique resolved path with every
-    matched category folded into one evidence string (resolves M-2). Returns
-    [(rel_path_str, categories_str, evidence_str)]."""
+    matched category folded into one evidence string (resolves M-2).
+    `manifest_owned` (see `_read_cep_manifest`) is threaded through to
+    `_top_level_candidate_dirs` so a CEP-owned top-level directory is
+    excluded from candidacy the same way the hardcoded ignore sets already
+    are - the 2026-09-01 evaluation's finding on top-level candidacy.
+    Returns [(rel_path_str, categories_str, evidence_str)]."""
     repo_root = Path(repo_root)
-    candidates = _top_level_candidate_dirs(repo_root)
+    candidates = _top_level_candidate_dirs(repo_root, manifest_owned=manifest_owned)
     if exclude_base is not None:
         exclude_base = Path(exclude_base).resolve()
         candidates = [c for c in candidates if c.resolve() != exclude_base]
