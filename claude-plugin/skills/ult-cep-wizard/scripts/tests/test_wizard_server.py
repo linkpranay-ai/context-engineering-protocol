@@ -1080,6 +1080,44 @@ class TestApiInitRoutes(WizardServerTestCase):
         )
         self.assertEqual(resp.status, 400)
 
+    def test_preview_absolute_workspace_root_is_400_writes_nothing_outside_repo(self):
+        # An absolute workspace_root must be refused by the containment guard
+        # before it ever reaches wizard_init/validate_layout - regression
+        # coverage for the gap where such a value could reach this
+        # HTTP-exposed route unchecked.
+        cookie, csrf = self._authenticated_session()
+        with tempfile.TemporaryDirectory() as outside:
+            outside_marker = str(Path(outside) / "definitely-not-created")
+            resp = self._post_json(
+                "/api/init/preview",
+                {"workspace_root": outside_marker},
+                cookie=cookie,
+                csrf=csrf,
+            )
+            self.assertEqual(resp.status, 400)
+            self.assertFalse(Path(outside_marker).exists())
+
+    def test_init_absolute_workspace_root_is_400_writes_nothing_outside_repo(self):
+        config_path = self.repo_root / "context-config.yaml"
+        before = config_path.read_text(encoding="utf-8") if config_path.exists() else None
+        cookie, csrf = self._authenticated_session()
+        with tempfile.TemporaryDirectory() as outside:
+            outside_marker = str(Path(outside) / "definitely-not-created")
+            resp = self._post_json(
+                "/api/init",
+                {"workspace_root": outside_marker},
+                cookie=cookie,
+                csrf=csrf,
+            )
+            self.assertEqual(resp.status, 400)
+            self.assertFalse(Path(outside_marker).exists())
+            # Nothing should have been scaffolded inside the repo either - the
+            # guard must fire before any write, not just before this
+            # particular outside path - so the config is byte-for-byte
+            # unchanged (or still absent, if it was absent before).
+            after = config_path.read_text(encoding="utf-8") if config_path.exists() else None
+            self.assertEqual(before, after)
+
 
 # --------------------------------------------------------------------------
 # Journey 3 Phase A: GET /api/retrofit/inventory

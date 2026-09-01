@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -125,6 +125,23 @@ class TestPathWellformedness(unittest.TestCase):
         rel = Path("a/../b")
         problems = vl.check_path_wellformedness(rel)
         self.assertTrue(any("'..'" in p for p in problems))
+
+    def test_posix_absolute_path_flagged(self):
+        problems = vl.check_path_wellformedness(Path("/abs/posix"))
+        self.assertTrue(any("absolute path" in p for p in problems))
+
+    def test_windows_drive_absolute_path_flagged(self):
+        problems = vl.check_path_wellformedness(PureWindowsPath("C:/OUTSIDE"))
+        self.assertTrue(any("absolute path" in p for p in problems))
+
+    def test_unc_path_flagged(self):
+        problems = vl.check_path_wellformedness(PureWindowsPath("//server/share/x"))
+        self.assertTrue(any("absolute path" in p for p in problems))
+
+    def test_relative_path_with_drive_letter_like_segment_still_ok(self):
+        # A relative path segment that merely contains a colon-free, non-drive
+        # string must not be caught by the absolute-path short-circuit.
+        self.assertEqual(vl.check_path_wellformedness(Path("docs/x")), [])
 
 
 class TestWorkspaceRootWellformedness(unittest.TestCase):
@@ -1512,6 +1529,24 @@ class TestRunInit(unittest.TestCase):
             code, messages = vl.run_init(root, workspace_root=".")
             self.assertEqual(code, 1)
             self.assertTrue(any("S22" in m for m in messages))
+
+    def test_workspace_root_absolute_value_refuses(self):
+        # An absolute --workspace-root must be rejected before any scaffold
+        # target is computed - repo_root / <absolute rel> silently discards
+        # repo_root, so this is the one input that could otherwise cause
+        # init to write outside the affirmed repo root.
+        outside_marker = "definitely-not-created"
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
+            root = Path(tmp)
+            self._install_skills(root, "ult-context-generate")
+            write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            absolute_target = str(Path(outside) / outside_marker)
+            code, messages = vl.run_init(root, workspace_root=absolute_target)
+            self.assertEqual(code, 1)
+            self.assertTrue(any("M3" in m for m in messages), messages)
+            self.assertFalse((Path(outside) / outside_marker).exists())
+            config = vl.load_yaml_file(root / "context-config.yaml")
+            self.assertNotIn("workspace_root", config.get("layout", {}))
 
     def test_default_omits_hook_scaffold(self):
         # ci_hook defaults to False - init never touches .git/hooks/ unless

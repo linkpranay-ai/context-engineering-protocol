@@ -1186,6 +1186,19 @@ def _make_handler(ctx: _ServerContext):
             if body is None:
                 return
             workspace_root = body.get("workspace_root")
+            if workspace_root:
+                # Belt-and-suspenders (2026-09-01): validate_layout.run_init
+                # already rejects an absolute/UNC workspace_root as
+                # not-well-formed, but this route is the only write-adjacent
+                # one in the wizard that skipped the containment check every
+                # other client-supplied path gets at the HTTP boundary - add
+                # it here too, rather than relying solely on a check several
+                # calls away that a future refactor could bypass.
+                try:
+                    wizard_containment.check_containment(ctx.repo_root, workspace_root)
+                except wizard_containment.ContainmentError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    return
 
             if self._try_layout_source() is None:
                 return
@@ -1206,6 +1219,14 @@ def _make_handler(ctx: _ServerContext):
             if body is None:
                 return
             workspace_root = body.get("workspace_root")
+            if workspace_root:
+                # See the matching guard in _handle_api_init_preview - this is
+                # the real, committing route, so the guard matters even more here.
+                try:
+                    wizard_containment.check_containment(ctx.repo_root, workspace_root)
+                except wizard_containment.ContainmentError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    return
 
             if self._try_layout_source() is None:
                 return

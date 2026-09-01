@@ -616,6 +616,29 @@ def resolve_how_l1_enabled(config):
 
 def check_path_wellformedness(rel_path):
     problems = []
+    # An absolute path (POSIX '/...', Windows 'C:\...', or a UNC share
+    # '\\server\share\...') is never repo-relative, and joining one onto a
+    # root with pathlib silently discards the root rather than raising -
+    # `repo_root / rel_path` just becomes `rel_path` itself. Every caller of
+    # this function (run_init's --workspace-root, config's layout.workspace_root,
+    # and the per-marker well-formedness loop) needs that path rejected here
+    # rather than at the join site, since the join site cannot tell the
+    # difference between "joined fine" and "silently replaced" after the fact
+    # (2026-09-01: closes the gap where such a value reached an HTTP-exposed
+    # write path unchecked).
+    #
+    # `.is_absolute()`/`.drive` alone are not enough: a POSIX-style value
+    # like "/etc/x" parsed as a plain `Path` on a Windows host becomes a
+    # `WindowsPath` with no drive, and pathlib does NOT consider a driveless
+    # rooted path "absolute" on Windows - yet `repo_root / "/etc/x"` still
+    # discards `repo_root` the same way. `.root` catches that case (and every
+    # other rooted-but-driveless variant) on any host OS without needing to
+    # know in advance which OS produced the string.
+    if rel_path.is_absolute() or rel_path.drive or rel_path.root:
+        problems.append(
+            f"'{rel_path}' is an absolute path - paths must be repo-relative (M3)"
+        )
+        return problems
     for part in rel_path.parts:
         if part == "..":
             problems.append("contains a '..' segment - paths must be repo-relative (M3)")
@@ -1299,6 +1322,13 @@ def run_init(repo_root, workspace_root=None, ci_hook=False, dry_run=False):
             default = resolve_pre_d21_default(slot, config)
 
         rel = Path(default.rstrip("/"))
+        # Defensive, not the primary guard: `effective_wr` should already have
+        # passed check_path_wellformedness above (or come from an
+        # already-validated config value) by the time it reaches here, but
+        # `repo_root / rel` silently discards `repo_root` and becomes `rel`
+        # itself if `rel` is ever absolute - assert instead of writing outside
+        # the affirmed root should that invariant ever be violated upstream.
+        assert not rel.is_absolute(), f"slot '{slot}' resolved to an absolute path {rel!r}"
         kind = spec["kind"]
         target = repo_root / rel
 

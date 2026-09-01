@@ -203,6 +203,16 @@ unreachable via the UI, not just via the CLI) already D20-initialized. The front
 never needs to special-case that last refusal: `workspace_root_offer_eligible` already
 hides the offer before it could happen.
 
+Both handlers additionally run `wizard_containment.check_containment(ctx.repo_root,
+workspace_root)` before calling into `wizard_init` at all (HTTP 400,
+`{"error": str(exc)}` on `ContainmentError`) — see `wizard-security-model.md` §5.
+`run_init`'s own well-formedness check (`check_path_wellformedness`) independently
+rejects an absolute/UNC value too; the two are deliberately redundant, not
+either-or, since `check_containment` also catches a symlink/junction component the
+well-formedness check was never designed to see. This makes `workspace_root` the same
+"validated at the boundary, not just deep in the call stack" shape as every other
+client-supplied path this document covers, closing the one route that used to skip it.
+
 ## 6. Frontend flow
 
 1. On load, `wizard.js` fetches `/api/decisions` and renders each field as a row: a
