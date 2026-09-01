@@ -32,6 +32,31 @@
 > the schema implies wasn't real for any skill that only follows this contract.
 > Step 3 below now says so explicitly. Gap found during the `ult-cep-retrofit`
 > design review, fixed here rather than deferred.
+>
+> **Context-availability policy (added 2026-08-31, ISSUES.md Round 2 finding
+> 6):** step 1's "Not found" branch used to say "proceed exactly as you
+> normally would" unconditionally — a task-oriented skill (e.g. `implement`)
+> could then complete real work ungrounded, with the only disclosure arriving
+> in step 8's end-of-work attribution line, too late for the user to choose
+> otherwise. Every consuming skill now declares one of three policies —
+> retrofitted skills set this per-unit in `ult-cep-wizard`'s retrofit picker
+> (persisted as `context_availability` alongside that unit's contract
+> selection); a hand-authored consuming skill states its policy next to its
+> one-line pointer to this file:
+>
+> - **`ask`** — the recommended default for implementation, design, planning,
+>   review, and debugging skills. Step 1 below asks before proceeding.
+> - **`required`** — for high-risk or governed skills. Step 1 below stops
+>   until an approved package is supplied or generated — never proceeds
+>   ungrounded.
+> - **`optional`** — preserves the original lightweight behavior (proceed
+>   silently), but step 1 below now announces the absence up front instead of
+>   only in step 8's attribution line, so silence is never the only signal.
+>
+> A skill with no declared policy at all (pre-2026-08-31 content, or a
+> hand-authored skill that hasn't adopted this) behaves exactly as `optional`
+> did before this addition — this callout changes nothing for it beyond
+> requiring the up-front announcement.
 
 Any skill that is asked to work on a specific feature (brainstorm a design,
 write a plan, write test cases, review code, debug an issue, etc.) should
@@ -83,12 +108,41 @@ follow this before doing that work:
    non-empty `approved_by`. Also check for a sibling
    `<feature-slug>_<task-type>_*.addenda.yaml`. This glob check is the
    fallback path used when step 0 found no tagged packages.
-   - **Not found:** proceed exactly as you normally would — consult the code
-     graph if `CONSUMING-CODE-GRAPH.md` applies, apply compiled guidelines if
-     `CONSUMING-COMPILED-GUIDELINES.md` applies. Don't ask the user to
-     generate a context package; that's a heavier step
-     (`/ult-context-generate`) than this optional check.
    - **Found:** continue to step 2.
+   - **Not found:** branch on this skill's declared context-availability
+     policy (see the "Context-availability policy" callout above; treat an
+     undeclared policy as `optional`):
+     - **`ask`:** ask the user, verbatim:
+       > No approved CEP context package was found for `<feature>` /
+       > `<task type>`. Generate one now, continue without CEP context, or
+       > provide an existing package?
+       - *Generate one now:* hand off to `/ult-context-generate` for
+         `<feature>`/`<task type>` — do **not** run it yourself inline, package
+         generation stays a human-approved process. Once an approved package
+         exists (or the handoff is declined), resume this skill at step 1 and
+         re-check.
+       - *Continue without CEP context:* proceed as the `optional` branch
+         below does, then continue to step 2.
+       - *Provide an existing package:* have the user point to the file:
+         confirm it matches `<feature-slug>_<task-type>_*.yaml` with a
+         non-empty `approved_by`, then treat it as **Found** and continue to
+         step 2. If it doesn't qualify, return to the top of this branch.
+     - **`required`:** stop. State that this skill requires an approved CEP
+       context package for `<feature>`/`<task type>` and none was found; do
+       not proceed with the work. Direct the user to `/ult-context-generate`
+       or to supply an existing approved package, then re-check step 1 —
+       never fall through to normal work ungrounded.
+     - **`optional`:** announce up front — e.g. "No approved CEP context
+       package found for `<feature>`/`<task type>` — proceeding without it."
+       — then proceed exactly as you normally would: consult the code graph
+       if `CONSUMING-CODE-GRAPH.md` applies, apply compiled guidelines if
+       `CONSUMING-COMPILED-GUIDELINES.md` applies. Don't auto-run
+       `/ult-context-generate`; that remains a human-initiated step. Continue
+       to step 2.
+
+   None of these branches ever auto-run `/ult-context-generate` on their own
+   initiative — generation is only ever a human-approved handoff, triggered by
+   an explicit user choice (`ask`) or an explicit user direction (`required`).
 
 2. **Confirm with the user**, in one line:
    > "Found a context package for this feature (`<id>`, generated `<date>`,
