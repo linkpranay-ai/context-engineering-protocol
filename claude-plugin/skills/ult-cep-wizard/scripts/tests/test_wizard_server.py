@@ -1054,6 +1054,9 @@ class TestApiInitRoutes(WizardServerTestCase):
 
     def test_init_actually_writes_and_state_reflects_it(self):
         cookie, csrf = self._authenticated_session()
+        self._post_json(
+            "/api/init/preview", {"workspace_root": ".cep/"}, cookie=cookie, csrf=csrf,
+        )
         resp = self._post_json(
             "/api/init", {"workspace_root": ".cep/"}, cookie=cookie, csrf=csrf,
         )
@@ -1072,12 +1075,51 @@ class TestApiInitRoutes(WizardServerTestCase):
     def test_second_init_call_is_400(self):
         cookie, csrf = self._authenticated_session()
         self._post_json(
+            "/api/init/preview", {"workspace_root": ".cep/"}, cookie=cookie, csrf=csrf
+        )
+        self._post_json(
             "/api/init", {"workspace_root": ".cep/"}, cookie=cookie, csrf=csrf
         )
+        # Already initialized - preview itself refuses now, so the second
+        # /api/init call below necessarily has no matching preview token
+        # either way; both are 400.
+        preview_resp = self._post_json(
+            "/api/init/preview", {"workspace_root": "docs/"}, cookie=cookie, csrf=csrf
+        )
+        self.assertEqual(preview_resp.status, 400)
         resp = self._post_json(
             "/api/init", {"workspace_root": "docs/"}, cookie=cookie, csrf=csrf
         )
         self.assertEqual(resp.status, 400)
+
+    def test_init_without_prior_preview_is_400_writes_nothing(self):
+        # the 2026-08-31 Round-2 evaluation's finding on POST /api/init committing
+        # without a prior preview: hitting /api/init directly, with no
+        # preceding /api/init/preview call this session, must be refused
+        # before anything is written.
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json(
+            "/api/init", {"workspace_root": ".cep/"}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+        self.assertFalse((self.repo_root / ".cep").exists())
+        config_text = (self.repo_root / "context-config.yaml").read_text(encoding="utf-8")
+        self.assertNotIn("workspace_root", config_text)
+
+    def test_init_after_preview_of_a_different_workspace_root_is_400(self):
+        # A stale/mismatched preview (this session previewed ".cep/" but is
+        # now committing "docs/") must not be accepted as proof this
+        # workspace_root was previewed.
+        cookie, csrf = self._authenticated_session()
+        self._post_json(
+            "/api/init/preview", {"workspace_root": ".cep/"}, cookie=cookie, csrf=csrf,
+        )
+        resp = self._post_json(
+            "/api/init", {"workspace_root": "docs/"}, cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(resp.status, 400)
+        self.assertFalse((self.repo_root / ".cep").exists())
+        self.assertFalse((self.repo_root / "docs" / ".layout-slots.yaml").exists())
 
     def test_preview_absolute_workspace_root_is_400_writes_nothing_outside_repo(self):
         # An absolute workspace_root must be refused by the containment guard

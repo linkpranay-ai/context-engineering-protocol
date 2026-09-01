@@ -38,7 +38,9 @@ than sharing a base):
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
+import secrets
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,6 +55,23 @@ class InitError(Exception):
 @dataclass
 class InitResult:
     messages: List[str] = field(default_factory=list)
+    init_preview_token: Optional[str] = None
+
+
+def _compute_init_preview_token(repo_root_resolved: Path, workspace_root: Optional[str]) -> str:
+    """the 2026-08-31 Round-2 evaluation's finding on POST /api/init committing without
+    ever having gone through a preview for the same inputs: a deterministic
+    fingerprint of exactly what a preview covered (the resolved repo root plus
+    the cleaned `workspace_root`), not a secret. It isn't meant to resist a
+    caller who fabricates one directly against this repo/workspace_root pair -
+    wizard_server.py is what makes it meaningful, by never accepting a
+    client-supplied token at all: it stores the value this function returns
+    from the last successful preview in session-scoped state, and passes only
+    that stored value back into `run_init`, so `run_init` requiring a match is
+    really requiring "the same session actually called preview_init with
+    these exact inputs first", not "the request included some string"."""
+    digest_input = f"{repo_root_resolved}|{workspace_root or ''}".encode("utf-8")
+    return hashlib.sha256(digest_input).hexdigest()
 
 
 def _find_repo_layout_scripts_dir(repo_root) -> Path:
@@ -90,29 +109,54 @@ def preview_init(repo_root, workspace_root: Optional[str] = None) -> InitResult:
     """Dry-run preview (zero disk writes) of what `run_init` would do with this
     `workspace_root` - the tree/messages the wizard shows before the human commits.
     Raises `InitError` on any refusal (invalid workspace_root, already
-    initialized, no installed slot's owning skill present)."""
+    initialized, no installed slot's owning skill present).
+
+    Also computes and returns `init_preview_token` - see
+    `_compute_init_preview_token`'s docstring for why this is a fingerprint, not
+    a secret, and where the actual enforcement lives."""
     repo_root = Path(repo_root).resolve()
+    cleaned = _clean_workspace_root(workspace_root)
     vl = _import_validate_layout(repo_root)
-    code, messages = vl.run_init(
-        repo_root, workspace_root=_clean_workspace_root(workspace_root), dry_run=True
-    )
+    code, messages = vl.run_init(repo_root, workspace_root=cleaned, dry_run=True)
     if code != 0:
         raise InitError("; ".join(messages))
-    return InitResult(messages=messages)
+    return InitResult(
+        messages=messages,
+        init_preview_token=_compute_init_preview_token(repo_root, cleaned),
+    )
 
 
-def run_init(repo_root, workspace_root: Optional[str] = None) -> InitResult:
+def run_init(
+    repo_root,
+    workspace_root: Optional[str] = None,
+    init_preview_token: Optional[str] = None,
+) -> InitResult:
     """The real, committing call - identical inputs/shape to `preview_init`, but
     `dry_run=False`. The frontend is expected to have already shown the human the
     matching `preview_init` output for the same `workspace_root` value before
     calling this (mirrors wizard_apply.py's stage-then-apply two-step, adapted to
     init's own preview-then-commit shape rather than a freshness-hash check, since
-    there is no prior artifact here to drift)."""
+    there is no prior artifact here to drift).
+
+    the 2026-08-31 Round-2 evaluation's finding on POST /api/init committing without a
+    prior preview: `init_preview_token` must be present and must equal this same
+    repo_root/workspace_root pair's own freshly recomputed fingerprint, or this
+    raises `InitError` before ever calling `validate_layout.run_init` - i.e.
+    before anything on disk changes. The caller (wizard_server.py) is the one
+    responsible for sourcing `init_preview_token` from session-scoped state
+    rather than the raw request body; this function only enforces the match,
+    it does not decide where a legitimate token comes from."""
     repo_root = Path(repo_root).resolve()
+    cleaned = _clean_workspace_root(workspace_root)
+    expected_token = _compute_init_preview_token(repo_root, cleaned)
+    if not init_preview_token or not secrets.compare_digest(init_preview_token, expected_token):
+        raise InitError(
+            "No matching preview found for this workspace_root - preview it again "
+            "before committing (the preview may be stale, or workspace_root "
+            "changed since the last preview)."
+        )
     vl = _import_validate_layout(repo_root)
-    code, messages = vl.run_init(
-        repo_root, workspace_root=_clean_workspace_root(workspace_root), dry_run=False
-    )
+    code, messages = vl.run_init(repo_root, workspace_root=cleaned, dry_run=False)
     if code != 0:
         raise InitError("; ".join(messages))
-    return InitResult(messages=messages)
+    return InitResult(messages=messages, init_preview_token=init_preview_token)

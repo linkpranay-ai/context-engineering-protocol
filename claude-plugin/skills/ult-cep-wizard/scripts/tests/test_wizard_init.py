@@ -114,7 +114,8 @@ class TestPreviewInitRefusals(unittest.TestCase):
             _install_ult_repo_layout(root)
             _install_owning_skill(root)
             _write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
-            wi.run_init(root)  # real init - now D20-initialized
+            token = wi.preview_init(root).init_preview_token
+            wi.run_init(root, init_preview_token=token)  # real init - now D20-initialized
 
             with self.assertRaises(wi.InitError):
                 wi.preview_init(root, workspace_root="docs/")
@@ -142,8 +143,9 @@ class TestRunInit(unittest.TestCase):
             _install_ult_repo_layout(root)
             _install_owning_skill(root)
             _write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            token = wi.preview_init(root, workspace_root=".cep/").init_preview_token
 
-            result = wi.run_init(root, workspace_root=".cep/")
+            result = wi.run_init(root, workspace_root=".cep/", init_preview_token=token)
 
             self.assertTrue(any("Scaffolded" in m or "Registered" in m for m in result.messages))
             self.assertTrue((root / ".cep" / "contexts").is_dir())
@@ -156,10 +158,65 @@ class TestRunInit(unittest.TestCase):
             _install_ult_repo_layout(root)
             _install_owning_skill(root)
             _write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
-            wi.run_init(root, workspace_root=".cep/")
+            token = wi.preview_init(root, workspace_root=".cep/").init_preview_token
+            wi.run_init(root, workspace_root=".cep/", init_preview_token=token)
+
+            # Already initialized - preview_init itself now refuses before a
+            # legitimate token for this second call could ever be minted
+            # (test_already_d20_initialized_is_refused covers this refusal
+            # directly; asserted again here as the setup for the next line).
+            with self.assertRaises(wi.InitError):
+                wi.preview_init(root, workspace_root="docs/")
+            # run_init refuses too, even handed the first call's own
+            # (necessarily stale, for a different workspace_root) token.
+            with self.assertRaises(wi.InitError):
+                wi.run_init(root, workspace_root="docs/", init_preview_token=token)
+
+
+class TestInitPreviewTokenGate(unittest.TestCase):
+    """the 2026-08-31 Round-2 evaluation's finding on POST /api/init committing without a
+    prior preview - unit coverage at the wizard_init.py layer; end-to-end HTTP
+    coverage lives in test_wizard_server.py's TestApiInitRoutes."""
+
+    def test_run_init_without_any_token_is_refused_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _install_ult_repo_layout(root)
+            _install_owning_skill(root)
+            _write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
 
             with self.assertRaises(wi.InitError):
-                wi.run_init(root, workspace_root="docs/")
+                wi.run_init(root, workspace_root=".cep/")
+
+            self.assertFalse((root / ".cep").exists())
+            config_text = (root / "context-config.yaml").read_text(encoding="utf-8")
+            self.assertNotIn("workspace_root", config_text)
+
+    def test_run_init_with_token_for_a_different_workspace_root_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _install_ult_repo_layout(root)
+            _install_owning_skill(root)
+            _write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+            stale_token = wi.preview_init(root, workspace_root=".cep/").init_preview_token
+
+            with self.assertRaises(wi.InitError):
+                wi.run_init(root, workspace_root="docs/", init_preview_token=stale_token)
+
+            self.assertFalse((root / ".cep").exists())
+            self.assertFalse((root / "docs" / ".layout-slots.yaml").exists())
+
+    def test_run_init_with_garbage_token_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _install_ult_repo_layout(root)
+            _install_owning_skill(root)
+            _write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
+
+            with self.assertRaises(wi.InitError):
+                wi.run_init(root, workspace_root=".cep/", init_preview_token="not-a-real-token")
+
+            self.assertFalse((root / ".cep").exists())
 
 
 class TestPreviewMatchesRealRun(unittest.TestCase):
@@ -171,7 +228,9 @@ class TestPreviewMatchesRealRun(unittest.TestCase):
             _write(root / "context-config.yaml", "cache:\n  product_context_path: contexts/\n")
 
             preview = wi.preview_init(root, workspace_root="docs/")
-            real = wi.run_init(root, workspace_root="docs/")
+            real = wi.run_init(
+                root, workspace_root="docs/", init_preview_token=preview.init_preview_token
+            )
 
             self.assertEqual(len(preview.messages), len(real.messages))
 

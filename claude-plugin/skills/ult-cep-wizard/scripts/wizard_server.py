@@ -306,10 +306,10 @@ def _make_handler(ctx: _ServerContext):
                 self._handle_api_discover()
                 return
             if path == "/api/init/preview":
-                self._handle_api_init_preview()
+                self._handle_api_init_preview(session)
                 return
             if path == "/api/init":
-                self._handle_api_init()
+                self._handle_api_init(session)
                 return
             if path == "/api/retrofit/select":
                 self._handle_api_retrofit_select()
@@ -1175,14 +1175,20 @@ def _make_handler(ctx: _ServerContext):
                 },
             )
 
-        def _handle_api_init_preview(self) -> None:
+        def _handle_api_init_preview(self, session: wizard_auth.Session) -> None:
             """the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: dry-run preview of the
             first-run `layout.workspace_root` namespacing offer - the tree/messages
             shown before the human commits to a value. Defensive backstop
             `_try_layout_source()` gate matches every other mutating-adjacent route
             here (frontend is expected to have already routed past `layout_broken`
             via `/api/state`); this route itself never mutates anything regardless,
-            since `wizard_init.preview_init` always calls `dry_run=True`."""
+            since `wizard_init.preview_init` always calls `dry_run=True`.
+
+            the 2026-08-31 Round-2 evaluation's finding on POST /api/init committing without a
+            prior preview: a successful preview stamps this session's
+            `init_preview_token` - the only value `_handle_api_init` will ever
+            accept as proof a preview happened for the workspace_root it's about
+            to commit."""
             body = self._read_json_body()
             if body is None:
                 return
@@ -1209,13 +1215,23 @@ def _make_handler(ctx: _ServerContext):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
 
+            session.init_preview_token = result.init_preview_token
             self._send_json(HTTPStatus.OK, {"messages": result.messages})
 
-        def _handle_api_init(self) -> None:
+        def _handle_api_init(self, session: wizard_auth.Session) -> None:
             """The real, committing call - identical body shape to
             `/api/init/preview`. The frontend is expected to have already shown the
             human the matching preview output for the same `workspace_root` value
-            before calling this (see wizard_init.run_init's own docstring)."""
+            before calling this (see wizard_init.run_init's own docstring).
+
+            the 2026-08-31 Round-2 evaluation's finding on POST /api/init committing without a
+            prior preview: `init_preview_token` is sourced only from this
+            session's own state (set by a prior successful `/api/init/preview`
+            call), never from the request body - a client cannot supply or
+            forge its way past this by sending its own value. No preview this
+            session, or a preview for a different `workspace_root`, both fail
+            `wizard_init.run_init`'s internal match check before anything is
+            written."""
             body = self._read_json_body()
             if body is None:
                 return
@@ -1232,11 +1248,19 @@ def _make_handler(ctx: _ServerContext):
             if self._try_layout_source() is None:
                 return
             try:
-                result = wizard_init.run_init(ctx.repo_root, workspace_root=workspace_root)
+                result = wizard_init.run_init(
+                    ctx.repo_root,
+                    workspace_root=workspace_root,
+                    init_preview_token=session.init_preview_token,
+                )
             except wizard_init.InitError as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
 
+            # One-shot: a completed commit consumes the preview it was based
+            # on, same posture as the bootstrap token's single-use exchange -
+            # a stale token from this commit must not authorize another one.
+            session.init_preview_token = None
             self._send_json(HTTPStatus.OK, {"messages": result.messages})
 
     return WizardRequestHandler
