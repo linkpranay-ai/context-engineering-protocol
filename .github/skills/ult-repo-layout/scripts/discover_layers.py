@@ -367,10 +367,49 @@ def _requirements_signal(path):
     return name_match, doc_count
 
 
+def _is_code_sample_or_code_dominant(path, doc_count=None):
+    """True if `path` should be vetoed as evidence for an *un-named* category
+    match - a genuine name-pattern match (REQUIREMENTS_NAME_RE,
+    DESIGN_NAME_RE, API_NAME_RE) is never routed through this and always
+    qualifies on its own, exactly as before this check existed.
+
+    Two independent, additive checks (the 2026-08-31 Round-2 evaluation's
+    findings on repo-layout discovery proposing unsuitable candidate
+    directories after installation, gaps 3.1 and 3.2):
+
+    1. CODE_SAMPLE_DIR_NAMES - an explicit fast path, matched
+       case-insensitively against the candidate's own top-level name only
+       (never a descendant directory sharing one of these names one level
+       down).
+    2. A general non-doc-dominance ratio. This replaces the old
+       CODE_EXTENSIONS-based code-count with a count of *every* file that
+       isn't itself a doc/diagram/spec extension - a fixed extension list
+       can never be exhaustive (the reported repro included Kotlin, Swift,
+       and YAML directories that a Python/JS/Go-centric list like
+       CODE_EXTENSIONS silently missed), so this counts what a directory
+       is *not* (documentation-shaped) rather than trying to enumerate
+       every language, config format, or build artifact it might be.
+
+    A directory of runnable sample/demo code routinely carries one
+    README.md (or a `.drawio`/`.proto` dropped in for illustration) per
+    example - enough to clear a low doc-count bar despite holding no
+    authored corpus content at all; this is the shared veto for that shape,
+    used by every un-named/generic-fallback evidence path in this module."""
+    if path.name.casefold() in CODE_SAMPLE_DIR_NAMES:
+        return True
+    if doc_count is None:
+        doc_count = _count_docs(path)
+    total_count = sum(1 for _ in _iter_files(path))
+    non_doc_count = total_count - doc_count
+    if non_doc_count > 0 and non_doc_count >= doc_count * CODE_DOMINANCE_RATIO:
+        return True
+    return False
+
+
 def _unnamed_doc_count_eligible(path, doc_count):
     """Whether `doc_count` alone (no category name-pattern match) is enough
     to register `path` as evidence for *some* category - see
-    CODE_SAMPLE_DIR_NAMES/CODE_EXTENSIONS above for why this is narrower than
+    _is_code_sample_or_code_dominant above for why this is narrower than
     a bare `doc_count >= MIN_DOC_COUNT_FOR_UNNAMED_MATCH` check. Shared by
     every un-named/generic fallback path in this module (Requirements'
     own generic route in categorize_candidate and
@@ -384,26 +423,33 @@ def _unnamed_doc_count_eligible(path, doc_count):
     here."""
     if doc_count < MIN_DOC_COUNT_FOR_UNNAMED_MATCH:
         return False
-    if path.name.casefold() in CODE_SAMPLE_DIR_NAMES:
-        return False
-    code_count = _count_by_ext(path, CODE_EXTENSIONS)
-    if code_count > 0 and code_count >= doc_count * CODE_DOMINANCE_RATIO:
-        return False
-    return True
+    return not _is_code_sample_or_code_dominant(path, doc_count)
 
 
 def _design_signal(path):
+    """Design/ADR/architecture-diagram evidence. A genuine name match
+    (DESIGN_NAME_RE) qualifies unconditionally; unnamed evidence (a bare ADR
+    filename or `.drawio`/`.puml` diagram sitting in an otherwise
+    code-dominant or CODE_SAMPLE_DIR_NAMES directory) is vetoed the same way
+    Requirements' own unnamed fallback already was - see gap 3.1,
+    _is_code_sample_or_code_dominant."""
     name_match = bool(DESIGN_NAME_RE.search(path.name))
     adr_count = _count_adr_filenames(path)
     diagram_count = _count_by_ext(path, DIAGRAM_EXTENSIONS)
-    matched = name_match or adr_count > 0 or diagram_count > 0
+    unnamed_evidence = adr_count > 0 or diagram_count > 0
+    matched = name_match or (unnamed_evidence and not _is_code_sample_or_code_dominant(path))
     return matched, {"name_match": name_match, "adr_count": adr_count, "diagram_count": diagram_count}
 
 
 def _api_signal(path):
+    """API/spec-file evidence. A genuine name match (API_NAME_RE) qualifies
+    unconditionally; unnamed evidence (a spec/`.proto`/`.graphql` file
+    sitting in an otherwise code-dominant or CODE_SAMPLE_DIR_NAMES
+    directory) is vetoed the same way - see gap 3.1,
+    _is_code_sample_or_code_dominant."""
     name_match = bool(API_NAME_RE.search(path.name))
     has_spec_file = _has_api_spec_filenames(path) or _count_by_ext(path, API_SPEC_EXTENSIONS) > 0
-    matched = name_match or has_spec_file
+    matched = name_match or (has_spec_file and not _is_code_sample_or_code_dominant(path))
     return matched, {"name_match": name_match, "has_spec_file": has_spec_file}
 
 

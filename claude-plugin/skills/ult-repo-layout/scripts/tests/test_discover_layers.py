@@ -258,6 +258,81 @@ class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
         self.assertIn("openapi/", roots)
         self.assertIn("include_roots_decision: PENDING   # ADD: openapi/", section.render())
 
+    def test_sibling_examples_dir_with_proto_file_is_not_an_api_candidate(self):
+        # Gap 3.1: categorize_candidate's Design/API signals were never gated
+        # through the code-sample/code-dominance veto Requirements' own
+        # generic route already used - an un-named `examples/` directory
+        # with a `.proto` file dropped in for illustration used to surface
+        # as an API/spec candidate. CODE_SAMPLE_DIR_NAMES membership vetoes
+        # it outright, same as it already does for Requirements.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "examples" / "service" / "README.md", "# Example service")
+        write(self.repo_root / "examples" / "service" / "api.proto", "syntax = \"proto3\";")
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("examples/", roots)
+        self.assertNotIn("examples/", section.render())
+
+    def test_sibling_cookbook_dir_with_kotlin_files_is_not_a_requirements_candidate(self):
+        # Gap 3.2: the old CODE_EXTENSIONS-based ratio never counted Kotlin,
+        # so a code-dominant, un-named `cookbook/` directory of `.kt` files
+        # with a couple of README.md files slipped through as a Requirements
+        # candidate. The extension-list-free non-doc-dominance ratio counts
+        # any non-doc file, regardless of language, so this is caught now.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "cookbook" / "README.md", "# Cookbook")
+        write(self.repo_root / "cookbook" / "notes.md", "# Notes")
+        for i in range(8):
+            write(self.repo_root / "cookbook" / f"Recipe{i}.kt", "fun main() {}")
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("cookbook/", roots)
+        self.assertNotIn("cookbook/", section.render())
+
+    def test_sibling_gallery_dir_with_swift_and_drawio_is_not_a_design_candidate(self):
+        # Gap 3.1/3.2 combined: an un-named `gallery/` directory dominated
+        # by `.swift` code, with one `.drawio` diagram dropped in, used to
+        # surface as a Design candidate purely on diagram_count > 0 - Design
+        # evidence was never gated at all. Neither CODE_SAMPLE_DIR_NAMES
+        # (not a recognized sample-dir name) nor the old CODE_EXTENSIONS
+        # ratio (.swift wasn't listed) caught this; the extension-list-free
+        # ratio does.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "gallery" / "README.md", "# Gallery")
+        write(self.repo_root / "gallery" / "layout.drawio", "<mxfile></mxfile>")
+        for i in range(8):
+            write(self.repo_root / "gallery" / f"View{i}.swift", "struct View {}")
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("gallery/", roots)
+        self.assertNotIn("gallery/", section.render())
+
+    def test_sibling_deploy_dir_with_yaml_files_is_not_a_requirements_candidate(self):
+        # Gap 3.2: YAML wasn't in CODE_EXTENSIONS either - a code(-config)-
+        # dominant, un-named `deploy/` directory of `.yaml` manifests with a
+        # couple of README.md files slipped through the old ratio check.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "deploy" / "README.md", "# Deploy")
+        write(self.repo_root / "deploy" / "notes.md", "# Notes")
+        for i in range(8):
+            write(self.repo_root / "deploy" / f"service{i}.yaml", "kind: Deployment")
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("deploy/", roots)
+        self.assertNotIn("deploy/", section.render())
+
     def test_vendor_looking_subdir_inside_workspace_root_proposed_for_exclude(self):
         write(self.repo_root / "docs" / "a.md", "# doc")
         for i in range(6):
