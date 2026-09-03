@@ -258,9 +258,16 @@ class TestResolveExternalTarget(unittest.TestCase):
     # create/remove.
     def test_mid_chain_junction_ancestor_is_rejected(self):
         real_violation = wc.component_is_containment_violation
+        checked_ancestor = self.external_root.resolve().parent
 
         def fake_violation(path):
-            if Path(path) == self.external_root.resolve().parent:
+            # Resolve before comparing: the ancestor walk passes the *raw*
+            # (unresolved) path component, which on Windows CI runners can
+            # come back in 8.3 short-path form (e.g. RUNNER~1) even though
+            # checked_ancestor is the long-form resolved path - a bare
+            # Path equality would then never match and this mock would
+            # silently never fire.
+            if Path(path).resolve() == checked_ancestor:
                 return True
             return real_violation(path)
 
@@ -278,7 +285,10 @@ class TestResolveExternalTarget(unittest.TestCase):
         checked_ancestor = self.external_root.resolve().parent
 
         def fake_violation(path):
-            if Path(path) == checked_ancestor:
+            # See test_mid_chain_junction_ancestor_is_rejected above: resolve
+            # before comparing so this isn't defeated by a raw short-path
+            # (8.3) ancestor form on Windows CI runners.
+            if Path(path).resolve() == checked_ancestor:
                 return False  # cloud placeholder: not a violation
             return real_violation(path)
 
