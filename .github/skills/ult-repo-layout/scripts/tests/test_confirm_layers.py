@@ -81,6 +81,17 @@ class TestFieldResolve(unittest.TestCase):
         with self.assertRaises(cl.FieldError):
             f.resolve()
 
+    def test_acknowledge_offered_alongside_candidates_is_accepted(self):
+        # the 2026-08-31 Round-2 evaluation's finding on What-L2 decision-line verb
+        # coverage: once a line's own comment lists ACKNOWLEDGE (as
+        # discover_layers.py's with-candidates template now does), it resolves
+        # like any other listed verb - same generic comment-as-grammar parsing
+        # as the negative case above, just with the verb actually offered.
+        f = self._field("ACKNOWLEDGE", "CONFIRM: my-specs/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE")
+        f.resolve()
+        self.assertEqual(f.verb, "ACKNOWLEDGE")
+        self.assertIsNone(f.arg)
+
     def test_still_pending_is_an_error(self):
         f = self._field("PENDING", "CONFIRM: my-specs/ | CUSTOM: <path> | SKIP")
         with self.assertRaises(cl.FieldError):

@@ -195,6 +195,73 @@ class TestWhatL2ScanAndScore(TempRepoTestCase):
         rendered = section.render()
         self.assertNotIn("contexts/", rendered)
 
+    def test_examples_dir_with_per_example_readmes_is_not_a_requirements_candidate(self):
+        # the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: a directory of runnable
+        # sample code with one README.md per example crosses
+        # MIN_DOC_COUNT_FOR_UNNAMED_MATCH (2) despite holding no requirements
+        # prose at all - CODE_SAMPLE_DIR_NAMES excludes the un-named
+        # fallback route for this exact directory-name convention.
+        write(self.repo_root / "examples" / "hello-world" / "README.md", "# Hello World example")
+        write(self.repo_root / "examples" / "hello-world" / "main.py", "print('hi')")
+        write(self.repo_root / "examples" / "advanced" / "README.md", "# Advanced example")
+        write(self.repo_root / "examples" / "advanced" / "main.py", "print('hi')")
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("examples/", rendered)
+        self.assertIsNone(path)
+
+    def test_code_dominant_unnamed_dir_is_not_a_requirements_candidate_regardless_of_name(self):
+        # Generalizes the examples/ fix beyond the named fast path: any
+        # directory whose code files outnumber its doc files by
+        # CODE_DOMINANCE_RATIO is read as "predominantly code, incidentally
+        # documented", whatever it happens to be named.
+        write(self.repo_root / "cookbook" / "recipe-one" / "README.md", "# Recipe one")
+        for i in range(8):
+            write(self.repo_root / "cookbook" / "recipe-one" / f"step{i}.py", "pass")
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("cookbook/", rendered)
+
+    def test_examples_dir_with_genuine_name_match_still_qualifies(self):
+        # A name match (REQUIREMENTS_NAME_RE) is untouched by
+        # CODE_SAMPLE_DIR_NAMES/CODE_EXTENSIONS - only the un-named generic
+        # fallback route is narrowed.
+        for i in range(12):
+            write(self.repo_root / "specs" / f"{i}.md", "# req")
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIn("CONFIRM: specs/", rendered)
+
+    def test_manifest_owned_requirements_named_dir_is_excluded_from_candidacy(self):
+        # the 2026-09-01 evaluation's finding on top-level candidacy: a
+        # manifest-owned top-level directory outside SCAN_IGNORED_DIR_NAMES/
+        # CEP_BUCKET_DIR_NAMES still surfaced as a What-L2 Requirements
+        # candidate even when CEP's own manifest names it as owned -
+        # _top_level_candidate_dirs never received manifest data at all
+        # before this fix, unlike How-L2's already-manifest-aware
+        # `.github/` scan (see _manifest_extra_ignored).
+        for i in range(12):
+            write(self.repo_root / "specification" / f"{i}.md", "# x")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["specification"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("specification/", rendered)
+        self.assertIsNone(path)
+
 
 class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
     def test_populated_workspace_root_after_exclude_is_notice_only(self):
@@ -217,6 +284,112 @@ class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
         section, path, roots = dl.discover_what_l2(self.repo_root, config)
         self.assertIn("openapi/", roots)
         self.assertIn("include_roots_decision: PENDING   # ADD: openapi/", section.render())
+
+    def test_manifest_owned_sibling_is_excluded_from_include_roots(self):
+        # the 2026-09-01 evaluation's finding on top-level candidacy:
+        # manifest data was already threaded into How-L2's `.github/` scan
+        # but never into What-L2's outside-workspace_root sibling scan
+        # (_composite_sibling_scan/_top_level_candidate_dirs) - a
+        # manifest-owned sibling directory used to still surface as an
+        # include_roots candidate on the strength of CEP's own installed
+        # content. Same fixture as
+        # test_sibling_composite_scan_runs_outside_workspace_root above,
+        # but with a manifest naming `openapi/` as CEP-owned.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "openapi" / "openapi.yaml", "openapi: 3.0.0")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["openapi"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("openapi/", roots)
+        self.assertNotIn("openapi/", section.render())
+
+    def test_sibling_examples_dir_with_proto_file_is_not_an_api_candidate(self):
+        # Gap 3.1: categorize_candidate's Design/API signals were never gated
+        # through the code-sample/code-dominance veto Requirements' own
+        # generic route already used - an un-named `examples/` directory
+        # with a `.proto` file dropped in for illustration used to surface
+        # as an API/spec candidate. CODE_SAMPLE_DIR_NAMES membership vetoes
+        # it outright, same as it already does for Requirements.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "examples" / "service" / "README.md", "# Example service")
+        write(self.repo_root / "examples" / "service" / "api.proto", "syntax = \"proto3\";")
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("examples/", roots)
+        self.assertNotIn("examples/", section.render())
+
+    def test_sibling_cookbook_dir_with_kotlin_files_is_not_a_requirements_candidate(self):
+        # Gap 3.2: the old CODE_EXTENSIONS-based ratio never counted Kotlin,
+        # so a code-dominant, un-named `cookbook/` directory of `.kt` files
+        # with a couple of README.md files slipped through as a Requirements
+        # candidate. The extension-list-free non-doc-dominance ratio counts
+        # any non-doc file, regardless of language, so this is caught now.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "cookbook" / "README.md", "# Cookbook")
+        write(self.repo_root / "cookbook" / "notes.md", "# Notes")
+        for i in range(8):
+            write(self.repo_root / "cookbook" / f"Recipe{i}.kt", "fun main() {}")
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("cookbook/", roots)
+        self.assertNotIn("cookbook/", section.render())
+
+    def test_sibling_gallery_dir_with_swift_and_drawio_is_not_a_design_candidate(self):
+        # Gap 3.1/3.2 combined: an un-named `gallery/` directory dominated
+        # by `.swift` code, with one `.drawio` diagram dropped in, used to
+        # surface as a Design candidate purely on diagram_count > 0 - Design
+        # evidence was never gated at all. Neither CODE_SAMPLE_DIR_NAMES
+        # (not a recognized sample-dir name) nor the old CODE_EXTENSIONS
+        # ratio (.swift wasn't listed) caught this; the extension-list-free
+        # ratio does.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "gallery" / "README.md", "# Gallery")
+        write(self.repo_root / "gallery" / "layout.drawio", "<mxfile></mxfile>")
+        for i in range(8):
+            write(self.repo_root / "gallery" / f"View{i}.swift", "struct View {}")
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("gallery/", roots)
+        self.assertNotIn("gallery/", section.render())
+
+    def test_sibling_deploy_dir_with_yaml_files_is_not_a_requirements_candidate(self):
+        # Gap 3.2: YAML wasn't in CODE_EXTENSIONS either - a code(-config)-
+        # dominant, un-named `deploy/` directory of `.yaml` manifests with a
+        # couple of README.md files slipped through the old ratio check.
+        write(self.repo_root / "docs" / "a.md", "# doc")
+        write(self.repo_root / "deploy" / "README.md", "# Deploy")
+        write(self.repo_root / "deploy" / "notes.md", "# Notes")
+        for i in range(8):
+            write(self.repo_root / "deploy" / f"service{i}.yaml", "kind: Deployment")
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertNotIn("deploy/", roots)
+        self.assertNotIn("deploy/", section.render())
 
     def test_vendor_looking_subdir_inside_workspace_root_proposed_for_exclude(self):
         write(self.repo_root / "docs" / "a.md", "# doc")
@@ -289,6 +462,48 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         config = self.config()
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_ci_workflow_file_alone_does_not_inflate_github_candidacy(self):
+        # the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: skills/prompts exclusion
+        # alone isn't enough - a bare CI workflow YAML (automation, not an
+        # authored convention) is neither a doc nor a recognized
+        # HOW_L2_GITHUB_SIGNAL_NAMES/_DIRS entry, and previously the "any
+        # file at all" fallback let it single-handedly qualify .github/ once
+        # skills/prompts were excluded. Nearly every real repo has a CI
+        # workflow regardless of whether it has any authored conventions.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "prompts" / "do-thing.prompt.md", "# Do Thing")
+        write(self.repo_root / ".github" / "workflows" / "ci.yml", "name: CI\non: [push]\n")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_github_issue_template_dir_still_counts_as_a_signal(self):
+        write(self.repo_root / ".github" / "ISSUE_TEMPLATE" / "bug.md", "# Bug report")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_github_candidate_carries_caution_about_nested_cep_tooling(self):
+        # Even when .github/ legitimately ranks on real content, a human
+        # confirming it needs to know CEP's own skills/prompts stay nested
+        # inside that same path - discovery-time exclusion never carries
+        # forward into what "confirmed how_l2.path=.github/" means
+        # downstream.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "CODEOWNERS", "* @team")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIn("CONFIRM: .github/", rendered)
+        self.assertIn("WARNING", rendered)
+        self.assertIn(".github/skills/", rendered)
+
+    def test_no_caution_when_github_is_not_a_candidate_at_all(self):
+        write(self.repo_root / "docs" / "style-guide" / "a.md", "# style")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn("WARNING", section.render())
 
     def test_manifest_present_still_excludes_the_common_skills_and_prompts_pair(self):
         # Same fixture as test_cep_own_installed_skills_and_prompts_do_not_
@@ -558,8 +773,8 @@ class TestDriftTracking(TempRepoTestCase):
         # sees zero remaining PENDING fields, same as a real human editing
         # every field on the artifact before confirming.
         text = artifact.replace(
-            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
-            f"decision: {verb}   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
+            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE",
+            f"decision: {verb}   # CONFIRM: specification/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE",
             1,
         )
         return text.replace(
@@ -573,6 +788,20 @@ class TestDriftTracking(TempRepoTestCase):
         artifact_path = self.repo_root / "context-layout-discovery.md"
         artifact_path.write_text(self._resolve_what_l2_pending(artifact, verb), encoding="utf-8")
         return cl.run_confirm(self.repo_root)
+
+    def test_acknowledge_with_candidates_present_is_accepted_and_writes_no_path(self):
+        # the 2026-08-31 Round-2 evaluation's finding on What-L2 decision-line verb
+        # coverage: with a genuine Requirements candidate on the board,
+        # ACKNOWLEDGE (added alongside CONFIRM/CUSTOM/SKIP) must resolve
+        # cleanly through confirm-layers, and - like SKIP - must leave
+        # layers.what_l2.path unset rather than silently confirming the
+        # candidate the human declined to pick.
+        self._make_what_l2_candidate()
+        code, msgs = self._run_discover_then_confirm("ACKNOWLEDGE")
+        self.assertEqual(code, 0, msgs)
+        config_path = self.repo_root / "context-config.yaml"
+        config = vl.load_yaml_file(config_path) if config_path.exists() else {}
+        self.assertNotIn("path", (config or {}).get("layers", {}).get("what_l2", {}))
 
     def test_confirmed_path_removed_appends_redisc_section_original_untouched(self):
         self._make_what_l2_candidate()
@@ -675,8 +904,8 @@ class TestPerCandidateDriftTracking(TempRepoTestCase):
 
     def _resolve_pending(self, artifact):
         text = artifact.replace(
-            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
-            "decision: CONFIRM   # CONFIRM: specification/ | CUSTOM: <path> | SKIP",
+            "decision: PENDING   # CONFIRM: specification/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE",
+            "decision: CONFIRM   # CONFIRM: specification/ | CUSTOM: <path> | SKIP | ACKNOWLEDGE",
             1,
         )
         text = text.replace(

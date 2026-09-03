@@ -92,6 +92,16 @@ warns about exactly this if it slips through). Before your first
 `graphify update`, check for that file and, if present, merge its
 `owned_paths` into `.graphifyignore` — one entry per line.
 
+No CLI flag is needed to enable this: the published `graphifyy` package docs
+state that `.graphifyignore` is auto-discovered next to the directory you
+point `graphify update` at, the same way `.gitignore` is, and is evaluated
+after `.gitignore`. `graphify --help` not listing an ignore-file option is
+expected per that documentation — it's not a sign the file is being ignored.
+That said, treat the auto-discovery behavior itself as unconfirmed on
+Windows rather than settled fact: a 2026-08-31 evaluation there retried with
+the documented ignore configuration in place and observed no change in
+output.
+
 `.graphifyignore` is a file the adopter may also want to write in
 themselves (build output, fixture trees, anything else they never want
 indexed), so this recipe **must not regenerate the whole file**. Write the
@@ -175,6 +185,11 @@ uv tool install graphifyy
 # ~300 KSLOC). Use your Step 0 directory in place of `.` if you scoped.
 graphify update . --no-cluster
 
+# Verify the run actually produced a graph (the 2026-08-31 Round-2 evaluation's finding on the codegraph sanity-check invocation not being runnable as documented,
+# 2026-08-31) — see the paragraph below the "Together, these write..." note.
+# Treat a nonzero exit here the same as `graphify update` itself failing.
+python .github/skills/ult-codegraph/scripts/check_graphify_output.py .
+
 # Optional: cluster into communities + generate the human-readable report.
 # Community *names* require GEMINI_API_KEY/GOOGLE_API_KEY — without one they
 # stay generic ("Community 0", "Community 1", ...). The underlying graph.json
@@ -189,6 +204,20 @@ location. It has no `--output` flag; `graphify update`/`query`/`path`/`explain`
 all default-read from `graphify-out/` relative to the path you point them at,
 so this directory must stay where the tool expects it for incremental updates
 and queries to work.
+
+**Always run `check_graphify_output.py` immediately after `graphify
+update`.** On Windows specifically, `graphify update`'s internal watch/
+rebuild step has been observed to fail with `[WinError 5] Access is denied`
+while giving no further detail at all — no path naming which file it
+couldn't access, no retry, and no exit-code/console signal reliably
+distinguishing "ran to completion" from "silently gave up after creating an
+empty `graphify-out/cache/`." `check_graphify_output.py` (stdlib-only, no
+new dependency) distinguishes four states — never ran, partial failure
+(`graphify-out/cache/` exists, `graph.json` doesn't — the exact repro above),
+present but empty/corrupt, and genuinely ok — and exits nonzero with
+Windows-specific troubleshooting for the first three. Don't proceed to
+`graphify query`/`path`/`explain`/`affected` on a graph this check flags as
+failed; treat it the same as `graphify update` itself having failed.
 
 **`GRAPH_REPORT.md`/`graph.html` are produced by the `cluster-only` step, not
 by `graphify update . --no-cluster` alone.** If a consuming skill's flow only
@@ -287,6 +316,7 @@ here's exactly what this costs" shape used for irreversible deletes.
 |------|---------|
 | `SKILL.md` | This instruction file |
 | `CONSUMING-CODE-GRAPH.md` | Consumer-contract other skills are pointed at |
+| `scripts/check_graphify_output.py` | Post-`graphify update` sanity check — run it every time (see "How to run" above) |
 
 ## Prerequisites
 

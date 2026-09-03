@@ -58,12 +58,16 @@ history and exit criteria — not needed to operate this skill day to day.
 This file and others in this repo cite `D<N>`/`§<N>` labels (e.g. `D21 §16.2`) — see
 `../../../references/design-scratchpad-glossary.md` for what each one means.
 
-**Alternative front-end:** once `init`/`discover` has run at least once here, you can
-also view what got resolved through a local browser wizard instead of re-reading
-`context-config.yaml` and the markers by hand — see
-[`ult-cep-wizard`](../ult-cep-wizard/SKILL.md) (D24). It's a read-only status
-view on top of this skill's own state, not an alternative way to run `init`/
-`discover`/`confirm-layers` — those still happen here.
+**Alternative front-end:** you can also view and (partly) drive this skill's state
+through a local browser wizard instead of re-reading `context-config.yaml` and the
+markers by hand — see [`ult-cep-wizard`](../ult-cep-wizard/SKILL.md) (D24). It's
+mostly a read-only status view, but it can trigger `discover` in place (its own
+freshness-hash-guarded `POST /api/discover`) and the mechanical half of `init` —
+slot scaffolding and the `layout.workspace_root` opt-in this section describes,
+via `POST /api/init` — before D20 has been initialized at all. It never asks for
+`project_name`/`description`, offers a rename-before-scaffold prompt, or runs
+`confirm-layers`/`reconcile` — those, and the fully conversational `init`, still
+happen here.
 
 ## Dependencies
 

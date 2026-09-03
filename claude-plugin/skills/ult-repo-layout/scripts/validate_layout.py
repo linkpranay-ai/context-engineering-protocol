@@ -89,7 +89,7 @@ md_index.py / content_hash.py.
 
 CLI:
     python validate_layout.py --validate [<repo-root>]
-    python validate_layout.py --init [--workspace-root <path>] [--ci-hook] [<repo-root>]
+    python validate_layout.py --init [--workspace-root <path>] [--ci-hook] [--dry-run] [<repo-root>]
 
 `--init` backs only the mechanical half of SKILL.md's `init` mode - scaffold
 each installed slot's directory/marker, write `project_layout` into
@@ -616,6 +616,29 @@ def resolve_how_l1_enabled(config):
 
 def check_path_wellformedness(rel_path):
     problems = []
+    # An absolute path (POSIX '/...', Windows 'C:\...', or a UNC share
+    # '\\server\share\...') is never repo-relative, and joining one onto a
+    # root with pathlib silently discards the root rather than raising -
+    # `repo_root / rel_path` just becomes `rel_path` itself. Every caller of
+    # this function (run_init's --workspace-root, config's layout.workspace_root,
+    # and the per-marker well-formedness loop) needs that path rejected here
+    # rather than at the join site, since the join site cannot tell the
+    # difference between "joined fine" and "silently replaced" after the fact
+    # (2026-09-01: closes the gap where such a value reached an HTTP-exposed
+    # write path unchecked).
+    #
+    # `.is_absolute()`/`.drive` alone are not enough: a POSIX-style value
+    # like "/etc/x" parsed as a plain `Path` on a Windows host becomes a
+    # `WindowsPath` with no drive, and pathlib does NOT consider a driveless
+    # rooted path "absolute" on Windows - yet `repo_root / "/etc/x"` still
+    # discards `repo_root` the same way. `.root` catches that case (and every
+    # other rooted-but-driveless variant) on any host OS without needing to
+    # know in advance which OS produced the string.
+    if rel_path.is_absolute() or rel_path.drive or rel_path.root:
+        problems.append(
+            f"'{rel_path}' is an absolute path - paths must be repo-relative (M3)"
+        )
+        return problems
     for part in rel_path.parts:
         if part == "..":
             problems.append("contains a '..' segment - paths must be repo-relative (M3)")
@@ -1089,6 +1112,32 @@ def _scaffold_pre_commit_hook(repo_root):
     return f"Scaffolded pre-commit hook at '{hook_path.relative_to(repo_root).as_posix()}'."
 
 
+def _preview_pre_commit_hook(repo_root):
+    """Read-only sibling of `_scaffold_pre_commit_hook` for `run_init(...,
+    dry_run=True)` - same three branches, same phrasing, never writes
+    anything. Kept separate rather than adding a `dry_run` flag to the real
+    function because the two are trivial (two existence checks) and the
+    "Would " prefix on every branch reads more clearly as its own small
+    function than as a parameterized one."""
+    hooks_dir = repo_root / ".git" / "hooks"
+    if not hooks_dir.is_dir():
+        return (
+            "Would skip pre-commit hook - no .git/hooks/ directory found. Wire "
+            "'validate_layout.py --validate' into your CI/pre-commit setup "
+            "by hand (see SKILL.md \"CI / pre-commit hook\")."
+        )
+    hook_path = hooks_dir / "pre-commit"
+    if hook_path.exists():
+        return (
+            f"Would skip pre-commit hook - "
+            f"'{hook_path.relative_to(repo_root).as_posix()}' already exists."
+        )
+    return (
+        f"Would scaffold pre-commit hook at "
+        f"'{hook_path.relative_to(repo_root).as_posix()}'."
+    )
+
+
 def _marker_entry_lines(slot, kind, file_name):
     lines = [f"  - slot: {slot}", f"    kind: {kind}"]
     if file_name:
@@ -1141,7 +1190,7 @@ def _write_project_layout_section(lines, entries):
     lines.extend(block)
 
 
-def run_init(repo_root, workspace_root=None, ci_hook=False):
+def run_init(repo_root, workspace_root=None, ci_hook=False, dry_run=False):
     """Back only the mechanical half of `init` mode (SKILL.md "Modes >
     init") - scaffold each installed slot's directory/marker, write
     `project_layout` into context-config.yaml, and, only if `ci_hook` is
@@ -1162,8 +1211,22 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
     scaffolds the pre-commit hook alone and succeeds, since the hook is
     opt-in and would otherwise be unreachable after the first `init`.
 
+    `dry_run=True` (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init - the wizard's
+    first-run `workspace_root` preview, `/api/init/preview`) runs every
+    eligibility check and the full slot-resolution loop exactly as a real
+    call would, but performs none of the actual writes (`mkdir`, marker
+    files, `context-config.yaml`, the pre-commit hook) - it exists so a
+    caller can show "here's what init would do" before committing to it,
+    reusing this function's own resolution logic instead of a second,
+    driftable copy of it (same reuse-not-reimplement posture as every other
+    resolver in this module). Messages say "Would <verb>" instead of the
+    real past-tense verb so a preview can never be mistaken for a completed
+    run if logged or displayed verbatim. An already-initialized repo still
+    returns the same refusal in preview mode - there is nothing left to
+    preview once `project_layout` is set.
+
     Returns (exit_code, messages) - 0/[...] on success, 1/[...] on
-    refusal."""
+    refusal - identical shape whether or not `dry_run` is set."""
     repo_root = Path(repo_root).resolve()
     config_path = repo_root / "context-config.yaml"
     if not config_path.exists():
@@ -1189,7 +1252,11 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
             # the first init wrote it.
             return 0, [
                 "Already initialized - left project_layout untouched.",
-                _scaffold_pre_commit_hook(repo_root),
+                (
+                    _preview_pre_commit_hook(repo_root)
+                    if dry_run
+                    else _scaffold_pre_commit_hook(repo_root)
+                ),
             ]
         return 1, [
             "Already initialized. Run /ult-repo-layout reconcile to update "
@@ -1222,6 +1289,27 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
 
     effective_wr = workspace_root.rstrip("/") if workspace_root else existing_wr
 
+    # Snapshot the What-L2/How-L2 "does the shipped default already have
+    # content" checks *before* the scaffold loop below runs. Real-run
+    # scaffolding (e.g. context_packages landing at
+    # '{workspace_root}/contexts/') can mkdir(parents=True) the workspace
+    # root itself as a side effect; checking existence after that loop would
+    # then see that incidental directory and wrongly conclude there's
+    # already content, silently skipping the disable. This also keeps
+    # dry_run and real-run messages identical, since dry_run never runs the
+    # loop's mkdir at all (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init).
+    what_l2_default = None
+    what_l2_existed_before_init = None
+    if not resolve_what_l2_path_explicit(config):
+        what_l2_default = resolve_what_l2_path_for_init(config, effective_wr)
+        what_l2_existed_before_init = (repo_root / what_l2_default.rstrip("/")).exists()
+
+    how_l2_default = None
+    how_l2_existed_before_init = None
+    if not resolve_how_l2_path_explicit(config):
+        how_l2_default = resolve_how_l2_path(config)
+        how_l2_existed_before_init = (repo_root / how_l2_default.rstrip("/")).exists()
+
     entries = {}
     messages = []
     for slot, spec in SLOT_REGISTRY.items():
@@ -1234,14 +1322,23 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
             default = resolve_pre_d21_default(slot, config)
 
         rel = Path(default.rstrip("/"))
+        # Defensive, not the primary guard: `effective_wr` should already have
+        # passed check_path_wellformedness above (or come from an
+        # already-validated config value) by the time it reaches here, but
+        # `repo_root / rel` silently discards `repo_root` and becomes `rel`
+        # itself if `rel` is ever absolute - assert instead of writing outside
+        # the affirmed root should that invariant ever be violated upstream.
+        assert not rel.is_absolute(), f"slot '{slot}' resolved to an absolute path {rel!r}"
         kind = spec["kind"]
         target = repo_root / rel
 
         if kind == "directory":
-            target.mkdir(parents=True, exist_ok=True)
-            _write_marker(target, slot, kind, None)
+            if not dry_run:
+                target.mkdir(parents=True, exist_ok=True)
+                _write_marker(target, slot, kind, None)
             resolved_display = rel.as_posix() + "/"
-            messages.append(f"Scaffolded '{slot}' at '{resolved_display}'.")
+            verb = "Would scaffold" if dry_run else "Scaffolded"
+            messages.append(f"{verb} '{slot}' at '{resolved_display}'.")
         else:
             # kind == "file": init only registers the marker + slot
             # location - it never creates the file itself. That's the
@@ -1249,12 +1346,15 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
             # claiming "Scaffolded" here would be a false positive (the
             # file doesn't exist yet) that --validate immediately
             # contradicts the next time it runs.
-            target.parent.mkdir(parents=True, exist_ok=True)
-            _write_marker(target.parent, slot, kind, target.name)
+            if not dry_run:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _write_marker(target.parent, slot, kind, target.name)
             resolved_display = rel.as_posix()
+            verb = "Would register" if dry_run else "Registered"
+            tense = "would be written" if dry_run else "is written"
             messages.append(
-                f"Registered '{slot}' at '{resolved_display}' - the file "
-                f"itself is written by {spec['owning_skill']} on first run."
+                f"{verb} '{slot}' at '{resolved_display}' - the file "
+                f"itself {tense} by {spec['owning_skill']} on first run."
             )
 
         entries[slot] = (resolved_display, kind, spec["owning_skill"])
@@ -1268,14 +1368,21 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
     config_lines = config_path.read_text(encoding="utf-8-sig").splitlines()
 
     if workspace_root is not None:
+        # In dry_run, these two calls still mutate `config_lines`, but that
+        # list is never written back to disk below - harmless scratch state,
+        # kept unconditional so the resolution above (which already used
+        # `effective_wr`, not `config_lines`) doesn't need a second,
+        # dry_run-only branch just to compute the same values again.
         set_scalar(config_lines, ["layout", "workspace_root"], workspace_root.rstrip("/"))
         current_exclude = resolve_what_l2_exclude(config)
         for leaf in ("contexts/", "inputs/", "cache/"):
             if leaf not in current_exclude:
                 append_list_item(config_lines, ["layers", "what_l2", "exclude"], leaf)
+        verb = "Would set" if dry_run else "Set"
+        tense = "would be pre-populated" if dry_run else "pre-populated"
         messages.append(
-            f"Set layout.workspace_root = '{workspace_root.rstrip('/')}' and "
-            f"pre-populated layers.what_l2.exclude (§16.5 recommended triad)."
+            f"{verb} layout.workspace_root = '{workspace_root.rstrip('/')}' and "
+            f"layers.what_l2.exclude {tense} (§16.5 recommended triad)."
         )
 
     # S28 day-one silent-clean: What-L2/How-L2 ship enabled: true with no
@@ -1285,27 +1392,34 @@ def run_init(repo_root, workspace_root=None, ci_hook=False):
     # shipped. Only touch it when the path is still the shipped default
     # (never override a path the user explicitly configured, even if that
     # path doesn't exist yet) and it genuinely doesn't exist on disk.
-    if not resolve_what_l2_path_explicit(config):
-        what_l2_default = resolve_what_l2_path_for_init(config, effective_wr)
-        if not (repo_root / what_l2_default.rstrip("/")).exists():
-            set_scalar(config_lines, ["layers", "what_l2", "enabled"], "false")
-            messages.append(
-                f"Set layers.what_l2.enabled = false - the shipped default "
-                f"'{what_l2_default}' doesn't exist in this repo yet. Set it "
-                f"back to true (and layers.what_l2.path, if different) once "
-                f"there's content to index."
-            )
+    if what_l2_default is not None and not what_l2_existed_before_init:
+        set_scalar(config_lines, ["layers", "what_l2", "enabled"], "false")
+        verb = "Would set" if dry_run else "Set"
+        messages.append(
+            f"{verb} layers.what_l2.enabled = false - the shipped default "
+            f"'{what_l2_default}' doesn't exist in this repo yet. Set it "
+            f"back to true (and layers.what_l2.path, if different) once "
+            f"there's content to index."
+        )
 
-    if not resolve_how_l2_path_explicit(config):
-        how_l2_default = resolve_how_l2_path(config)
-        if not (repo_root / how_l2_default.rstrip("/")).exists():
-            set_scalar(config_lines, ["how_dimension", "how_l2", "enabled"], "false")
-            messages.append(
-                f"Set how_dimension.how_l2.enabled = false - the shipped "
-                f"default '{how_l2_default}' doesn't exist in this repo yet. "
-                f"Set it back to true (and how_dimension.how_l2.path, if "
-                f"different) once there's content to index."
-            )
+    if how_l2_default is not None and not how_l2_existed_before_init:
+        set_scalar(config_lines, ["how_dimension", "how_l2", "enabled"], "false")
+        verb = "Would set" if dry_run else "Set"
+        messages.append(
+            f"{verb} how_dimension.how_l2.enabled = false - the shipped "
+            f"default '{how_l2_default}' doesn't exist in this repo yet. "
+            f"Set it back to true (and how_dimension.how_l2.path, if "
+            f"different) once there's content to index."
+        )
+
+    if dry_run:
+        messages.append(
+            f"Would write project_layout with {len(entries)} slot(s) to "
+            f"context-config.yaml."
+        )
+        if ci_hook:
+            messages.append(_preview_pre_commit_hook(repo_root))
+        return 0, messages
 
     _write_project_layout_section(config_lines, entries)
     config_path.write_text("\n".join(config_lines) + "\n", encoding="utf-8")
@@ -1540,6 +1654,12 @@ def main(argv=None):
         "--no-ci-hook", action="store_true",
         help=argparse.SUPPRESS,  # deprecated no-op - the hook is opt-in by default now
     )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="only with --init: preview what init would do (scaffolded paths, "
+             "workspace_root/exclude/enabled changes) without writing anything "
+             "(the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init)",
+    )
     args = parser.parse_args(argv)
 
     if args.init:
@@ -1551,6 +1671,7 @@ def main(argv=None):
             )
         code, messages = run_init(
             args.repo_root, workspace_root=args.workspace_root, ci_hook=args.ci_hook,
+            dry_run=args.dry_run,
         )
         for message in messages:
             print(message)

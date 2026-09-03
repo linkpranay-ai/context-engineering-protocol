@@ -121,6 +121,8 @@ def upsert_selection(
     contracts: List[str],
     reference_mode: str,
     reference_args: Dict[str, str],
+    context_availability: str = "ask",
+    target_root: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Stages (or replaces) one unit's selection. Never touches that unit's
     previously-computed draft_text/insertion_point/target_file_hash if the
@@ -128,7 +130,26 @@ def upsert_selection(
     reference config are expected to re-run draft() afterwards (Phase B's
     POST /api/retrofit/draft), which recomputes and overwrites those fields
     together, atomically, rather than this function guessing whether a stale
-    draft is still valid."""
+    draft is still valid.
+
+    `context_availability` (the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting) is the
+    per-unit policy - "ask"/"required"/"optional" per
+    wizard_retrofit_draft.CONTEXT_AVAILABILITY_POLICIES, validated by the
+    caller (wizard_server.py) before this function ever sees it - persisted
+    here so a later draft() call for this unit doesn't need it re-supplied.
+
+    `target_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment) is None for an
+    ordinary in-repo unit (unchanged default - every existing entry shape and
+    test keeps working with no migration) or the absolute, already-validated
+    external root `primary_file`/`unit_dir_rel_path` are relative to
+    otherwise. Persisted per-unit, not as one session-global value, because
+    this file already lets a session select/draft units from different
+    in-repo subtrees independently - a global external/in-repo toggle
+    wouldn't compose with that; a per-unit field does, and defaults to the
+    same "None means repo_root" convention every other module in this fix
+    uses (wizard_retrofit_inventory.RetrofitInventoryResult.target_root,
+    wizard_retrofit_draft.build_draft's containment_root,
+    wizard_retrofit_apply.ApplyUnitInput.containment_root)."""
     units = state.setdefault("units", {})
     entry = units.setdefault(unit_id, {})
     entry["primary_file"] = primary_file
@@ -137,6 +158,8 @@ def upsert_selection(
     entry["contracts"] = list(contracts)
     entry["reference_mode"] = reference_mode
     entry["reference_args"] = dict(reference_args)
+    entry["context_availability"] = context_availability
+    entry["target_root"] = target_root
     return entry
 
 
@@ -151,6 +174,7 @@ def set_draft(
     target_file_hash: Optional[str],
     context_before: str = "",
     context_after: str = "",
+    policy_drifted: bool = False,
 ) -> Dict[str, Any]:
     entry = find_unit(state, unit_id)
     entry["draft_text"] = draft_text
@@ -161,6 +185,12 @@ def set_draft(
     entry["target_file_hash"] = target_file_hash
     entry["context_before"] = context_before
     entry["context_after"] = context_after
+    # True when build_draft() found a contract pointer already present in the
+    # target file but embedding a stale context-availability policy value -
+    # the draft_text above is a policy-line replacement only, not a fresh
+    # contract insertion. wizard.js reads this to render a "policy change
+    # only" label instead of the normal insertion-diff view.
+    entry["policy_drifted"] = policy_drifted
     return entry
 
 

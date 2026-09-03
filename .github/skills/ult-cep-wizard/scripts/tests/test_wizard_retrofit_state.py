@@ -124,6 +124,71 @@ class TestUpsertSelection(unittest.TestCase):
         self.assertEqual(entry["draft_text"], "See `../CONSUMING-CONTEXT-PACKAGE.md`.")
         self.assertEqual(entry["target_file_hash"], "deadbeef")
 
+    def test_context_availability_defaults_to_ask_and_is_persisted(self):
+        """the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting."""
+        state = {"schema_version": 1, "units": {}}
+        wrs.upsert_selection(
+            state, "widget-reviewer",
+            primary_file="widget-reviewer/SKILL.md", unit_dir_rel_path="widget-reviewer",
+            include=True, contracts=["CONSUMING-CONTEXT-PACKAGE.md"],
+            reference_mode="same-repo", reference_args={},
+        )
+        entry = wrs.find_unit(state, "widget-reviewer")
+        self.assertEqual(entry["context_availability"], "ask")
+
+    def test_explicit_context_availability_is_persisted(self):
+        state = {"schema_version": 1, "units": {}}
+        wrs.upsert_selection(
+            state, "widget-reviewer",
+            primary_file="widget-reviewer/SKILL.md", unit_dir_rel_path="widget-reviewer",
+            include=True, contracts=["CONSUMING-CONTEXT-PACKAGE.md"],
+            reference_mode="same-repo", reference_args={},
+            context_availability="required",
+        )
+        entry = wrs.find_unit(state, "widget-reviewer")
+        self.assertEqual(entry["context_availability"], "required")
+
+    def test_target_root_defaults_to_none_and_is_persisted(self):
+        """the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - None means "this unit's
+        primary_file is relative to ctx.repo_root", the unchanged in-repo
+        case every existing entry shape and caller keeps working with."""
+        state = {"schema_version": 1, "units": {}}
+        wrs.upsert_selection(
+            state, "widget-reviewer",
+            primary_file="widget-reviewer/SKILL.md", unit_dir_rel_path="widget-reviewer",
+            include=True, contracts=["CONSUMING-CONTEXT-PACKAGE.md"],
+            reference_mode="same-repo", reference_args={},
+        )
+        entry = wrs.find_unit(state, "widget-reviewer")
+        self.assertIn("target_root", entry)
+        self.assertIsNone(entry["target_root"])
+
+    def test_explicit_target_root_is_persisted_per_unit(self):
+        state = {"schema_version": 1, "units": {}}
+        wrs.upsert_selection(
+            state, "external-widget",
+            primary_file="widget-reviewer/SKILL.md", unit_dir_rel_path="widget-reviewer",
+            include=True, contracts=["CONSUMING-CODE-GRAPH.md"],
+            reference_mode="plugin",
+            reference_args={"CONSUMING-CODE-GRAPH.md": "/context-engineering-oss:ult-cep-wizard"},
+            target_root="C:/clones/mattpocock-skills",
+        )
+        # A second, ordinary in-repo unit selected in the same session must
+        # keep its own independent (None) target_root - proves this is a
+        # per-unit field, not a session-global toggle.
+        wrs.upsert_selection(
+            state, "in-repo-widget",
+            primary_file="second-widget.md", unit_dir_rel_path=".",
+            include=True, contracts=["CONSUMING-CONTEXT-PACKAGE.md"],
+            reference_mode="same-repo",
+            reference_args={"CONSUMING-CONTEXT-PACKAGE.md": "context-engineering/CONSUMING-CONTEXT-PACKAGE.md"},
+        )
+        self.assertEqual(
+            wrs.find_unit(state, "external-widget")["target_root"],
+            "C:/clones/mattpocock-skills",
+        )
+        self.assertIsNone(wrs.find_unit(state, "in-repo-widget")["target_root"])
+
 
 class TestSetDraft(unittest.TestCase):
     def setUp(self):
@@ -164,6 +229,27 @@ class TestSetDraft(unittest.TestCase):
         )
         self.assertEqual(entry["context_before"], "")
         self.assertEqual(entry["context_after"], "")
+
+    def test_set_draft_defaults_policy_drifted_to_false(self):
+        entry = wrs.set_draft(
+            self.state, "widget-reviewer",
+            draft_text="x", insertion_point=None, contracts_included=[],
+            contracts_skipped_idempotent=[], target_file_hash=None,
+        )
+        self.assertFalse(entry["policy_drifted"])
+
+    def test_set_draft_persists_an_explicit_policy_drifted_flag(self):
+        # the 2026-08-31 Round-2 evaluation's finding on policy drift going
+        # undetected on already-retrofitted units: wizard.js needs this flag
+        # on the persisted entry to render a "policy change only" label.
+        entry = wrs.set_draft(
+            self.state, "widget-reviewer",
+            draft_text="**Context-availability policy: `required`**",
+            insertion_point=None, contracts_included=[],
+            contracts_skipped_idempotent=["CONSUMING-CONTEXT-PACKAGE.md"],
+            target_file_hash="deadbeef", policy_drifted=True,
+        )
+        self.assertTrue(entry["policy_drifted"])
 
     def test_set_draft_resets_a_prior_override_flag(self):
         wrs.set_draft(

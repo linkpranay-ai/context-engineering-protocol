@@ -4,16 +4,69 @@
 > codebases (500 KSLOC+), where `graph.json` itself can be tens of MB.
 > Report findings as an issue in this repo so this can graduate out of
 > pilot status.
+>
+> **Graph-availability policy (added 2026-09-01, the 2026-08-31 Round-2
+> evaluation's finding on code-graph consumption silently falling back when
+> the graph is missing or stale):** step 1's "Not present" branch used to
+> proceed unconditionally, and step 4's staleness nudge used to only ever
+> mention-and-continue — a consuming skill could answer a structural
+> question off raw source alone, or off a graph built from a stale commit,
+> with no explicit choice ever surfaced to the user. Every consuming skill
+> now declares one of three policies, applied to *both* "missing" (step 1)
+> and "stale" (step 4) — a hand-authored consuming skill states its policy
+> next to its one-line pointer to this file:
+>
+> - **`ask`** — the recommended default. Step 1/4 below ask before
+>   proceeding on raw source or a stale graph.
+> - **`required`** — for skills whose answer must rest on a fresh graph.
+>   Step 1/4 below stop until a graph exists and is current — never fall
+>   through to raw source or a graph flagged stale.
+> - **`optional`** — preserves the original lightweight behavior (proceed),
+>   but announces the gap up front (missing or stale) instead of only in
+>   step 3's one-line attribution.
+>
+> A skill with no declared policy (pre-2026-09-01 content, or a
+> hand-authored skill that hasn't adopted this) behaves exactly as
+> `optional` did before this addition.
 
 Any skill that reads, writes, modifies, reviews, or judges project code/tests
 should follow this before doing that work:
 
 1. Check whether `graphify-out/graph.json` exists (graphify's own fixed
    output location at the project root — there is no normalized copy; see
-   `ult-codegraph/SKILL.md` for why).
-   - **Not present:** proceed exactly as you normally would. Don't ask the
-     user to generate one — this is an optional aid, not a requirement.
-   - **Present:** continue to step 2.
+   `ult-codegraph/SKILL.md` for why). Also run
+   `check_graphify_output.py <target>` here rather than trusting bare
+   existence — see that script's own module docstring for the four states
+   (`never_ran`/`partial_failure`/`empty_or_corrupt`/`ok`) it distinguishes;
+   treat anything other than `ok` as **Not present** below, not as
+   **Present**.
+   - **Present (`ok`):** continue to step 2.
+   - **Not present** (`never_ran`/`partial_failure`/`empty_or_corrupt`):
+     branch on this skill's declared graph-availability policy (see the
+     callout above; treat an undeclared policy as `optional`):
+     - **`ask`:** ask the user, verbatim:
+       > No usable code graph was found at `graphify-out/graph.json`
+       > (`check_graphify_output.py` reports `<status>`). Build one now
+       > (`/ult-codegraph`), proceed on raw source only, or point me to an
+       > existing graph elsewhere?
+       - *Build one now:* hand off to `/ult-codegraph` — do **not** run
+         `graphify update` yourself inline; building the graph stays a
+         human-approved step (same rationale `/ult-context-generate` already
+         follows for context packages — see `CONSUMING-CONTEXT-PACKAGE.md`).
+         Once it exists, resume this contract at step 1 and re-check.
+       - *Proceed on raw source only:* proceed as the `optional` branch
+         below does, then continue to step 2.
+       - *Point to an existing graph elsewhere:* accept a `--graph <path>`
+         override (see the multi-root-merge limitation noted further down);
+         if it checks out as `ok`, treat it as **Present** and continue to
+         step 2, otherwise return to the top of this branch.
+     - **`required`:** stop. State that this skill requires a usable code
+       graph and none was found (name the `check_graphify_output.py`
+       status); direct the user to `/ult-codegraph` or an existing graph
+       path, then re-check step 1 — never fall through to raw source alone.
+     - **`optional`:** announce up front — e.g. "No code graph found —
+       proceeding on raw source only." — then proceed exactly as you
+       normally would. Continue to step 2.
    - **Present but results are noisy with CEP's own installed content**
      (skill/prompt files under `.github/`, `.cursor/`, etc. showing up in
      `query`/`explain` results for a question about the project's own
@@ -22,6 +75,11 @@ should follow this before doing that work:
      and point back to `ult-codegraph/SKILL.md` Step 0 rather than trying
      to filter results here — scoping belongs at generation time, not at
      every query.
+
+   None of these branches ever auto-run `graphify update`/`/ult-codegraph`
+   on their own initiative — (re)building the graph is only ever a
+   human-approved handoff, triggered by an explicit user choice (`ask`) or
+   an explicit user direction (`required`).
 
 2. **Prefer scoped runtime queries over reading the full graph.** Run
    `graphify query "<question>" --budget N` (a budget-capped traversal that
@@ -75,14 +133,34 @@ should follow this before doing that work:
    related nodes for `<paths>`" — or "No code graph found — proceeding
    without it" if `graphify-out/graph.json` is absent.
 
-4. Staleness nudge (cheap, non-blocking): `graphify-out/GRAPH_REPORT.md`'s
-   "Graph Freshness" section records the commit the graph was built from.
-   If `git rev-parse HEAD` differs, mention it in one line ("the code graph
-   looks stale — built from `<old-commit>`, current is `<head>`; consider
-   re-running `/ult-codegraph`") and continue — don't block on it. If
+4. Staleness check: `graphify-out/GRAPH_REPORT.md`'s "Graph Freshness"
+   section records the commit the graph was built from. If
    `GRAPH_REPORT.md` doesn't exist (not produced under `--no-cluster`, the
-   default invocation — see `ult-codegraph/SKILL.md`), skip this nudge
-   silently; its absence is expected, not an error.
+   default invocation — see `ult-codegraph/SKILL.md`), skip this check
+   silently; its absence is expected, not an error, and there is nothing to
+   compare against. Otherwise, compare that commit to `git rev-parse HEAD`;
+   if they match, continue to step 5 with no nudge needed.
+
+   If they differ, branch on this skill's declared graph-availability
+   policy (same one declared for step 1 — see the callout above; treat an
+   undeclared policy as `optional`):
+   - **`ask`:** ask the user, verbatim:
+     > The code graph looks stale — built from `<old-commit>`, current is
+     > `<head>`. Rebuild now (`/ult-codegraph`), or proceed with the graph
+     > as-is?
+     - *Rebuild now:* hand off to `/ult-codegraph` — do **not** run
+       `graphify update` yourself inline, for the same reason step 1's
+       `ask` branch doesn't. Once rebuilt, resume this contract at step 1.
+     - *Proceed with the graph as-is:* proceed as the `optional` branch
+       below does, then continue to step 5.
+   - **`required`:** stop. State that this skill requires a current graph
+     and the one present is stale (`<old-commit>` vs `<head>`); direct the
+     user to `/ult-codegraph`, then re-check step 1 — never proceed on a
+     graph already known to be stale.
+   - **`optional`:** mention it in one line ("the code graph looks stale —
+     built from `<old-commit>`, current is `<head>`; consider re-running
+     `/ult-codegraph`") and continue — this is the original non-blocking
+     behavior, unchanged for this policy.
 
 5. **Going deeper, only when steps 2–4 still come up empty (gated — ask,
    never run silently).** If you suspect a relationship exists that the

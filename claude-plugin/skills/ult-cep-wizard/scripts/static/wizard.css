@@ -809,6 +809,83 @@ main {
   color: var(--danger);
 }
 
+/* the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init - the needs_discover workspace_root
+   offer. Sits above the shared Run Discover button, same border/spacing family as
+   the rest of #state-needs-discover. */
+#needs-discover-init-offer {
+  margin: 0.75rem 0 1rem 0;
+  padding: 0.75rem 0.9rem;
+  background: var(--panel-alt-bg);
+  border: 1px dashed var(--cyan);
+  border-radius: 8px;
+}
+
+#needs-discover-init-offer h3 {
+  margin: 0 0 0.35rem 0;
+  font-size: 0.95rem;
+}
+
+#needs-discover-init-offer label {
+  display: block;
+  margin: 0.5rem 0 0.25rem 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+#init-workspace-root-input {
+  width: 100%;
+  max-width: 22rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: inherit;
+  box-sizing: border-box;
+}
+
+.init-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+#init-run-button {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--orange);
+  border: none;
+  border-radius: 6px;
+}
+
+#init-run-button:hover {
+  background: var(--orange-bright);
+}
+
+.init-preview-list {
+  margin: 0.6rem 0 0 0;
+  padding: 0.5rem 0.5rem 0.5rem 1.4rem;
+  background: var(--panel-bg);
+  border-radius: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--navy-700);
+}
+
+#init-message {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+#init-message.error {
+  color: var(--danger);
+}
+
 #d20-banner {
   background: var(--cyan-pale);
   border: 1px solid var(--cyan);
@@ -973,6 +1050,82 @@ button.secondary:hover {
   opacity: 0.5;
 }
 
+/* the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - external-target panel, sits
+   above the repo-relative path/entries it's an alternative to. */
+.retrofit-external-root-panel {
+  margin: 0 0 0.85rem 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+}
+
+.retrofit-external-root-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--navy-700);
+  margin-bottom: 0.35rem;
+}
+
+.retrofit-external-root-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+#retrofit-external-root-input {
+  flex: 1 1 18rem;
+  min-width: 14rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-alt-bg);
+  color: var(--navy-900);
+}
+
+#retrofit-external-root-browse,
+#retrofit-external-root-clear {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.65rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--navy-700);
+  font-weight: 700;
+}
+
+#retrofit-external-root-browse:hover,
+#retrofit-external-root-clear:hover {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+#retrofit-external-root-status {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+#retrofit-external-root-status.error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.retrofit-external-root-warning {
+  margin: 0.5rem 0 0 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
 #retrofit-picker-entries {
   list-style: none;
   margin: 0.5rem 0 0 0;
@@ -1020,6 +1173,71 @@ button.secondary:hover {
   margin: 0 0 0.5rem 0;
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+/* the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: directory chips, filter bar,
+   and the row-hidden state applyRetrofitFilters() toggles. */
+.retrofit-directory-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.6rem 0;
+}
+
+.retrofit-directory-chip {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border, #d0d5dd);
+  background: transparent;
+  color: var(--navy-700);
+  cursor: pointer;
+}
+
+.retrofit-directory-chip[aria-pressed="true"] {
+  background: var(--navy-700);
+  color: #fff;
+  border-color: var(--navy-700);
+}
+
+.retrofit-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.5rem 0;
+  font-size: 0.82rem;
+}
+
+.retrofit-filter-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+#retrofit-filter-search {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.82rem;
+}
+
+.retrofit-filter-count {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#retrofit-filter-empty-message {
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--muted);
+  margin: 0 0 0.6rem 0;
+}
+
+.retrofit-row-hidden {
+  display: none;
 }
 
 .retrofit-review-gate-label {
@@ -1217,6 +1435,16 @@ button.secondary:hover {
   gap: 0.35rem;
 }
 
+/* the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - explains why same-repo is
+   disabled for a unit whose target is external (see renderRetrofitUnitRow). */
+.retrofit-reference-mode-note {
+  flex-basis: 100%;
+  margin: -0.3rem 0 0 0;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--danger);
+}
+
 .retrofit-contract-row {
   display: flex;
   flex-wrap: wrap;
@@ -1234,6 +1462,26 @@ button.secondary:hover {
   border-radius: 6px;
   background: var(--panel-alt-bg);
   color: var(--navy-900);
+}
+
+/* the 2026-08-31 Round-2 evaluation's finding on context-availability policy handling during retrofit drafting - per-skill context-availability
+   policy control, sits between the contract checkboxes and the draft panel. */
+.retrofit-context-availability {
+  margin: 0.4rem 0 0.6rem 0;
+}
+
+.retrofit-context-availability-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--navy-700);
+}
+
+.retrofit-context-availability-hint {
+  margin: 0.2rem 0 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .retrofit-draft-panel {

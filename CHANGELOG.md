@@ -78,6 +78,33 @@ versioning without a formal SemVer API-compatibility guarantee yet (see [`ROADMA
 
 ### Fixed
 
+- **Round 2 remediation, hygiene follow-ups (2026-09-01).** A batch of low-severity items closing
+  out the last of a 15-item remediation sequence:
+  - `check_graphify_output.py` gains a fifth `stale` state (`graph.json` predates the target's
+    current HEAD commit) so a graph built days ago and never rebuilt no longer reports `ok` at
+    face value; falls back to `ok` when staleness can't be determined (non-git target, no `git` on
+    `PATH`), the same "no signal, don't invent one" stance `_read_cep_manifest` already takes
+    elsewhere in this repo.
+  - `GRAPHIFYIGNORE_NOTE` and the matching `ult-codegraph/SKILL.md` prose downgraded from stating
+    `.graphifyignore` auto-discovery as confirmed behavior to citing it as what `graphifyy`'s own
+    docs state — a Windows evaluation that retried with the documented ignore configuration in
+    place observed no change in output, so the behavior itself stays unconfirmed on this platform.
+  - `CONSUMING-CONTEXT-PACKAGE.md`'s context-availability policy callout softened: the `required`
+    policy's "never proceeds ungrounded" line overstated what the schema/wizard mechanically
+    guarantee. The policy line records a consuming skill's own step-1 instruction; nothing outside
+    that skill's own execution verifies it was actually reached before real work happened. Made
+    explicit rather than left implied.
+  - **Commit-map correction:** `8b97619`'s message names findings 6/7/8/9 but not that it also
+    carries finding 5's entire frontend half (the `caseStudiesExternalUrl`/`window.open` wiring in
+    `static/wizard.js`) — `5be50d8` three commits earlier added only the backend field, so finding 5
+    was non-functional until `8b97619` landed. Recorded here rather than rewriting either commit.
+    Going forward this branch's later commits keep to one finding per commit specifically to avoid
+    repeating this class of gap.
+  - `catalog/check_private_refs.py` exempted its own test fixture file
+    (`catalog/tests/test_check_private_refs.py`) from its repo-wide scan, by relative path rather
+    than an inline marker — the fixtures that prove the gate catches each denylisted filename
+    necessarily contain that filename verbatim, which the gate was otherwise flagging against
+    itself.
 - **Private skill-library references scrubbed from public-facing content.** Several files
   named or linked skills that only exist in this maintainer's private, unpublished skill
   library — never shipped in this repo — as if they were real, installed producers/consumers:
@@ -774,7 +801,7 @@ external context-engineering prior art.
   `ult-context-generate/SKILL.md`'s Step 9 human-review-gate template. `CONFORMANCE.md` §4 records it
   as a SHOULD, not the enforcement mechanism itself.
 - **`references/design-scratchpad-glossary.md`**: a plain-English index of every
-  `CONTEXT-ENGINEERING-DESIGN.md` `D<N>`/`§<N>` label cited across this repo, so those citations
+  `CONTEXT-ENGINEERING-DESIGN.md` `D<N>`/`§<N>` label cited across this repo, so those citations <!-- private-ref-allow: recording the private doc's name to explain what this glossary resolves, not a live citation of it -->
   resolve without the private, unpublished source document. Linked from `CONTRIBUTING.md`'s existing
   citation note and from the two most heavily-cited skills (`ult-context-generate`, `ult-repo-layout`).
   At the time this glossary shipped, `ROADMAP.md` item 15 logged the fuller pre-1.0 citation cleanup
@@ -793,7 +820,7 @@ external context-engineering prior art.
 ### Fixed
 
 - **Private-document citation leak**: skills and scripts across the repo cited unpublished sibling
-  design docs by filename (`CONTEXT-ENGINEERING-DESIGN.md` and two others) or bare `D<N>`/`D-0NN`
+  design docs by filename (`CONTEXT-ENGINEERING-DESIGN.md` and two others) or bare `D<N>`/`D-0NN` <!-- private-ref-allow: describing the past citation-leak fix, not a live citation -->
   decision-log labels a reader has no way to resolve. Rewrote every site to state the substance
   inline instead of pointing at a document that doesn't exist in this repo, and updated
   `CONTRIBUTING.md`'s citation note to match. Closes out `ROADMAP.md` item 15. Also removed internal

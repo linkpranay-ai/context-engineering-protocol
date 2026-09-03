@@ -101,6 +101,25 @@ CEP_BUCKET_DIR_NAMES = {"contexts", "inputs", "cache"}
 # elsewhere in the repo.
 HOW_L2_GITHUB_CANDIDATE_EXCLUDE = {"skills", "prompts"}
 
+# the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: excluding
+# skills/prompts from the doc-count is not enough on its own - the
+# ranked-candidate loop below also falls back to "does `.github/` have *any*
+# file at all, once skills/prompts are pruned" for repos where `.github/`
+# has no markdown docs. That fallback exists so a style-guide/-style
+# directory with a stray non-doc file still surfaces (see the loop's own
+# comment), but `.github/` is not an intentionally-authored conventions
+# directory the way `docs/style-guide/` or `conventions/` are - nearly every
+# repo has a `.github/` full of CI workflow YAML and issue/PR-template
+# boilerplate regardless of whether it has any authored conventions at all,
+# and that automation content alone was enough to make `.github/` the sole
+# ranked candidate in the reported repro. For `.github/` specifically, "any
+# file" is narrowed to file/directory names that are recognized convention
+# signals (mirrors HOW_L2_ROOT_SIGNAL_FILES/HOW_L2_ROOT_SIGNAL_GLOBS' own
+# named-signal approach, applied here inside `.github/` instead of at the
+# repo root) - a bare workflow file no longer qualifies by itself.
+HOW_L2_GITHUB_SIGNAL_NAMES = {"codeowners", "contributing.md", "pull_request_template.md"}
+HOW_L2_GITHUB_SIGNAL_DIRS = {"issue_template", "pull_request_template"}
+
 # §17.4's What-L2/How-L2 sibling-scan exclusion list, applied in addition to
 # CEP_BUCKET_DIR_NAMES. Mirrored by ult-autoscaffold-content/scaffold_state.py's
 # own SCAN_IGNORED_DIR_NAMES -- a small local duplicate, not a shared import
@@ -161,6 +180,40 @@ MEDIUM_CONFIDENCE_FILE_FLOOR = 3
 # candidates, never suppress a name-matched one (name_match alone still
 # qualifies regardless of file count) or a genuinely well-populated one.
 MIN_DOC_COUNT_FOR_UNNAMED_MATCH = 2
+
+# the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: a directory of runnable
+# sample/demo code routinely carries one README.md per example - enough on
+# its own to clear MIN_DOC_COUNT_FOR_UNNAMED_MATCH's low bar despite holding
+# no requirements prose at all. Two independent, additive checks gate
+# Requirements' un-named generic-fallback path (see
+# _unnamed_doc_count_eligible below) - neither touches a genuine name
+# match (REQUIREMENTS_NAME_RE), which still qualifies on its own regardless:
+#
+# 1. CODE_SAMPLE_DIR_NAMES - an explicit, self-documenting fast path for the
+#    exact reported repro and its obvious siblings, matched case-insensitively
+#    against the candidate's own top-level name only (never a descendant
+#    directory sharing one of these names one level down).
+# 2. A general code-dominance ratio (see _unnamed_doc_count_eligible) -
+#    catches the same false positive under any other name (`cookbook/`,
+#    `sample-apps/`, a project-specific name this list doesn't know about)
+#    by checking the candidate's own file mix rather than relying solely on
+#    a name list that can never be exhaustive.
+#
+# CODE_EXTENSIONS is scoped to this eligibility check alone - it is never
+# folded into SCAN_IGNORED_DIR_NAMES/_prune_ignored (that source is
+# legitimate first-party content CEP should still be able to see elsewhere,
+# e.g. a future Code-Graph layer; it is just not evidence of a documentation
+# corpus by itself).
+CODE_SAMPLE_DIR_NAMES = {"examples", "example", "samples", "sample", "demos", "demo"}
+CODE_EXTENSIONS = (
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".c", ".cc", ".cpp",
+    ".h", ".hpp", ".rs", ".rb", ".cs", ".php", ".sh", ".ps1",
+)
+# A directory whose code files outnumber its doc files by at least this
+# ratio is read as "predominantly code, incidentally documented" rather than
+# an authored corpus - conservative on purpose (a true 50/50 mix of code
+# snippets and real docs, e.g. a tutorials/ directory, should still qualify).
+CODE_DOMINANCE_RATIO = 3
 
 # Section titles and TITLE_TO_BASE_KEY moved to layout_decision_grammar.py
 # (D24 Phase 1, factored out so ult-cep-wizard can import the same
@@ -293,14 +346,26 @@ def _has_content(repo_root, rel_path):
     return any(True for _ in _iter_files(target))
 
 
-def _top_level_candidate_dirs(repo_root, base=None):
+def _top_level_candidate_dirs(repo_root, base=None, manifest_owned=None):
     """Immediate subdirectories of `base` (default: repo_root), pruned of
-    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES. §17.4's "sibling
-    directories" scan operates one level down from `base`."""
+    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES, and of any manifest-owned
+    top-level directory when `manifest_owned` (see `_read_cep_manifest`) is
+    supplied - the 2026-09-01 evaluation's finding on top-level candidacy: a
+    CEP-owned top-level directory outside those two hardcoded name sets
+    (e.g. an install that lands its own directory at repo root rather than
+    nesting everything under `.github/`) was never excluded from What-L2
+    sibling-directory candidacy the way `.github/`'s own manifest-owned
+    subdirectories already are for How-L2 (see `_manifest_extra_ignored`,
+    reused here against `base` itself rather than a `.github/`-style fixed
+    candidate). §17.4's "sibling directories" scan operates one level down
+    from `base`."""
     base = Path(base) if base is not None else Path(repo_root)
     if not base.is_dir():
         return []
-    names = _prune_ignored([p.name for p in base.iterdir() if p.is_dir()])
+    manifest_names = (
+        _manifest_extra_ignored(base, manifest_owned) if manifest_owned is not None else set()
+    )
+    names = _prune_ignored([p.name for p in base.iterdir() if p.is_dir()], manifest_names)
     return sorted(base / n for n in names)
 
 
@@ -314,25 +379,96 @@ def _requirements_signal(path):
     return name_match, doc_count
 
 
+def _is_code_sample_or_code_dominant(path, doc_count=None):
+    """True if `path` should be vetoed as evidence for an *un-named* category
+    match - a genuine name-pattern match (REQUIREMENTS_NAME_RE,
+    DESIGN_NAME_RE, API_NAME_RE) is never routed through this and always
+    qualifies on its own, exactly as before this check existed.
+
+    Two independent, additive checks (the 2026-08-31 Round-2 evaluation's
+    findings on repo-layout discovery proposing unsuitable candidate
+    directories after installation, gaps 3.1 and 3.2):
+
+    1. CODE_SAMPLE_DIR_NAMES - an explicit fast path, matched
+       case-insensitively against the candidate's own top-level name only
+       (never a descendant directory sharing one of these names one level
+       down).
+    2. A general non-doc-dominance ratio. This replaces the old
+       CODE_EXTENSIONS-based code-count with a count of *every* file that
+       isn't itself a doc/diagram/spec extension - a fixed extension list
+       can never be exhaustive (the reported repro included Kotlin, Swift,
+       and YAML directories that a Python/JS/Go-centric list like
+       CODE_EXTENSIONS silently missed), so this counts what a directory
+       is *not* (documentation-shaped) rather than trying to enumerate
+       every language, config format, or build artifact it might be.
+
+    A directory of runnable sample/demo code routinely carries one
+    README.md (or a `.drawio`/`.proto` dropped in for illustration) per
+    example - enough to clear a low doc-count bar despite holding no
+    authored corpus content at all; this is the shared veto for that shape,
+    used by every un-named/generic-fallback evidence path in this module."""
+    if path.name.casefold() in CODE_SAMPLE_DIR_NAMES:
+        return True
+    if doc_count is None:
+        doc_count = _count_docs(path)
+    total_count = sum(1 for _ in _iter_files(path))
+    non_doc_count = total_count - doc_count
+    if non_doc_count > 0 and non_doc_count >= doc_count * CODE_DOMINANCE_RATIO:
+        return True
+    return False
+
+
+def _unnamed_doc_count_eligible(path, doc_count):
+    """Whether `doc_count` alone (no category name-pattern match) is enough
+    to register `path` as evidence for *some* category - see
+    _is_code_sample_or_code_dominant above for why this is narrower than
+    a bare `doc_count >= MIN_DOC_COUNT_FOR_UNNAMED_MATCH` check. Shared by
+    every un-named/generic fallback path in this module (Requirements'
+    own generic route in categorize_candidate and
+    _discover_what_l2_workspace_root_unset, and the catch-all
+    _generic_fallback_signal below) - a directory of runnable sample code
+    with a couple of per-example README.md files is exactly as much a false
+    positive for "Generic fallback" as it is for "Requirements", since
+    nothing about *why* a directory made a category on doc-count alone
+    changes between them. Callers still OR this with their own name_match
+    check where one exists; a genuine name match is untouched by anything
+    here."""
+    if doc_count < MIN_DOC_COUNT_FOR_UNNAMED_MATCH:
+        return False
+    return not _is_code_sample_or_code_dominant(path, doc_count)
+
+
 def _design_signal(path):
+    """Design/ADR/architecture-diagram evidence. A genuine name match
+    (DESIGN_NAME_RE) qualifies unconditionally; unnamed evidence (a bare ADR
+    filename or `.drawio`/`.puml` diagram sitting in an otherwise
+    code-dominant or CODE_SAMPLE_DIR_NAMES directory) is vetoed the same way
+    Requirements' own unnamed fallback already was - see gap 3.1,
+    _is_code_sample_or_code_dominant."""
     name_match = bool(DESIGN_NAME_RE.search(path.name))
     adr_count = _count_adr_filenames(path)
     diagram_count = _count_by_ext(path, DIAGRAM_EXTENSIONS)
-    matched = name_match or adr_count > 0 or diagram_count > 0
+    unnamed_evidence = adr_count > 0 or diagram_count > 0
+    matched = name_match or (unnamed_evidence and not _is_code_sample_or_code_dominant(path))
     return matched, {"name_match": name_match, "adr_count": adr_count, "diagram_count": diagram_count}
 
 
 def _api_signal(path):
+    """API/spec-file evidence. A genuine name match (API_NAME_RE) qualifies
+    unconditionally; unnamed evidence (a spec/`.proto`/`.graphql` file
+    sitting in an otherwise code-dominant or CODE_SAMPLE_DIR_NAMES
+    directory) is vetoed the same way - see gap 3.1,
+    _is_code_sample_or_code_dominant."""
     name_match = bool(API_NAME_RE.search(path.name))
     has_spec_file = _has_api_spec_filenames(path) or _count_by_ext(path, API_SPEC_EXTENSIONS) > 0
-    matched = name_match or has_spec_file
+    matched = name_match or (has_spec_file and not _is_code_sample_or_code_dominant(path))
     return matched, {"name_match": name_match, "has_spec_file": has_spec_file}
 
 
 def _generic_fallback_signal(path, doc_count=None):
     if doc_count is None:
         doc_count = _count_docs(path)
-    return doc_count >= MIN_DOC_COUNT_FOR_UNNAMED_MATCH, {"doc_count": doc_count}
+    return _unnamed_doc_count_eligible(path, doc_count), {"doc_count": doc_count}
 
 
 def _confidence(name_match, count):
@@ -351,7 +487,7 @@ def categorize_candidate(path):
     categories = {}
 
     req_name, req_count = _requirements_signal(path)
-    if req_name or req_count >= MIN_DOC_COUNT_FOR_UNNAMED_MATCH:
+    if req_name or _unnamed_doc_count_eligible(path, req_count):
         categories["Requirements"] = {
             "name_match": req_name, "files": req_count,
             "confidence": _confidence(req_name, req_count),
@@ -463,11 +599,19 @@ def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
     section_title = WHAT_L2_TITLE
     exclude = set(e.rstrip("/") for e in vl.resolve_what_l2_exclude(config))
     wr_dir = Path(repo_root) / wr
+    # Threaded into every _composite_sibling_scan/_top_level_candidate_dirs
+    # call below so a CEP-owned top-level directory is excluded from
+    # What-L2 candidacy the same way SCAN_IGNORED_DIR_NAMES/
+    # CEP_BUCKET_DIR_NAMES already are - the 2026-09-01 evaluation's
+    # finding on top-level candidacy.
+    manifest_owned = _read_cep_manifest(repo_root)
 
     # Outside-workspace_root composite scan always runs (Founder
     # clarification on C1) - proposed as include_roots regardless of
     # whether `path` itself resolved.
-    outside_candidates = _composite_sibling_scan(repo_root, exclude_base=wr_dir)
+    outside_candidates = _composite_sibling_scan(
+        repo_root, exclude_base=wr_dir, manifest_owned=manifest_owned
+    )
 
     # Step 2: does {workspace_root}/ exist and have content after
     # exclusions?
@@ -504,7 +648,7 @@ def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
     # if it also equals another layer's hand-configured path.
     exclude_rows = []
     exclude_lines = []
-    for cand in _top_level_candidate_dirs(repo_root, base=wr_dir):
+    for cand in _top_level_candidate_dirs(repo_root, base=wr_dir, manifest_owned=manifest_owned):
         rel = cand.relative_to(repo_root).as_posix() + "/"
         if _looks_vendor_or_generated(cand):
             other_layer = _matches_other_hand_configured_path(config, rel)
@@ -537,6 +681,12 @@ def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
 
 def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
     section_title = WHAT_L2_TITLE
+    # Threaded into every _composite_sibling_scan/_top_level_candidate_dirs
+    # call below so a CEP-owned top-level directory is excluded from
+    # What-L2 candidacy the same way SCAN_IGNORED_DIR_NAMES/
+    # CEP_BUCKET_DIR_NAMES already are - the 2026-09-01 evaluation's
+    # finding on top-level candidacy.
+    manifest_owned = _read_cep_manifest(repo_root)
 
     if _has_content(repo_root, default_path):
         section = LayerSection(
@@ -549,11 +699,11 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
         )
         resolved_path = default_path
     else:
-        candidates = _top_level_candidate_dirs(repo_root)
+        candidates = _top_level_candidate_dirs(repo_root, manifest_owned=manifest_owned)
         req_candidates = []
         for cand in candidates:
             name_match, doc_count = _requirements_signal(cand)
-            if name_match or doc_count >= MIN_DOC_COUNT_FOR_UNNAMED_MATCH:
+            if name_match or _unnamed_doc_count_eligible(cand, doc_count):
                 req_candidates.append((cand, name_match, doc_count))
         req_candidates.sort(key=lambda c: (c[1], c[2], _dir_mtime(c[0])), reverse=True)
 
@@ -571,7 +721,16 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
                 status_lines=["**Status:** enabled by default."],
                 table_header=["Candidate", "Category", "Name match", "Files", "Confidence"],
                 table=rows,
-                decision_lines=[f"decision: PENDING   # CONFIRM: {top_rel} | CUSTOM: <path> | SKIP"],
+                # the 2026-08-31 Round-2 evaluation's finding on What-L2 decision-line verb coverage: SKIP alone forces a
+                # false binary here - CONFIRM one of the found candidates, or type a
+                # CUSTOM path - with no vocabulary for "none of these are right, and
+                # this project genuinely has no requirements corpus", the same
+                # acknowledgment the no-candidates branch below already offers.
+                # apply_field() already treats any non-CONFIRM/CUSTOM/DISABLE verb
+                # identically (a no-op, same as SKIP) - this only names the option.
+                decision_lines=[
+                    f"decision: PENDING   # CONFIRM: {top_rel} | CUSTOM: <path> | SKIP | ACKNOWLEDGE"
+                ],
             )
             resolved_path = None  # proposal only, not yet confirmed
         elif rows:
@@ -582,11 +741,17 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
             # H-2: no Requirements match at all. List every surviving
             # other-category candidate and require an explicit decision -
             # never auto-assign `path` to another category's best score.
-            other_candidates = _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=("Requirements",))
+            other_candidates = _composite_sibling_scan(
+                repo_root, exclude_base=None, exclude_categories=("Requirements",), manifest_owned=manifest_owned
+            )
             if other_candidates:
                 rows2 = [[f"`{rel}`", cats, ev] for rel, cats, ev in other_candidates]
+                # Same ACKNOWLEDGE addition as the with-candidates template above -
+                # see its comment. Here it also covers "none of these other-category
+                # candidates are Requirements either", not just the single-candidate
+                # case.
                 decision_lines = [
-                    f"decision: PENDING   # CONFIRM: {rel} | SKIP  "
+                    f"decision: PENDING   # CONFIRM: {rel} | SKIP | ACKNOWLEDGE  "
                     f"(H-2: no Requirements match exists - pick which category match, "
                     f"if any, fills `what_l2.path`; every candidate not picked still "
                     f"becomes an include_roots candidate below)"
@@ -616,7 +781,9 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
 
     # Composite sibling scan for every OTHER category always runs,
     # independent of whether `path` resolved (fixes H-1).
-    other_candidates = _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=("Requirements",))
+    other_candidates = _composite_sibling_scan(
+        repo_root, exclude_base=None, exclude_categories=("Requirements",), manifest_owned=manifest_owned
+    )
     include_rows = [[f"`{rel}`", cats, ev] for rel, cats, ev in other_candidates]
     include_lines = [f"include_roots_decision: PENDING   # ADD: {rel} | SKIP" for rel, _c, _e in other_candidates]
     if include_rows:
@@ -659,13 +826,17 @@ def _matches_other_hand_configured_path(config, rel):
     return None
 
 
-def _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=()):
+def _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=(), manifest_owned=None):
     """Scan top-level directories (outside `exclude_base` if given) for
     every §17.4 category match, dedup by unique resolved path with every
-    matched category folded into one evidence string (resolves M-2). Returns
-    [(rel_path_str, categories_str, evidence_str)]."""
+    matched category folded into one evidence string (resolves M-2).
+    `manifest_owned` (see `_read_cep_manifest`) is threaded through to
+    `_top_level_candidate_dirs` so a CEP-owned top-level directory is
+    excluded from candidacy the same way the hardcoded ignore sets already
+    are - the 2026-09-01 evaluation's finding on top-level candidacy.
+    Returns [(rel_path_str, categories_str, evidence_str)]."""
     repo_root = Path(repo_root)
-    candidates = _top_level_candidate_dirs(repo_root)
+    candidates = _top_level_candidate_dirs(repo_root, manifest_owned=manifest_owned)
     if exclude_base is not None:
         exclude_base = Path(exclude_base).resolve()
         candidates = [c for c in candidates if c.resolve() != exclude_base]
@@ -681,6 +852,23 @@ def _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=())
         results.append((rel, ", ".join(categories.keys()), _fmt_evidence(categories)))
     results.sort(key=lambda r: r[0])
     return results
+
+
+def _github_candidate_has_signal(cand, extra_ignored):
+    """`.github/`-only replacement for the generic "any file at all"
+    fallback - see HOW_L2_GITHUB_SIGNAL_NAMES/_DIRS above for why. Walks the
+    same pruned tree `_iter_files` already would (skills/prompts and any
+    manifest-owned paths excluded via `extra_ignored`); a match on a
+    recognized convention-signal filename, or a file anywhere inside a
+    recognized convention-signal directory, counts - a bare CI workflow or
+    any other unrecognized file does not."""
+    for f in _iter_files(cand, extra_ignored):
+        if f.name.casefold() in HOW_L2_GITHUB_SIGNAL_NAMES:
+            return True
+        parent_names = {p.casefold() for p in f.relative_to(cand).parts[:-1]}
+        if parent_names & HOW_L2_GITHUB_SIGNAL_DIRS:
+            return True
+    return False
 
 
 def _render_include_roots(candidates, primary_path):
@@ -752,16 +940,46 @@ def discover_how_l2(repo_root, config):
             )
             extra_ignored = manifest_names | hardcoded_fallback
             doc_count = _count_docs(cand, extra_ignored)
-            if doc_count > 0 or any(True for _ in _iter_files(cand, extra_ignored)):
+            if cand_rel == ".github/":
+                # Narrowed fallback - see HOW_L2_GITHUB_SIGNAL_NAMES/_DIRS
+                # above; a bare CI workflow or other unrecognized file no
+                # longer single-handedly qualifies `.github/`.
+                has_other_evidence = _github_candidate_has_signal(cand, extra_ignored)
+            else:
+                has_other_evidence = any(True for _ in _iter_files(cand, extra_ignored))
+            if doc_count > 0 or has_other_evidence:
                 ranked.append((cand_rel, doc_count, _dir_mtime(cand)))
     ranked.sort(key=lambda r: (r[1], r[2]), reverse=True)
 
     if ranked:
         top_rel = ranked[0][0]
+        github_caution = None
+        if any(r[0] == ".github/" for r in ranked):
+            # the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: even after the exclusion/narrowing
+            # above, `.github/` may still legitimately rank (real CODEOWNERS,
+            # a real CONTRIBUTING.md, etc.) - but confirming it as
+            # how_l2.path still leaves this install's own `.github/skills/`
+            # and `.github/prompts/` nested inside that same directory tree.
+            # Nothing downstream of this discovery step re-applies this
+            # exclusion once a path is confirmed, so a human accepting
+            # `.github/` here needs to know that risk up front rather than
+            # discover it later - same "warn, don't silently fail" posture
+            # as this skill's other fail-closed-but-not-silent checks.
+            github_caution = (
+                "`.github/` is among the candidates above. This install's own "
+                "`.github/skills/` and `.github/prompts/` remain nested inside "
+                "`.github/` regardless of which candidate is confirmed - "
+                "confirming `.github/` as `how_l2.path` means any tool that "
+                "later reads that path's full subtree (not just this "
+                "discovery scan) may treat CEP's own tooling as this "
+                "project's conventions. CUSTOM to a dedicated conventions "
+                "directory instead if that risk matters here."
+            )
         return LayerSection(
             section_title,
             status_lines=["**Status:** no hand-configured `how_l2.path`; CEP default missing/empty."],
             decision_lines=[f"decision: PENDING   # CONFIRM: {top_rel} | CUSTOM: <path> | SKIP"],
+            warning=github_caution,
         ), None
 
     # Root-signal-only fallback (fixes H-3's "not a directory" framing):

@@ -87,9 +87,13 @@ surfaces). Exact JSON (`wizard_onboarding_state.to_json_dict`):
   "validate_failures": [],
   "discovery_artifact_exists": true,
   "decision_counts": {"pending": 0, "staged": 0, "confirmed": 0},
-  "d20_initialized": false
+  "d20_initialized": false,
+  "workspace_root_current": null,
+  "workspace_root_offer_eligible": false
 }
 ```
+
+`workspace_root_current`/`workspace_root_offer_eligible` are the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init additions — see §6.
 
 Note the dataclass field is `OnboardingState.name`, but the JSON key is `"state"` —
 `wizard.js`'s `loadState()` reads `view.state`, not `view.name`.
@@ -103,3 +107,45 @@ layout must still let the process bind and serve the `layout_broken` screen rath
 calls `self._try_layout_source()` fresh, per request, early-returning (503 already
 sent) on `None` rather than assuming one built once at startup is still valid. See
 `wizard-picker-and-boxes.md` §1 for the read-path side of this same change.
+
+## 6. Workspace-root init offer (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init)
+
+Before this fix, the only way to opt into `layout.workspace_root` (§16.2 namespacing —
+re-rooting a project's slots under one directory, e.g. `.cep/` or `docs/`) was the
+fully conversational `/ult-repo-layout init` step, outside the wizard entirely — a
+brownfield adopter using only the wizard's guided flow had no way to make that call
+before D20 got scaffolded with pre-D21 defaults it could never retroactively re-root.
+
+`workspace_root_offer_eligible` is `true` only at `needs_discover` while
+`d20_initialized` is still `false` — the one window before any slot has a default path
+committed. `run_init` (§18's mechanical `init` half) already refuses unconditionally
+once D20-initialized (never-silently-reset), so this flag lets the frontend hide the
+offer entirely instead of showing it and then surfacing that refusal after the fact.
+`workspace_root_current` separately carries whatever value is already set (via this
+offer, or via the CLI/agent flow directly), independent of eligibility, so a repo that
+already opted in still reports it here.
+
+Two new write routes, both wrapping `validate_layout.run_init` through
+`wizard_init.py` (same "thin wrapper around an existing, already-tested CLI script"
+posture as `wizard_discover.py`/`run_discover`, not a reimplementation):
+
+- `POST /api/init/preview` → `wizard_init.preview_init` → `run_init(..., dry_run=True)`
+  — every eligibility check and the full slot-resolution loop runs exactly as a real
+  call would, but nothing is written to disk. Messages say "Would …" instead of the
+  real past-tense verb.
+- `POST /api/init` → `wizard_init.run_init` → `run_init(..., dry_run=False)` — the real
+  write.
+
+Both take an optional `{"workspace_root": "<path>"}` JSON body (blank/omitted →
+`None`, pre-D21 defaults). Both are session-cookie *and* CSRF-header gated, same as
+every other mutating route (`wizard_auth`). Neither route asks for `project_name`/
+`description` — that half of `init` has no wizard-side equivalent and stays the
+coding agent's job; see the `needs-discover-greenfield` copy in `index.html`.
+
+The frontend (`wizard.js`'s `renderInitOffer`, gated on `workspace_root_offer_eligible`
+from `/api/state` — never re-derived from `d20_initialized` client-side) offers
+Preview / Initialize / Skip. Skip is a session-only client-side dismiss (mirrors the
+D20 banner's "Got it" — "not now", not "never"); Initialize calls `loadState()` again
+on success, which naturally hides the offer once the server reports
+`workspace_root_offer_eligible: false`. See `manual_smoke_onboarding.md` §1a for the
+manual walkthrough.

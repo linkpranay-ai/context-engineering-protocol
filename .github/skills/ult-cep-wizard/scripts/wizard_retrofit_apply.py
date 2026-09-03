@@ -116,6 +116,13 @@ class ApplyUnitInput:
     draft_text: str
     contracts_included: List[str]
     target_file_hash: Optional[str]
+    # the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: the absolute, already-
+    # validated external root `primary_file` is relative to, when this unit's
+    # target isn't ctx.repo_root - None (the default) is the unchanged
+    # in-repo case. Same "None means repo_root" convention as
+    # wizard_retrofit_inventory.RetrofitInventoryResult.target_root and
+    # wizard_retrofit_draft.build_draft's containment_root.
+    containment_root: Optional[str] = None
 
 
 @dataclass
@@ -154,7 +161,9 @@ def apply_unit(repo_root, unit_input: ApplyUnitInput) -> ApplyUnitResult:
         )
 
     try:
-        target = wc.check_containment(repo_root, unit_input.primary_file)
+        target = wc.check_containment(
+            unit_input.containment_root or repo_root, unit_input.primary_file
+        )
     except wc.ContainmentError as exc:
         return ApplyUnitResult(unit_id=uid, status="failed", reason=str(exc))
     if not target.is_file():

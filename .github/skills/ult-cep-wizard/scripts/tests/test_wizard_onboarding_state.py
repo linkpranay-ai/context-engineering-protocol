@@ -227,9 +227,69 @@ class TestJsonDict(unittest.TestCase):
                     "discovery_artifact_exists",
                     "decision_counts",
                     "d20_initialized",
+                    "workspace_root_current",
+                    "workspace_root_offer_eligible",
                 },
             )
             self.assertEqual(payload["state"], "needs_discover")
+
+
+class TestWorkspaceRootOffer(unittest.TestCase):
+    """the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: the wizard-UI workspace_root
+    namespacing offer must appear exactly at needs_discover-before-D20-init, and
+    nowhere else."""
+
+    def test_eligible_at_needs_discover_before_d20_init(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_clean_repo(root)
+            state = wos.compute_state(root)
+            self.assertEqual(state.name, wos.NEEDS_DISCOVER)
+            self.assertTrue(state.workspace_root_offer_eligible)
+            self.assertIsNone(state.workspace_root_current)
+
+    def test_not_eligible_once_d20_initialized(self):
+        # run_init itself refuses once D20-initialized (never-silently-reset) -
+        # the offer must not even be shown in that case.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_clean_repo(root)
+            _install_d20_marker(root)
+            state = wos.compute_state(root)
+            self.assertEqual(state.name, wos.NEEDS_DISCOVER)
+            self.assertFalse(state.workspace_root_offer_eligible)
+
+    def test_not_eligible_at_layout_broken(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_broken_repo(root)
+            state = wos.compute_state(root)
+            self.assertFalse(state.workspace_root_offer_eligible)
+
+    def test_not_eligible_at_decisions_pending_or_steady_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_clean_repo(root)
+            _write(root / "context-layout-discovery.md", ALL_CONFIRMED_ARTIFACT)
+            state = wos.compute_state(root)
+            self.assertEqual(state.name, wos.STEADY_STATE)
+            self.assertFalse(state.workspace_root_offer_eligible)
+
+    def test_workspace_root_current_reflects_already_configured_value(self):
+        # A repo that ran `init --workspace-root docs/` through the CLI/agent flow
+        # still reports the value here, even though the offer itself is no longer
+        # eligible (d20_initialized is now True).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_clean_repo(root)
+            _install_d20_marker(root)
+            _write(
+                root / "context-config.yaml",
+                "layout:\n  workspace_root: docs/\n",
+            )
+            state = wos.compute_state(root)
+            self.assertEqual(state.workspace_root_current, "docs")
+            self.assertFalse(state.workspace_root_offer_eligible)
 
 
 if __name__ == "__main__":

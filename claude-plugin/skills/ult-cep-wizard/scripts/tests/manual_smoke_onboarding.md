@@ -1,15 +1,16 @@
 # Manual smoke test: brownfield onboarding journey (Phase 2, D24 §18.14)
 
 Companion to the automated suites (`test_wizard_onboarding_state.py`,
-`test_wizard_discover.py`, `TestApiState`/`TestDiscoverRoute` in
-`test_wizard_server.py`) — this walks the same journey a real user would, over a real
-browser and real HTTP, end to end: **never-initialized repo → guided Discover →
-Decisions → Apply → steady-state**, plus the D20-banner human-in-the-loop step. Same
-rigor as the Phase 1 write-path smoke test this session already ran for
-`/api/stage`/`/api/apply` — this extends it to cover what's new in Phase 2, it doesn't
-replace it. Run this after any change that touches `wizard_onboarding_state.py`,
-`wizard_discover.py`, the `/api/state`/`/api/discover` routes, or the frontend state
-router, before considering the change done.
+`test_wizard_discover.py`, `test_wizard_init.py`, `TestApiState`/`TestDiscoverRoute`/
+`TestApiInitRoutes` in `test_wizard_server.py`) — this walks the same journey a real
+user would, over a real browser and real HTTP, end to end: **never-initialized repo →
+optional workspace-root init → guided Discover → Decisions → Apply → steady-state**,
+plus the D20-banner human-in-the-loop step. Same rigor as the Phase 1 write-path smoke
+test this session already ran for `/api/stage`/`/api/apply` — this extends it to cover
+what's new in Phase 2, it doesn't replace it. Run this after any change that touches
+`wizard_onboarding_state.py`, `wizard_discover.py`, `wizard_init.py`, the
+`/api/state`/`/api/discover`/`/api/init`/`/api/init/preview` routes, or the frontend
+state router, before considering the change done.
 
 ## 0. Set up a throwaway fixture repo
 
@@ -55,6 +56,37 @@ whole point of step 1.
    frontend should re-call `loadState()` after a successful `POST /api/discover` and
    route to whatever state that returns (`decisions_pending` on a repo with real
    pending fields).
+
+## 1a. Workspace-root init offer (the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init)
+
+Run this against a **fresh** copy of the §1 fixture (before Discover has run, so
+`d20_initialized` is still false) — the offer disappears once D20 is initialized, by
+design.
+
+1. Confirm `#needs-discover-init-offer` is visible alongside the greenfield intro from
+   §1 step 3, and that `GET /api/state` reports `"workspace_root_offer_eligible":
+   true, "workspace_root_current": null`.
+2. Leave the workspace-root field blank and click **Preview**. Confirm
+   `POST /api/init/preview` fires (Network tab), the messages list renders (starting
+   with "Would…"), and **nothing appears on disk** — no `contexts/`, no
+   `project_layout` in `context-config.yaml`.
+3. Type `.cep/` into the field and click **Preview** again. Confirm the messages now
+   mention `.cep/contexts` and `layout.workspace_root: .cep` — still nothing written.
+4. Click **Initialize** (still with `.cep/` in the field). Confirm: `POST /api/init`
+   fires, `.cep/contexts/` actually exists on disk afterward, `context-config.yaml`
+   now has `layout.workspace_root: .cep` under `layout:`, the offer's messages switch
+   to past tense ("Scaffolded…"/"Set…", not "Would…"), and the page automatically
+   re-fetches `/api/state` and the offer disappears (`workspace_root_offer_eligible`
+   is now `false`, and the intro switches to the brownfield variant — D20 is
+   initialized now even though Discover hasn't run yet).
+5. Reload the page. Confirm the offer stays hidden (server-computed, not just a
+   client-side dismiss) and `GET /api/state` reports `"workspace_root_current":
+   ".cep"`.
+6. On a **separate fresh fixture**, click **Skip (use defaults)** instead of
+   Initialize. Confirm the offer hides immediately with no network request, Discover
+   still works normally afterward, and reloading the page **re-shows** the offer
+   (session-only dismiss, same as the D20 banner's "Got it" in §4 — "not now", not
+   "never").
 
 ## 2. `decisions_pending` → Apply → `steady_state`
 

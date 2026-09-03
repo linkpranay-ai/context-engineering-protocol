@@ -214,9 +214,19 @@ class TestListDocs(unittest.TestCase):
                 "docs": [
                     {"id": "concept", "title": "Concept", "kind": "doc"},
                     {"id": "protocol", "title": "Protocol", "kind": "doc"},
-                ]
+                ],
+                "case_studies_external_url": wd.CASE_STUDIES_EXTERNAL_URL,
             },
         )
+
+    def test_to_json_dict_case_studies_external_url_present_even_when_no_docs(self):
+        # The frontend's fallback (wizard.js's "Case Studies" nav button
+        # opening this link instead of a local doc) must be available
+        # whether or not *any* doc was found locally - it's this whole
+        # gap's actual fix, not an incidental extra field.
+        payload = wd.to_json_dict([])
+        self.assertEqual(payload["docs"], [])
+        self.assertEqual(payload["case_studies_external_url"], wd.CASE_STUDIES_EXTERNAL_URL)
 
 
 class TestBundleVerification(unittest.TestCase):

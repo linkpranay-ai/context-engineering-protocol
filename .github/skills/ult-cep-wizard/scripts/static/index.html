@@ -121,10 +121,11 @@
     </div>
     <div class="docs-overlay-body retrofit-overlay-body">
       <p class="retrofit-intro">
-        Point at a skill library <strong>inside this repo</strong> to see which of its
-        skills look code-related or task-related, select which CEP contract(s) each
-        one should reference, and draft a pointer to insert. Every draft is deterministic
-        template text, always editable, and nothing is written to any file yet.
+        Point at a skill library &mdash; inside this repo, or an external directory
+        you choose below &mdash; to see which of its skills look code-related or
+        task-related, select which CEP contract(s) each one should reference, and
+        draft a pointer to insert. Every draft is deterministic template text,
+        always editable, and nothing is written to any file yet.
       </p>
 
       <section id="retrofit-picker" aria-label="Retrofit target picker">
@@ -133,6 +134,34 @@
           Browsing is read-only. Click a directory to open it, then "Inventory this
           directory" to scan it as a candidate skill library.
         </p>
+
+        <!-- the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment: explicit external-target
+             flow. Off by default - the repo_root browsing below is untouched
+             until this is used. Typing an absolute path and clicking "Browse"
+             re-roots the picker at that directory via GET /api/picker's
+             external_root param, which the server re-validates and
+             canonicalizes on every request (see
+             wizard_containment.resolve_external_target) - never trusted
+             as-typed. "Use this repo instead" clears it. -->
+        <div id="retrofit-external-root-panel" class="retrofit-external-root-panel">
+          <label for="retrofit-external-root-input" class="retrofit-external-root-label">
+            Or point at a directory outside this repo (absolute path):
+          </label>
+          <div class="retrofit-external-root-row">
+            <input type="text" id="retrofit-external-root-input"
+                   placeholder="e.g. C:\other-repo\skills or /home/me/other-repo/skills" />
+            <button type="button" id="retrofit-external-root-browse">Browse external directory</button>
+            <button type="button" id="retrofit-external-root-clear" style="display: none;">Use this repo instead</button>
+          </div>
+          <p id="retrofit-external-root-status" role="status"></p>
+          <p id="retrofit-external-root-warning" class="retrofit-external-root-warning" style="display: none;">
+            &#9888; Retrofit writes for this target will go <strong>outside this
+            repository</strong>, to <span id="retrofit-external-root-warning-path"></span>.
+            Contract references for these units must be plugin-qualified (same-repo
+            mode is unavailable).
+          </p>
+        </div>
+
         <p class="picker-path" id="retrofit-picker-current-path">.</p>
         <button type="button" id="retrofit-picker-up" disabled>&uarr; Up</button>
         <button type="button" id="retrofit-picker-use-dir">Inventory this directory</button>
@@ -149,10 +178,48 @@
         <p class="retrofit-inventory-target" id="retrofit-inventory-target"></p>
         <p id="retrofit-inventory-message" role="status"></p>
         <p id="retrofit-tier-summary" class="retrofit-tier-summary"></p>
+
+        <!-- the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: grouped counts by
+             source directory, clickable as a filter. Populated from
+             result.directory_counts - see renderRetrofitDirectorySummary()
+             in wizard.js. -->
+        <div id="retrofit-directory-summary" class="retrofit-directory-summary" role="group" aria-label="Filter by source directory"></div>
+
+        <!-- the 2026-08-31 Round-2 evaluation's finding on retrofit-inventory grouping and filtering by source directory: search + canonical-only + code/task
+             filters, so a reviewer of a large inventory isn't forced to
+             scan every card to find the ones that matter. Canonical-only
+             defaults to checked - "canonical-only default view" per the
+             Recommendation text. -->
+        <div id="retrofit-filter-bar" class="retrofit-filter-bar">
+          <input type="search" id="retrofit-filter-search" placeholder="Search by name or path&hellip;" aria-label="Search units by name or path" />
+          <label>
+            <input type="checkbox" id="retrofit-filter-canonical-only" checked />
+            Canonical only
+          </label>
+          <label>
+            <input type="checkbox" id="retrofit-filter-code" />
+            Code-related
+          </label>
+          <label>
+            <input type="checkbox" id="retrofit-filter-task" />
+            Task-related
+          </label>
+          <button type="button" id="retrofit-filter-clear-directory" style="display: none;">
+            Clear directory filter
+          </button>
+          <span id="retrofit-filter-count" class="retrofit-filter-count" role="status"></span>
+        </div>
+        <p id="retrofit-filter-empty-message" role="status" style="display: none;">
+          No units match the current filters. Adjust search, directory, or the
+          canonical/code/task checkboxes above.
+        </p>
+
         <label class="retrofit-review-gate-label">
           <input type="checkbox" id="retrofit-inventory-reviewed" />
-          I have reviewed this inventory, including which units are flagged
-          supplementary and why.
+          <span id="retrofit-review-gate-text">
+            I have reviewed this inventory, including which units are flagged
+            supplementary and why.
+          </span>
         </label>
         <ul id="retrofit-unclaimed-dirs" class="retrofit-unclaimed-list"></ul>
         <ul id="retrofit-excluded-owned-paths" class="retrofit-unclaimed-list"></ul>
@@ -235,11 +302,12 @@
         <p>
           A baseline <code>context-config.yaml</code> exists, but this repo hasn't run
           <code>ult-repo-layout init</code> yet, so layout initialization hasn't
-          completed. <code>init</code> is a short conversational step with your coding
-          agent &mdash; it asks for this project's name and description, and
-          (optionally) whether its content lives in a separate workspace root &mdash;
-          it never guesses these from existing files. Run
-          <code>/ult-repo-layout init</code> whenever you're ready.
+          completed. The full <code>init</code> is a short conversational step with
+          your coding agent &mdash; it asks for this project's name and description
+          too, and never guesses those from existing files. Run
+          <code>/ult-repo-layout init</code> whenever you want that. The workspace-root
+          choice and slot scaffolding below are the mechanical part of the same step,
+          available here so you don't have to leave the wizard just for that.
         </p>
         <p>
           You can run <strong>Discover</strong> below before or after
@@ -256,6 +324,38 @@
           dimensions) &mdash; nothing is written into <code>context-config.yaml</code>
           until you review and Apply those decisions on the next screen.
         </p>
+      </div>
+
+      <!-- the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: shown only while
+           workspace_root_offer_eligible is true (needs_discover, before D20 has
+           scaffolded anything - see wizard_onboarding_state.py). Calls
+           POST /api/init/preview then POST /api/init (wizard_init.py, wrapping
+           validate_layout.run_init's mechanical half of `init` - it never asks for
+           project_name/description, see the greenfield copy above). Independent of
+           Discover: init can run before or after it, in either order. -->
+      <div id="needs-discover-init-offer" style="display: none;">
+        <h3>Optional: namespace this project's content</h3>
+        <p class="guide-hint">
+          <code>layout.workspace_root</code> re-roots this project's slots (contexts,
+          outputs, cache, &hellip;) under one directory, e.g. <code>.cep/</code> or
+          <code>docs/</code>, instead of scattering them across the repo root. This
+          only changes where content <em>defaults</em> to living going forward &mdash;
+          it never moves or overrides anything that already exists, and every other
+          registered slot resolves exactly as before if you leave it blank.
+        </p>
+        <label for="init-workspace-root-input">Workspace root (optional)</label>
+        <input
+          type="text"
+          id="init-workspace-root-input"
+          placeholder="e.g. .cep/ or docs/ &mdash; leave blank for today's defaults"
+        />
+        <div class="init-offer-actions">
+          <button type="button" id="init-preview-button" class="secondary">Preview</button>
+          <button type="button" id="init-run-button">Initialize</button>
+          <button type="button" id="init-skip-button" class="secondary">Skip (use defaults)</button>
+        </div>
+        <ul id="init-preview-messages" class="init-preview-list" style="display: none;"></ul>
+        <p id="init-message" role="status"></p>
       </div>
 
       <button type="button" id="discover-button">Run Discover</button>

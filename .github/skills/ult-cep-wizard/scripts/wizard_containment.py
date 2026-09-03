@@ -176,3 +176,126 @@ def check_containment(affirmed_root, candidate_path) -> Path:
             )
 
     return resolved_target
+
+
+def resolve_external_target(repo_root, candidate_path) -> Path:
+    """Validates a user-supplied absolute external retrofit-target root
+    (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - "Retrofit wizard cannot operate
+    on sibling or standalone skill library"). Unlike check_containment, this
+    function's whole job is to validate a root that is deliberately OUTSIDE
+    repo_root, so it cannot reuse check_containment's "must be inside" test -
+    only its containment-violation machinery (component_is_containment_violation)
+    for the candidate root itself.
+
+    Requirements, all fail-closed:
+
+      1. candidate_path must be non-empty and, once turned into a Path, absolute -
+         a relative external root is meaningless (relative to what?) and is
+         rejected rather than silently resolved against cwd or repo_root.
+      2. candidate_path must NOT already be inside repo_root - if it is, this is
+         just an ordinary in-repo target and callers should route it through the
+         existing picker/containment_root=None path instead of this one.
+         is_contained() already proves this correctly without any new logic:
+         pathlib's join semantics mean `Path(repo_root, absolute_candidate)`
+         evaluates to `absolute_candidate` itself, so this reuses
+         check_containment's existing resolved-and-normalized comparison rather
+         than re-implementing it.
+      3. candidate_path itself, AND every one of its ancestor directories
+         (component_is_containment_violation, walked over candidate.parents),
+         must not be a symlink/junction/reparse point - the external root
+         becomes the new write boundary for every unit selected under it, so
+         both it and the path leading to it must be real and unambiguous,
+         exactly like every intermediate component check_containment already
+         requires for in-repo paths. OneDrive cloud placeholders are exempt
+         (component_is_containment_violation's own distinction), so an
+         ancestor sitting under Files-On-Demand sync is still accepted.
+      4. candidate_path must exist and be a real directory - nothing is created
+         on the caller's behalf; per that finding's own repro steps,
+         the user has already cloned/checked out the library before pointing
+         the wizard at it.
+
+    Returns the resolved Path. Every downstream containment/write check for
+    this unit or session passes this Path as `containment_root` in place of
+    repo_root - the write boundary moves, but never widens: check_containment
+    still runs the exact same two checks against whichever root it's given.
+    Raises ContainmentError on any failure, the same exception type (and the
+    same "reason" surfacing convention) callers already handle for an in-repo
+    containment failure."""
+    if not candidate_path or not str(candidate_path).strip():
+        raise ContainmentError("An external retrofit target path is required.")
+
+    candidate = Path(candidate_path)
+    if not candidate.is_absolute():
+        raise ContainmentError(
+            f"'{candidate_path}' is not an absolute path - an external retrofit "
+            "target must be given as a full path (e.g. the root of an "
+            "already-cloned skill library)."
+        )
+
+    if is_contained(repo_root, candidate):
+        raise ContainmentError(
+            f"'{candidate_path}' is already inside the project root '{repo_root}' - "
+            "use the ordinary in-repo target picker instead of the external-target flow."
+        )
+
+    # The 2026-08-31 Round-2 evaluation's finding on external retrofit-root
+    # breadth: nothing above rejects a root so broad that "every unit under
+    # it" is effectively "every file on the machine" - a filesystem root
+    # (`C:\`, `\\server\share\`, `/`) or the user's own home directory both
+    # pass every check above (absolute, not inside repo_root, no ancestors to
+    # walk or a harmless one, not itself a reparse point, and both really are
+    # directories that exist). Checked by identity against the resolved
+    # candidate, not by string/prefix matching, so this can't be defeated by
+    # a trailing slash or a differently-cased drive letter, and doesn't
+    # accidentally reject a deliberately narrow subdirectory that merely
+    # lives near the anchor or home directory.
+    resolved_candidate = candidate.resolve()
+    if resolved_candidate == Path(candidate.anchor):
+        raise ContainmentError(
+            f"'{candidate}' is a filesystem root ('{candidate.anchor}') - too broad "
+            "to use as an external retrofit target; point at a specific "
+            "already-cloned skill library directory instead."
+        )
+    if resolved_candidate == Path.home().resolve():
+        raise ContainmentError(
+            f"'{candidate}' is your home directory - too broad to use as an "
+            "external retrofit target; point at a specific already-cloned skill "
+            "library directory instead."
+        )
+
+    # The 2026-08-31 Round-2 evaluation's finding on external (out-of-repo)
+    # retrofit-target containment: the check below this comment only ever
+    # looked at `candidate` itself - a reparse point one level higher (e.g.
+    # `candidate`'s parent is a junction, but `candidate` on disk is an
+    # ordinary directory once you're through it) walked straight past
+    # unnoticed, and the resolved Path returned from this function silently
+    # became a different real location than the literal path the user typed.
+    # That's exactly the "link-based indirection" ambiguity
+    # check_containment's own docstring already refuses for in-repo paths
+    # (see its component-by-component walk above) - an external root
+    # deserves the same guarantee along its own ancestor chain, checked
+    # before the candidate-itself check below so either one on its own is
+    # sufficient to reject.
+    for ancestor in candidate.parents:
+        if component_is_containment_violation(ancestor):
+            raise ContainmentError(
+                f"'{ancestor}' is a symlink/junction/reparse point in the path to "
+                f"'{candidate}' - not allowed as an ancestor of an external retrofit "
+                "target root (OneDrive cloud placeholders are exempt from this "
+                "check; this ancestor is not one)."
+            )
+
+    if component_is_containment_violation(candidate):
+        raise ContainmentError(
+            f"'{candidate}' is a symlink/junction/reparse point - not allowed as an "
+            "external retrofit target root (OneDrive cloud placeholders are exempt "
+            "from this check; this path is not one)."
+        )
+
+    if not candidate.is_dir():
+        raise ContainmentError(
+            f"'{candidate}' does not exist or is not a directory - clone/checkout "
+            "the external skill library first, then point the wizard at its root."
+        )
+
+    return resolved_candidate

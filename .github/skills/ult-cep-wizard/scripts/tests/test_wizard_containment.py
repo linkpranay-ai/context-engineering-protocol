@@ -189,6 +189,142 @@ class TestComponentIsContainmentViolationMocked(unittest.TestCase):
             self.assertFalse(wc.component_is_containment_violation(Path("C:/x")))
 
 
+class TestResolveExternalTarget(unittest.TestCase):
+    """the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment - "Retrofit wizard cannot
+    operate on sibling or standalone skill library". resolve_external_target
+    is the validation gate for a user-supplied external retrofit-target root;
+    every requirement in its docstring gets its own failure-mode test here."""
+
+    def setUp(self):
+        self._repo_tmp = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._repo_tmp.name)
+        (self.repo_root / "sub").mkdir()
+
+        self._ext_tmp = tempfile.TemporaryDirectory()
+        self.external_root = Path(self._ext_tmp.name)
+        (self.external_root / "skills").mkdir()
+
+    def tearDown(self):
+        self._repo_tmp.cleanup()
+        self._ext_tmp.cleanup()
+
+    def test_valid_external_root_resolves(self):
+        resolved = wc.resolve_external_target(self.repo_root, self.external_root)
+        self.assertEqual(resolved, self.external_root.resolve())
+
+    def test_blank_candidate_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, "")
+
+    def test_none_candidate_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, None)
+
+    def test_relative_candidate_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, "some/relative/path")
+
+    def test_candidate_already_inside_repo_root_is_rejected(self):
+        """This is just an ordinary in-repo target - callers should route it
+        through the existing picker, not the external-target flow."""
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, self.repo_root / "sub")
+
+    def test_nonexistent_candidate_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, self.external_root / "does-not-exist")
+
+    def test_candidate_that_is_a_file_not_a_directory_is_rejected(self):
+        a_file = self.external_root / "not-a-dir.txt"
+        a_file.write_text("x", encoding="utf-8")
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, a_file)
+
+    def test_symlinked_external_root_is_rejected(self):
+        link = self.external_root.parent / "link_to_external_root"
+        if not _try_make_symlink(link, self.external_root):
+            self.skipTest("process cannot create symlinks (no Developer Mode/admin)")
+        try:
+            with self.assertRaises(wc.ContainmentError):
+                wc.resolve_external_target(self.repo_root, link)
+        finally:
+            link.unlink(missing_ok=True)
+
+    # the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-
+    # target containment: candidate.parents walk. Mocked (like
+    # TestComponentIsContainmentViolationMocked above) rather than built from a real
+    # reparse point on disk - a real junction ancestor here would have to be a system
+    # directory several levels above a tempdir, which a test process can't safely
+    # create/remove.
+    def test_mid_chain_junction_ancestor_is_rejected(self):
+        real_violation = wc.component_is_containment_violation
+        checked_ancestor = self.external_root.resolve().parent
+
+        def fake_violation(path):
+            # Resolve before comparing: the ancestor walk passes the *raw*
+            # (unresolved) path component, which on Windows CI runners can
+            # come back in 8.3 short-path form (e.g. RUNNER~1) even though
+            # checked_ancestor is the long-form resolved path - a bare
+            # Path equality would then never match and this mock would
+            # silently never fire.
+            if Path(path).resolve() == checked_ancestor:
+                return True
+            return real_violation(path)
+
+        with mock.patch.object(wc, "component_is_containment_violation", side_effect=fake_violation):
+            with self.assertRaises(wc.ContainmentError):
+                wc.resolve_external_target(self.repo_root, self.external_root)
+
+    def test_cloud_placeholder_tagged_ancestor_is_still_accepted(self):
+        """An ancestor that IS a reparse point but is specifically the OneDrive
+        cloud-placeholder kind must not be rejected - component_is_containment_violation
+        already encodes that distinction; this just confirms the new ancestor walk
+        actually calls through to it rather than treating "is a reparse point at all"
+        as automatically disqualifying."""
+        real_violation = wc.component_is_containment_violation
+        checked_ancestor = self.external_root.resolve().parent
+
+        def fake_violation(path):
+            # See test_mid_chain_junction_ancestor_is_rejected above: resolve
+            # before comparing so this isn't defeated by a raw short-path
+            # (8.3) ancestor form on Windows CI runners.
+            if Path(path).resolve() == checked_ancestor:
+                return False  # cloud placeholder: not a violation
+            return real_violation(path)
+
+        with mock.patch.object(wc, "component_is_containment_violation", side_effect=fake_violation):
+            resolved = wc.resolve_external_target(self.repo_root, self.external_root)
+        self.assertEqual(resolved, self.external_root.resolve())
+
+    def test_clean_ancestor_chain_is_unchanged(self):
+        # No mocking at all - every real ancestor of a tempdir is an ordinary
+        # directory, so the new walk must not disturb the existing happy path.
+        resolved = wc.resolve_external_target(self.repo_root, self.external_root)
+        self.assertEqual(resolved, self.external_root.resolve())
+
+    # the 2026-08-31 Round-2 evaluation's finding on external retrofit-root
+    # breadth: a filesystem root or the user's home directory both pass every
+    # check above this pair (absolute, not inside repo_root, no disqualifying
+    # ancestor, and a real existing directory) - these two are the ones the
+    # finding calls out by name.
+    def test_filesystem_root_anchor_is_rejected(self):
+        anchor = Path(self.external_root.anchor)
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, anchor)
+
+    def test_home_directory_is_rejected(self):
+        with self.assertRaises(wc.ContainmentError):
+            wc.resolve_external_target(self.repo_root, Path.home())
+
+    def test_narrow_subdirectory_near_anchor_or_home_is_unaffected(self):
+        # The identity check must not overreach into rejecting a deliberately
+        # narrow, legitimate target merely because it is a sibling of (not
+        # equal to) the anchor or home directory.
+        resolved = wc.resolve_external_target(self.repo_root, self.external_root)
+        self.assertNotEqual(resolved, Path(self.external_root.anchor))
+        self.assertNotEqual(resolved, Path.home().resolve())
+
+
 class TestNormalizedForComparison(unittest.TestCase):
     def test_case_fold(self):
         self.assertEqual(

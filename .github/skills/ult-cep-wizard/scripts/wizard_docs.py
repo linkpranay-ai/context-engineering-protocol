@@ -84,6 +84,27 @@ _CASE_STUDY_H1 = re.compile(r"^#\s*Case Study:\s*(.+?)\s*$", re.MULTILINE)
 # supplied title rather than raising if the file somehow has no H1.
 _FIRST_H1 = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 
+# install.ps1's Copy-CepWizardDocs / install.sh's equivalent deliberately does
+# NOT bundle case-studies/ into a real install (83 files, 8.6M measured on a
+# full install - see that function's own comment) - so `list_docs()` below
+# omits every case-study doc id in the overwhelming majority of real installs,
+# not just the "skill installed standalone" case the rest of this module's
+# missing-doc handling was built for. Without this, wizard.js's
+# setDocsNavAvailability() had nothing left to do but disable the "Case
+# Studies" nav button with a generic "Not available in this install" tooltip
+# and no way to actually read them - a dead control for what the top bar
+# itself advertises as evidence a new evaluator specifically needs. This repo
+# URL is CEP's own published home (see plugin.json's `homepage`/`repository`
+# and README.md's clone instructions) - always correct to link to regardless
+# of which repo the wizard is currently running against, since case studies
+# are CEP's own project docs, not target-repo content (see module docstring
+# above). Threaded through to_json_dict() unconditionally so the frontend
+# always has it ready, whether or not case-studies-readme made it into this
+# particular scan.
+CASE_STUDIES_EXTERNAL_URL = (
+    "https://github.com/linkpranay-ai/context-engineering-protocol/tree/main/case-studies"
+)
+
 
 @dataclass
 class DocEntry:
@@ -248,5 +269,6 @@ def to_json_dict(entries: List[DocEntry]) -> dict:
     return {
         "docs": [
             {"id": e.doc_id, "title": e.title, "kind": e.kind} for e in entries
-        ]
+        ],
+        "case_studies_external_url": CASE_STUDIES_EXTERNAL_URL,
     }

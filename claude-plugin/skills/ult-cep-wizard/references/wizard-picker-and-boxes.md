@@ -93,13 +93,18 @@ supporting fields above.
   build-output-shaped directories are excluded from listings — the picker exists to
   help a user point at a real content directory, not to be a general-purpose file
   browser over noise that was never a candidate.
-- `/api/picker` response shape: `{rel_path, parent_rel_path, entries}` —
-  `parent_rel_path` is `null` at the repo root (nothing to go up to), and each entry in
+- `/api/picker` response shape: `{rel_path, parent_rel_path, entries, target_root}` —
+  `parent_rel_path` is `null` at the affirmed root (nothing to go up to), and each entry in
   `entries` is `{"name": ..., "rel_path": ...}`. `rel_path` (both the top-level one and
   each entry's) is always relative to the affirmed root, never an absolute filesystem
   path — the client never needs to know (or send back) the real absolute path on disk,
   which also means a crafted absolute path from the client can't be used to request
-  something outside the root in the first place. Phase 1's frontend passes an entry's
+  something outside the root in the first place. `target_root` (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment) is `null` when the affirmed root is `ctx.repo_root` (the default,
+  unchanged from before this finding); it's the resolved, canonicalized absolute path
+  when the caller opted into an external root via the optional `external_root` query
+  param, re-validated on every request via `wizard_containment.resolve_external_target()`
+  — see `wizard-retrofit-flow.md` §1.2, the one current consumer of that param. Phase 1's
+  frontend passes an entry's
   `rel_path` straight through to `POST /api/stage`'s `arg` when a user picks a directory
   for a `CUSTOM` decision (see `wizard-write-path.md` §2) — it is the same
   containment-checked value the picker itself already validated, not a second path the

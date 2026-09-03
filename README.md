@@ -95,10 +95,28 @@ That copies `.github/skills/`, `.github/prompts/`, `.cursor/rules/`, and `AGENTS
 project, and (with `--init-project`/`-InitProject`) scaffolds a starter `context-config.yaml`.
 Re-running is safe — library files are refreshed, project-owned files (like a filled-in
 `context-config.yaml`) are left alone. Run `./install.sh --help` / `Get-Help ./install.ps1` for
-the full flag list, including `--dry-run`/`-DryRun`, `--only`/`-Only <skill1,skill2>` to
-install just a subset of skills instead of the full set, and `--runtime`/`-Runtime
-claude|copilot|both` (default `both`) to scope the install to `.github/skills/` alone
-(`claude`) or also include `.github/prompts/`/`.cursor/rules/` (`copilot`, `both`).
+the full flag list, including `--dry-run`/`-DryRun` and `--only`/`-Only <skill1,skill2>` to
+install just a subset of skills instead of the full set.
+
+`--runtime`/`-Runtime` (default `both`) scopes what gets copied alongside `.github/skills/`
+(always copied — every value reads it natively):
+
+| `--runtime` value | Also installs |
+|---|---|
+| `claude` | Nothing else — skills only. |
+| `copilot` | `.github/prompts/` (thin per-skill pointers back into `.github/skills/`). |
+| `cursor` | `.github/prompts/` + `.cursor/rules/<skill>.mdc`. |
+| `codex` | Merges the CEP-managed block into `AGENTS.md` only — no `.github/prompts/` or `.cursor/rules/`, since Codex reads project instructions from `AGENTS.md` directly. |
+| `both` (default) | Everything above, unconditionally. |
+
+For a Codex-only project, the minimal install is:
+
+```powershell
+.\install.ps1 -TargetPath <project> -Runtime codex -InitProject
+```
+
+which installs just `.github/skills/` and the `AGENTS.md` merge — no prompt or Cursor-rule
+files a Codex-only project would never read.
 
 You can also drive layout setup itself through a browser instead of the CLI above —
 `ult-repo-layout` doesn't need to have run first; a repo with it merely *installed*

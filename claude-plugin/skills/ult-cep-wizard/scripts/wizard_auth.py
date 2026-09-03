@@ -53,6 +53,12 @@ class Session:
     csrf_nonce: str
     created_at: float
     last_seen_at: float
+    # the 2026-08-31 Round-2 evaluation's finding on POST /api/init committing
+    # without a prior preview: set by a successful /api/init/preview call
+    # (wizard_init.InitResult.init_preview_token), consumed by the next
+    # /api/init call. Session-scoped, in-memory only, like everything else on
+    # this dataclass - never persisted, never read from the request itself.
+    init_preview_token: Optional[str] = None
 
 
 class SessionStore:
