@@ -1648,7 +1648,15 @@ class TestRunInit(unittest.TestCase):
             # only needs to make launching `sh` itself PATH-independent; the
             # fabricated PATH below still correctly limits what the *hook's
             # own* interpreter lookup sees (python3 shim only, no python).
-            sh_path = shutil.which("sh") or "sh"
+            #
+            # If `sh` isn't resolvable from this process's own real PATH at
+            # all (plain Windows with no POSIX layer on PATH), there is no
+            # PATH-independent way to launch it - that's an environment gap,
+            # not a hook regression, so skip rather than assert on a launch
+            # failure this test was never meant to exercise.
+            sh_path = shutil.which("sh")
+            if not sh_path:
+                self.skipTest("no `sh` resolvable on PATH in this environment")
 
             env = dict(os.environ)
             env["PATH"] = str(fake_bin)
