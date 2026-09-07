@@ -370,6 +370,53 @@ def _top_level_candidate_dirs(repo_root):
     return sorted(names)
 
 
+def _settled_output_root_names(repo_root, state):
+    """Top-level directory names that are themselves the first path segment
+    of some already-recorded generation output in `state` -- e.g. "org"
+    once a module draft has been written to `org/core/CONTEXT.md`. Without
+    this, a resolved How-L2 output root that happens to sit at the repo's
+    own top level gets enumerated by _top_level_candidate_dirs() on the
+    very next scan and misfiled as a brand-new pending module: this tool's
+    own generated output reclassified as unscanned application code.
+
+    Every state section that can carry an `output_path` is checked --
+    modules, repo_docs, and interfaces all persist one, and the same
+    reclassification risk applies to all three, not just modules.
+
+    Only a MULTI-COMPONENT relative output_path counts: a bare top-level
+    output file (e.g. a repo_doc's output_path of "CEP-INDEX.md") has no
+    subdirectory of its own to protect -- nothing exists at the top level
+    for a later scan to mistake for a module.
+
+    A malformed, empty, or outside-repo_root output_path is skipped rather
+    than raising -- this is a defensive read of persisted state, not a
+    validating one; scan() should never abort over a stale or unexpected
+    path recorded by an earlier run."""
+    repo_root = Path(repo_root).resolve()
+    names = set()
+
+    def _consider(output_path):
+        if not output_path:
+            return
+        try:
+            resolved = (repo_root / output_path).resolve()
+            rel = resolved.relative_to(repo_root)
+        except (ValueError, OSError):
+            return
+        if len(rel.parts) > 1:
+            names.add(rel.parts[0])
+
+    for module in state.get("modules", []):
+        _consider(module.get("output_path"))
+    for doc in (state.get("repo_docs") or {}).values():
+        if isinstance(doc, dict):
+            _consider(doc.get("output_path"))
+    for interface in state.get("interfaces", []):
+        _consider(interface.get("output_path"))
+
+    return names
+
+
 # --------------------------------------------------------------------------- #
 # SKILL.md Step 4's small/large repo-size gate                               #
 # --------------------------------------------------------------------------- #
@@ -897,7 +944,10 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
 
     repo_root = Path(repo_root)
     existing = {m["id"]: m for m in state.get("modules", [])}
-    module_names = _top_level_candidate_dirs(repo_root)
+    settled_output_roots = _settled_output_root_names(repo_root, state)
+    module_names = [
+        n for n in _top_level_candidate_dirs(repo_root) if n not in settled_output_roots
+    ]
 
     in_degrees = {}
     node_counts = {}
@@ -983,10 +1033,20 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
         new_modules.append(entry)
 
     # A module no longer present on disk keeps its history -- state is a
-    # record of decisions made, not a live filesystem mirror.
+    # record of decisions made, not a live filesystem mirror. The one
+    # exception: a still-"pending" entry whose name is itself a settled
+    # output root (this exact reclassification bug, if it already ran once
+    # against an older build of this file before this fix existed) carries
+    # no real decision to preserve -- a "generated"/"skipped" entry always
+    # is preserved, but a lingering mistaken "pending" one is dropped here
+    # instead of being carried forward forever.
     for module_id, entry in existing.items():
-        if module_id not in seen_ids:
-            new_modules.append(entry)
+        if module_id in seen_ids:
+            continue
+        name = module_id[:-1] if module_id.endswith("/") else module_id
+        if entry.get("status") == "pending" and name in settled_output_roots:
+            continue
+        new_modules.append(entry)
 
     state["modules"] = new_modules
     state["repo_scan"] = {
