@@ -34,10 +34,12 @@ CI (ubuntu-latest) has both.
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -707,6 +709,45 @@ def _to_git_bash_path(win_path) -> str:
     return p.replace("\\", "/")
 
 
+def _git_bash_executable(timeout=5):
+    """Resolves `bash` on PATH and probes whether it is actually a genuine
+    MSYS2/Git-Bash build - the one _to_git_bash_path()'s "/c/..." mount-
+    point convention above is written for - rather than merely "some
+    executable named bash exists somewhere on PATH".
+
+    On Windows, `shutil.which("bash")` can resolve to the OS's own
+    WSL-launcher stub in System32 instead of Git-for-Windows Bash: with no
+    WSL distro installed that stub exits immediately without running
+    anything; with one installed it launches a real Linux bash that expects
+    "/mnt/c/..." paths, not "/c/...". Either way it is not compatible with
+    what this test file's path conversion produces, so a presence-only
+    check (`shutil.which("bash")` truthy) is not sufficient to predict
+    whether `_run_install_sh` will actually work - it can still fail with a
+    misleading exit code instead of a clear skip.
+
+    Probes with `uname -s`, which only a genuine MSYS2/Git-Bash build
+    answers with "MINGW..."/"MSYS...". Returns the resolved bash path when
+    that's confirmed, else None (covers "no bash at all", "the WSL stub
+    with no distro", and "a real Linux/WSL bash" alike - none of them are
+    usable here)."""
+    bash = shutil.which("bash")
+    if not bash:
+        return None
+    try:
+        result = subprocess.run(
+            [bash, "-c", "uname -s"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    uname = result.stdout.strip().upper()
+    if "MINGW" in uname or "MSYS" in uname:
+        return bash
+    return None
+
+
 def _run_install_sh(target, args):
     """Module-level so the cross-installer tests below can invoke install.sh
     without going through a TestInstallSh instance - one definition of how
@@ -714,7 +755,7 @@ def _run_install_sh(target, args):
     mixed-installer ones."""
     return subprocess.run(
         [
-            "bash",
+            _git_bash_executable() or "bash",
             _to_git_bash_path(INSTALL_SH),
             "--target",
             _to_git_bash_path(target),
@@ -726,7 +767,7 @@ def _run_install_sh(target, args):
     )
 
 
-@unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
+@unittest.skipUnless(_git_bash_executable(), "no Git-Bash-compatible bash on PATH")
 class TestInstallSh(_InstallScriptTestBase, unittest.TestCase):
     init_flag = "--init-project"
     dry_run_flag = "--dry-run"
@@ -763,7 +804,101 @@ class TestInstallPs1(_InstallScriptTestBase, unittest.TestCase):
         return _run_install_ps1(target, args)
 
 
-@unittest.skipUnless(shutil.which("bash"), "bash not on PATH")
+def _win_long_path(path):
+    """Prefixes an absolute Windows path with the `\\\\?\\` extended-length
+    marker so Python's own os-level calls (makedirs/exists/rmtree) bypass
+    MAX_PATH too - mirrors ConvertTo-LongPathSafe in install.ps1, which
+    exists for the identical reason on the PowerShell side. Needed because
+    Python's os module is only long-path-safe by default when the Windows
+    10+ LongPathsEnabled registry policy is turned on, which this suite
+    cannot assume is true of every machine it runs on (confirmed off on the
+    machine this test was authored against - plain os.path.exists() on a
+    >260-char path silently returned False rather than raising, which would
+    have made a plain (unprefixed) version of this test fail for a reason
+    having nothing to do with install.ps1)."""
+    s = str(path)
+    if s.startswith("\\\\?\\"):
+        return s
+    return "\\\\?\\" + s
+
+
+def _force_rmtree(path):
+    """shutil.rmtree that clears the read-only attribute before retrying a
+    failed delete, instead of giving up on it (ignore_errors=True). The
+    installer's own directory copy (robocopy /MIR) carries read-only
+    attributes through from the source checkout onto a meaningful fraction
+    of the copied `.github/skills/` tree, so a plain ignore-and-move-on
+    cleanup silently leaves part of the tree behind - which then surfaces
+    later as a confusing "directory not empty" error from the caller's own
+    tempdir cleanup, far from where the real problem is."""
+
+    def _clear_readonly_and_retry(func, path, exc_info):
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except OSError:
+            pass
+
+    shutil.rmtree(path, onerror=_clear_readonly_and_retry)
+
+
+def _extend_to_length(base, total_length):
+    """Builds a chain of nested subdirectories (each containing a space, to
+    also cover the "spaced path" half of the long-path regression below) so
+    the resulting absolute path string is at least total_length characters -
+    deterministic regardless of how long `base` itself already is (varies by
+    machine username/tempdir depth)."""
+    path = base
+    segment = "a" * 20 + " " + "b" * 19
+    while len(str(path)) < total_length:
+        path = path / segment
+    return path
+
+
+@unittest.skipUnless(_powershell_executable(), "neither pwsh nor powershell on PATH")
+@unittest.skipUnless(sys.platform == "win32", "MAX_PATH is a Windows-only constraint")
+class TestInstallPs1LongPath(unittest.TestCase):
+    """Windows PowerShell 5.1's native filesystem cmdlets (Set-Content,
+    New-Item, Test-Path, Get-Content) enforce the classic ~260-char
+    MAX_PATH even when the OS's long-paths policy is enabled, because
+    powershell.exe (unlike pwsh) doesn't declare long-path awareness in its
+    own manifest. The path handed to -TargetPath below is left unprefixed,
+    exactly like a real user's invocation would be - the whole point is
+    that install.ps1 must cope with an ordinary long path on its own, not
+    one already pre-blessed by its caller; see _win_long_path for why the
+    Python-side verification/cleanup calls need their own prefixing."""
+
+    def test_init_project_succeeds_under_long_spaced_target_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = _extend_to_length(Path(tmp), 280)
+            self.assertGreater(len(str(target)), 260)
+            first_level = Path(tmp) / target.relative_to(tmp).parts[0]
+            os.makedirs(_win_long_path(target), exist_ok=True)
+            try:
+                result = _run_install_ps1(target, ["-InitProject"])
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+                def _exists(*parts):
+                    return os.path.exists(_win_long_path(target.joinpath(*parts)))
+
+                self.assertTrue(_exists("context-config.yaml"))
+                self.assertTrue(_exists("starter_kit", "project_guidelines", ".pointer.md"))
+                self.assertTrue(_exists(".cep-install.json"))
+                self.assertTrue(_exists("AGENTS.md"))
+                self.assertTrue(_exists(".github", "skills"))
+
+                # Idempotent rerun exercises the exists-check/re-read side of
+                # every one of those functions (Test-Path, Get-Content -Raw),
+                # not just the create side - a fix that only long-path-safed
+                # the write half would pass the block above and still fail
+                # here.
+                second = _run_install_ps1(target, ["-InitProject"])
+                self.assertEqual(second.returncode, 0, second.stderr)
+            finally:
+                _force_rmtree(_win_long_path(first_level))
+
+
+@unittest.skipUnless(_git_bash_executable(), "no Git-Bash-compatible bash on PATH")
 @unittest.skipUnless(_powershell_executable(), "neither pwsh nor powershell on PATH")
 class TestCrossInstallerOwnershipCarryForward(unittest.TestCase):
     """context-config.yaml ownership must survive a re-install by the *other*
@@ -855,6 +990,62 @@ class TestCrossInstallerOwnershipCarryForward(unittest.TestCase):
                 (target / "context-config.yaml").read_text(encoding="utf-8"),
                 adopter_text,
             )
+
+
+class GitBashCapabilityProbeTests(unittest.TestCase):
+    """Unconditional unit tests for _git_bash_executable() itself - the
+    TestInstallSh/TestCrossInstallerOwnershipCarryForward skip gates above
+    only exercise it indirectly (and only when a real `bash` happens to be
+    on PATH), so the probe's own branches need direct coverage that runs
+    regardless of what's actually installed."""
+
+    def test_returns_none_when_bash_not_on_path(self):
+        with unittest.mock.patch("shutil.which", return_value=None):
+            self.assertIsNone(_git_bash_executable())
+
+    def test_returns_path_when_uname_reports_mingw(self):
+        with unittest.mock.patch("shutil.which", return_value="/some/bash"), \
+                unittest.mock.patch(
+                    "subprocess.run",
+                    return_value=subprocess.CompletedProcess(
+                        [], 0, stdout="MINGW64_NT-10.0\n", stderr=""
+                    ),
+                ):
+            self.assertEqual(_git_bash_executable(), "/some/bash")
+
+    def test_returns_path_when_uname_reports_msys(self):
+        with unittest.mock.patch("shutil.which", return_value="/some/bash"), \
+                unittest.mock.patch(
+                    "subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 0, stdout="MSYS_NT-10.0\n", stderr=""),
+                ):
+            self.assertEqual(_git_bash_executable(), "/some/bash")
+
+    def test_returns_none_when_uname_reports_real_linux(self):
+        # A genuine WSL bash (or any other real Linux bash) - path-
+        # incompatible with _to_git_bash_path()'s "/c/..." convention, so
+        # this must not be treated as usable here.
+        with unittest.mock.patch("shutil.which", return_value="/some/bash"), \
+                unittest.mock.patch(
+                    "subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 0, stdout="Linux\n", stderr=""),
+                ):
+            self.assertIsNone(_git_bash_executable())
+
+    def test_returns_none_when_probe_exits_nonzero(self):
+        # The WSL-launcher stub with no distro configured exits immediately
+        # without ever running `uname` - a non-zero exit, not a crash.
+        with unittest.mock.patch("shutil.which", return_value="/some/bash"), \
+                unittest.mock.patch(
+                    "subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="no distro"),
+                ):
+            self.assertIsNone(_git_bash_executable())
+
+    def test_returns_none_when_probe_raises(self):
+        with unittest.mock.patch("shutil.which", return_value="/some/bash"), \
+                unittest.mock.patch("subprocess.run", side_effect=OSError("boom")):
+            self.assertIsNone(_git_bash_executable())
 
 
 if __name__ == "__main__":

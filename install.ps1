@@ -50,19 +50,76 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# $env:OS is only ever "Windows_NT" on Windows — true on both Windows
+# PowerShell 5.1 and pwsh, unlike $IsWindows which doesn't exist in 5.1.
+$script:IsWindowsPlatform = ($env:OS -eq "Windows_NT")
+
+# ConvertTo-LongPathSafe: Windows PowerShell 5.1's native filesystem cmdlets
+# (Test-Path/Get-Content/Set-Content/New-Item) call .NET Framework APIs that
+# still enforce the classic ~260-char MAX_PATH limit even with the OS's
+# long-paths policy enabled - unlike robocopy (used for the bulk skills-tree
+# copy in Copy-LibraryTree below), which has been long-path-safe since well
+# before that policy existed. Prefixing an absolute, backslash-only path
+# with the `\\?\` extended-length marker makes those same cmdlets skip
+# MAX_PATH normalization entirely, which is what lets both the initial
+# -TargetPath existence check right below and -InitProject's own small
+# writes (context-config.yaml, the project_guidelines pointer, the install
+# manifest, the AGENTS.md merge) succeed even when $TargetPath is itself
+# already long (e.g. a deeply nested project root with spaces) - none of
+# those could previously reach a path past ~260 chars on Windows PowerShell
+# 5.1. Only ever applied on Windows (the only platform with MAX_PATH at
+# all) to an absolute path - `\\?\` requires one; a relative path is
+# returned unchanged since every caller here builds its argument from
+# $TargetPath via Join-Path (or passes the already-absolute $TargetPath
+# itself), which is absolute by construction once the block below runs. A
+# no-op below the threshold or if already prefixed, so it is always safe to
+# call unconditionally rather than gating each call site on whether the
+# specific path happens to be long. Callers must build any child path via
+# Join-Path (or string concatenation) BEFORE calling this, never after -
+# Join-Path does not understand an already-`\\?\`-prefixed base and throws
+# "Cannot find drive" if given one (verified empirically; PowerShell's
+# provider layer parses the leading `\\` as a UNC share name attempt).
+function ConvertTo-LongPathSafe([string]$Path) {
+    if (-not $script:IsWindowsPlatform) { return $Path }
+    if ($Path.StartsWith("\\?\")) { return $Path }
+    # 240, not 260: a margin below the real MAX_PATH that covers the
+    # longest leaf name any caller below still appends after this check
+    # (".pointer.md", "context-config.yaml", ".cep-install.json" - all
+    # under 20 chars), so a path just under 260 once fully joined is still
+    # caught here rather than slipping through unprefixed.
+    if ($Path.Length -lt 240) { return $Path }
+    if (-not [System.IO.Path]::IsPathRooted($Path)) { return $Path }
+    if ($Path.StartsWith("\\")) {
+        # UNC path: \\server\share\... becomes \\?\UNC\server\share\...
+        return "\\?\UNC\" + $Path.Substring(2)
+    }
+    return "\\?\$Path"
+}
+
 if ([string]::IsNullOrWhiteSpace($TargetPath)) {
     Write-Error "-TargetPath <dir> is required."
     exit 1
 }
 
-if (-not (Test-Path -LiteralPath $TargetPath -PathType Container)) {
+# [System.IO.Path]::GetFullPath, not Resolve-Path: it turns a possibly
+# relative $TargetPath into a canonical absolute one without touching the
+# filesystem, so it still works once that result is long enough to need
+# ConvertTo-LongPathSafe below - confirmed empirically that Resolve-Path
+# cannot be made to do the same for a path this long: called on the raw
+# path it fails with "path does not exist" (its own existence check can't
+# see past MAX_PATH either), and called on an already-`\\?\`-prefixed path
+# it returns a provider-qualified string ("Microsoft.PowerShell.Core\
+# FileSystem::\\?\...") instead of a plain path, which would corrupt every
+# Join-Path built from $TargetPath afterward.
+$TargetPath = [System.IO.Path]::GetFullPath($TargetPath)
+
+if (-not (Test-Path -LiteralPath (ConvertTo-LongPathSafe $TargetPath) -PathType Container)) {
     Write-Error "Target directory does not exist: $TargetPath"
     exit 1
 }
 
 $SourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
-$TargetPath = (Resolve-Path -LiteralPath $TargetPath).Path
 
 if ($TargetPath -eq $SourceRoot) {
     Write-Error "Target directory must not be the same as the library source directory ($SourceRoot)."
@@ -89,10 +146,6 @@ if (-not [string]::IsNullOrWhiteSpace($Only)) {
 }
 
 $script:ActionCount = 0
-
-# $env:OS is only ever "Windows_NT" on Windows — true on both Windows
-# PowerShell 5.1 and pwsh, unlike $IsWindows which doesn't exist in 5.1.
-$script:IsWindowsPlatform = ($env:OS -eq "Windows_NT")
 
 function Write-InstallAction([string]$Message) {
     $script:ActionCount++
@@ -211,7 +264,11 @@ function Format-AgentsMdForOnly([string]$Content) {
 # that wasn't actually installed.
 function Merge-AgentsMd {
     $src = Join-Path $SourceRoot "AGENTS.md"
-    $dst = Join-Path $TargetPath "AGENTS.md"
+    # Long-path-safed immediately: every use of $dst below (Test-Path,
+    # Get-Content, Set-Content) is a native-cmdlet filesystem call gated on
+    # $TargetPath, the side that can actually be long - $src lives under
+    # $SourceRoot (this repo's own checkout) and is never the long one.
+    $dst = ConvertTo-LongPathSafe (Join-Path $TargetPath "AGENTS.md")
 
     if (-not (Test-Path -LiteralPath $src)) {
         Write-Error "Expected source file missing: $src"
@@ -277,7 +334,7 @@ function Merge-AgentsMd {
 # and none of them may abort the install, hence the catch and the $null
 # guards rather than letting $ErrorActionPreference = "Stop" propagate.
 function Test-PriorManifestOwnsContextConfig {
-    $manifest = Join-Path $TargetPath ".cep-install.json"
+    $manifest = ConvertTo-LongPathSafe (Join-Path $TargetPath ".cep-install.json")
     if (-not (Test-Path -LiteralPath $manifest)) { return $false }
     try {
         $raw = Get-Content -LiteralPath $manifest -Raw
@@ -300,7 +357,7 @@ function Test-PriorManifestOwnsContextConfig {
 # 5-row mechanical substitution, only if not already present.
 function New-ContextConfig {
     $src = Join-Path $SourceRoot "starter_kits/context_engineering/context-config.yaml.template"
-    $dst = Join-Path $TargetPath "context-config.yaml"
+    $dst = ConvertTo-LongPathSafe (Join-Path $TargetPath "context-config.yaml")
 
     if (-not (Test-Path -LiteralPath $src)) {
         Write-Error "Expected source file missing: $src"
@@ -355,8 +412,14 @@ function New-ContextConfig {
 # the only documented starter-kit drop-zone — it's the one actually read by
 # a skill shipped in this repo (compiling-project-guidelines).
 function New-ProjectGuidelinesPointer {
-    $leafDir = Join-Path $TargetPath "starter_kit/project_guidelines"
-    $dst = Join-Path $leafDir ".pointer.md"
+    # $dst built from the RAW (unprefixed) $leafDirRaw, not the safed
+    # $leafDir - Join-Path cannot take an already-`\\?\`-prefixed base (see
+    # ConvertTo-LongPathSafe's doc comment), so both paths are joined first
+    # and only safed individually afterward, at the point each is used.
+    $leafDirRaw = Join-Path $TargetPath "starter_kit/project_guidelines"
+    $dstRaw = Join-Path $leafDirRaw ".pointer.md"
+    $leafDir = ConvertTo-LongPathSafe $leafDirRaw
+    $dst = ConvertTo-LongPathSafe $dstRaw
     $existed = Test-Path -LiteralPath $dst
 
     if ($DryRun) {
@@ -443,7 +506,7 @@ function New-CepInstallManifest {
         return
     }
 
-    $dst = Join-Path $TargetPath ".cep-install.json"
+    $dst = ConvertTo-LongPathSafe (Join-Path $TargetPath ".cep-install.json")
     # .cep-install.json records its own path too - it's a file this run
     # itself wrote, same as everything else in $OwnedPaths, and consumers
     # (discover_layers.py/cep_retrofit.py/scaffold_state.py's manifest
@@ -489,6 +552,33 @@ function New-CepInstallManifest {
     $json = $manifest | ConvertTo-Json -Depth 5
     Set-Content -LiteralPath $dst -Value $json -NoNewline
     Write-InstallAction "wrote: .cep-install.json"
+}
+
+# Test-InitProjectArtifactsPresent: final verification, run once at the end
+# of -InitProject, that both files it is responsible for actually landed on
+# disk. New-ContextConfig and New-ProjectGuidelinesPointer run under
+# $ErrorActionPreference = "Stop", so a *terminating* long-path failure from
+# Set-Content/New-Item already aborts the script before this point - but not
+# every long-path failure on Windows PowerShell 5.1 surfaces that way; some
+# native filesystem cmdlets have been observed to return without writing
+# anything and without throwing, depending on which internal .NET code path
+# handles the too-long path. This re-checks existence explicitly rather than
+# inferring success from a clean exit alone, so -InitProject fails loudly
+# instead of reporting success over a silently-incomplete write. Checked
+# through the same ConvertTo-LongPathSafe'd path each function wrote
+# through, not the raw display path, since a check against the unprefixed
+# path can itself be the thing that fails to resolve once $TargetPath is
+# long enough to need the prefix in the first place.
+function Test-InitProjectArtifactsPresent {
+    $configPath = ConvertTo-LongPathSafe (Join-Path $TargetPath "context-config.yaml")
+    $pointerPath = ConvertTo-LongPathSafe (Join-Path $TargetPath "starter_kit/project_guidelines/.pointer.md")
+    $missing = @()
+    if (-not (Test-Path -LiteralPath $configPath)) { $missing += "context-config.yaml" }
+    if (-not (Test-Path -LiteralPath $pointerPath)) { $missing += "starter_kit/project_guidelines/.pointer.md" }
+    if ($missing.Count -gt 0) {
+        Write-Error "InitProject verification failed - expected file(s) not found after write: $($missing -join ', ')"
+        exit 1
+    }
 }
 
 # IncludePrompts / IncludeCursorRules / IncludeAgentsMd: .github/skills/ is
@@ -548,6 +638,9 @@ if ($IncludeAgentsMd) {
 if ($InitProject) {
     New-ContextConfig
     New-ProjectGuidelinesPointer
+    if (-not $DryRun) {
+        Test-InitProjectArtifactsPresent
+    }
 }
 
 $CepInstallMode = if ($OnlyNames.Count -gt 0) { "only" } else { "full" }
