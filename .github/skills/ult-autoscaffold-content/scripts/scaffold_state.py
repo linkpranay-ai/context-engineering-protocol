@@ -370,14 +370,23 @@ def _top_level_candidate_dirs(repo_root):
     return sorted(names)
 
 
-def _settled_output_root_names(repo_root, state):
+def _settled_output_subtrees(repo_root, state):
     """Top-level directory names that are themselves the first path segment
-    of some already-recorded generation output in `state` -- e.g. "org"
-    once a module draft has been written to `org/core/CONTEXT.md`. Without
-    this, a resolved How-L2 output root that happens to sit at the repo's
-    own top level gets enumerated by _top_level_candidate_dirs() on the
-    very next scan and misfiled as a brand-new pending module: this tool's
-    own generated output reclassified as unscanned application code.
+    of some already-recorded generation output in `state`, mapped to the
+    resolved directory (or directories) that actually hold that output --
+    e.g. {"org": {<repo_root>/org/core}} once a module draft has been
+    written to `org/core/CONTEXT.md`. _settled_output_root_names() below is
+    just this dict's key set; scan() needs the fuller per-directory shape
+    too, to tell a top-level name that is PURELY settled output (nothing
+    else lives there -- safe to exclude wholesale, same as always) apart
+    from one that also holds real, unrelated content and merely happens to
+    share its first path segment with some output -- see
+    _directory_is_purely_settled_output(), which is what draws that line.
+    Without either check, a resolved How-L2 output root that happens to
+    sit at the repo's own top level gets enumerated by
+    _top_level_candidate_dirs() on the very next scan and misfiled as a
+    brand-new pending module: this tool's own generated output
+    reclassified as unscanned application code.
 
     Every state section that can carry an `output_path` is checked --
     modules, repo_docs, and interfaces all persist one, and the same
@@ -393,7 +402,7 @@ def _settled_output_root_names(repo_root, state):
     validating one; scan() should never abort over a stale or unexpected
     path recorded by an earlier run."""
     repo_root = Path(repo_root).resolve()
-    names = set()
+    subtrees = {}
 
     def _consider(output_path):
         if not output_path:
@@ -404,7 +413,7 @@ def _settled_output_root_names(repo_root, state):
         except (ValueError, OSError):
             return
         if len(rel.parts) > 1:
-            names.add(rel.parts[0])
+            subtrees.setdefault(rel.parts[0], set()).add(resolved.parent)
 
     for module in state.get("modules", []):
         _consider(module.get("output_path"))
@@ -414,7 +423,47 @@ def _settled_output_root_names(repo_root, state):
     for interface in state.get("interfaces", []):
         _consider(interface.get("output_path"))
 
-    return names
+    return subtrees
+
+
+def _settled_output_root_names(repo_root, state):
+    """The top-level names _settled_output_subtrees() knows about, with no
+    purity distinction -- kept as its own function because it answers a
+    genuinely different, narrower question ("does any recorded output live
+    under this name at all") than scan() itself needs to act safely (see
+    _directory_is_purely_settled_output(); scan() consults that, not this,
+    before excluding or dropping anything)."""
+    return set(_settled_output_subtrees(repo_root, state).keys())
+
+
+def _directory_is_purely_settled_output(module_path, known_subtrees):
+    """True when every file under module_path lives inside one of
+    known_subtrees (each an absolute directory Path from
+    _settled_output_subtrees()) -- i.e. nothing besides CEP's own recorded
+    generation output lives at this top level, so treating the whole
+    directory as CEP-owned (excluded from module_names, and safe to drop a
+    lingering "pending" entry for) loses nothing real.
+
+    A directory containing even one file outside every known subtree --
+    e.g. a pre-existing "docs/" that also happens to be where some
+    module's output_path was resolved to, deep under
+    "docs/style-guide/core/CONTEXT.md" -- is NOT pure: "docs" is a real,
+    unrelated top-level directory that merely shares a first path segment
+    with some output, and must stay a normal scan candidate. Silently
+    excluding or deleting it on that coincidence alone would be exactly
+    the kind of unrecoverable data loss this function exists to prevent
+    (scan() still prunes the known subtree(s) from that module's own file
+    list afterward, so the settled output itself doesn't pollute its
+    tiering -- see scan()'s own use of known_subtrees for that part).
+
+    A directory that doesn't exist on disk, or holds no files at all,
+    counts as pure: there's no real content there for scan() to lose
+    either way."""
+    for f in _iter_files(module_path):
+        resolved = f.resolve()
+        if not any(sub in resolved.parents for sub in known_subtrees):
+            return False
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -944,7 +993,17 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
 
     repo_root = Path(repo_root)
     existing = {m["id"]: m for m in state.get("modules", [])}
-    settled_output_roots = _settled_output_root_names(repo_root, state)
+    settled_output_subtrees = _settled_output_subtrees(repo_root, state)
+    # Purity-filtered, NOT the raw _settled_output_root_names() key set: a
+    # name only gets excluded/dropped wholesale below when its top-level
+    # directory holds nothing but known settled output. A name that also
+    # holds real, unrelated content stays a normal scan candidate -- see
+    # _directory_is_purely_settled_output()'s own docstring for why.
+    settled_output_roots = {
+        name
+        for name, subtrees in settled_output_subtrees.items()
+        if _directory_is_purely_settled_output(repo_root / name, subtrees)
+    }
     module_names = [
         n for n in _top_level_candidate_dirs(repo_root) if n not in settled_output_roots
     ]
@@ -995,6 +1054,17 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
 
         module_path = repo_root / name
         files = list(_iter_files(module_path))
+        # name only reaches settled_output_subtrees when it wasn't pure
+        # enough to be excluded outright above -- prune the specific known
+        # settled-output subtree(s) here instead, so this module's own
+        # tiering is based on its real content, not inflated or otherwise
+        # skewed by CEP's own generated files sitting inside it.
+        known_subtrees = settled_output_subtrees.get(name)
+        if known_subtrees:
+            files = [
+                f for f in files
+                if not any(sub in f.resolve().parents for sub in known_subtrees)
+            ]
         generated = _is_generated_module(module_path, files)
 
         if graph_mode == "graphify":
