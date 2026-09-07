@@ -370,6 +370,148 @@ def _top_level_candidate_dirs(repo_root):
     return sorted(names)
 
 
+def _settled_output_subtrees(repo_root, state):
+    """Top-level directory names that are themselves the first path segment
+    of some already-recorded generation output in `state`, mapped to
+    {"dirs": {...}, "files": {...}} describing exactly what that output
+    covers under that name. _settled_output_root_names() below is just
+    this dict's key set; scan() needs the fuller shape too, to tell a
+    top-level name that is PURELY settled output (nothing else lives
+    there -- safe to exclude wholesale, same as always) apart from one
+    that also holds real, unrelated content and merely happens to share
+    its first path segment with some output -- see
+    _directory_is_purely_settled_output(), which is what draws that line.
+    Without either check, a resolved How-L2 output root that happens to
+    sit at the repo's own top level gets enumerated by
+    _top_level_candidate_dirs() on the very next scan and misfiled as a
+    brand-new pending module: this tool's own generated output
+    reclassified as unscanned application code.
+
+    Two output_path shapes are tracked, deliberately NOT collapsed into
+    one:
+
+    - 3+ path components (e.g. "org/core/CONTEXT.md") have a genuine
+      intermediate directory of their own ("org/core") that's narrower
+      than the top-level name ("org") -- so "dirs" records that
+      intermediate directory, and everything under it (even a file not
+      individually named in state, like an asset generation dropped
+      alongside CONTEXT.md) counts as covered.
+
+    - EXACTLY 2 path components (e.g. "conventions/CODING-STANDARDS.md")
+      have no such intermediate directory: the file sits directly inside
+      the top-level directory, so "the directory it lives in" IS the
+      top-level directory itself. Recording that as a "dirs" entry the
+      way the 3+-component case does would make
+      _directory_is_purely_settled_output() trivially true for ANY
+      content under that top-level name, regardless of how much real,
+      unrelated content also lives there -- an adversarial review caught
+      exactly this: How-L2 candidates like "conventions/" are real,
+      pre-existing, content-bearing directories that SKILL.md writes
+      CODING-STANDARDS.md/TESTING-GUIDELINES.md straight into, not
+      dedicated output roots, and the whole directory (not just the one
+      generated file) was being silently swallowed. So a 2-component
+      output_path instead goes into "files" as the exact resolved file --
+      narrow enough that it can only ever cover that one known file,
+      never a directory's other, unrelated content.
+
+    A 1-component output_path (a bare top-level output file, e.g. a
+    repo_doc's output_path of "CEP-INDEX.md") still contributes nothing at
+    all: nothing exists at the top level for a later scan to mistake for
+    a module.
+
+    Every state section that can carry an `output_path` is checked --
+    modules, repo_docs, and interfaces all persist one, and the same
+    reclassification risk applies to all three, not just modules.
+
+    A malformed, empty, or outside-repo_root output_path is skipped rather
+    than raising -- this is a defensive read of persisted state, not a
+    validating one; scan() should never abort over a stale or unexpected
+    path recorded by an earlier run."""
+    repo_root = Path(repo_root).resolve()
+    dir_subtrees = {}
+    file_subtrees = {}
+
+    def _consider(output_path):
+        if not output_path:
+            return
+        try:
+            resolved = (repo_root / output_path).resolve()
+            rel = resolved.relative_to(repo_root)
+        except (ValueError, OSError):
+            return
+        if len(rel.parts) > 2:
+            dir_subtrees.setdefault(rel.parts[0], set()).add(resolved.parent)
+        elif len(rel.parts) == 2:
+            file_subtrees.setdefault(rel.parts[0], set()).add(resolved)
+
+    for module in state.get("modules", []):
+        _consider(module.get("output_path"))
+    for doc in (state.get("repo_docs") or {}).values():
+        if isinstance(doc, dict):
+            _consider(doc.get("output_path"))
+    for interface in state.get("interfaces", []):
+        _consider(interface.get("output_path"))
+
+    names = set(dir_subtrees) | set(file_subtrees)
+    return {
+        name: {"dirs": dir_subtrees.get(name, set()), "files": file_subtrees.get(name, set())}
+        for name in names
+    }
+
+
+def _settled_output_root_names(repo_root, state):
+    """The top-level names _settled_output_subtrees() knows about, with no
+    purity distinction -- kept as its own function because it answers a
+    genuinely different, narrower question ("does any recorded output live
+    under this name at all") than scan() itself needs to act safely (see
+    _directory_is_purely_settled_output(); scan() consults that, not this,
+    before excluding or dropping anything)."""
+    return set(_settled_output_subtrees(repo_root, state).keys())
+
+
+def _directory_is_purely_settled_output(module_path, subtrees):
+    """True when every file under module_path is covered by `subtrees`
+    (the {"dirs": ..., "files": ...} value from
+    _settled_output_subtrees() for this name) -- i.e. nothing besides
+    CEP's own recorded generation output lives at this top level, so
+    treating the whole directory as CEP-owned (excluded from
+    module_names, and safe to drop a lingering "pending" entry for) loses
+    nothing real. A file counts as covered if it lives under one of
+    subtrees["dirs"], or if it IS one of subtrees["files"] exactly --
+    membership in "files" does NOT extend to that file's sibling content,
+    which is the whole point of tracking 2-component output_paths at
+    file granularity instead of by directory (see
+    _settled_output_subtrees()'s docstring).
+
+    A directory containing even one file that's neither -- e.g. a
+    pre-existing "docs/" that also happens to be where some module's
+    output_path was resolved to, deep under
+    "docs/style-guide/core/CONTEXT.md", or a pre-existing "conventions/"
+    that a repo doc's output_path points straight into -- is NOT pure:
+    it's a real, unrelated top-level directory that merely shares a first
+    path segment with some output, and must stay a normal scan candidate.
+    Silently excluding or deleting it on that coincidence alone would be
+    exactly the kind of unrecoverable data loss this function exists to
+    prevent (scan() still prunes the known output(s) from that module's
+    own file list afterward, so the settled output itself doesn't
+    pollute its tiering -- see scan()'s own use of `subtrees` for that
+    part).
+
+    A directory that doesn't exist on disk, or holds no files at all,
+    counts as pure: there's no real content there for scan() to lose
+    either way."""
+    dirs = subtrees.get("dirs", set())
+    files = subtrees.get("files", set())
+    for f in _iter_files(module_path):
+        resolved = f.resolve()
+        if resolved in files:
+            continue
+        if any(d in resolved.parents for d in dirs):
+            continue
+        return False
+    return True
+
+
 # --------------------------------------------------------------------------- #
 # SKILL.md Step 4's small/large repo-size gate                               #
 # --------------------------------------------------------------------------- #
@@ -897,7 +1039,20 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
 
     repo_root = Path(repo_root)
     existing = {m["id"]: m for m in state.get("modules", [])}
-    module_names = _top_level_candidate_dirs(repo_root)
+    settled_output_subtrees = _settled_output_subtrees(repo_root, state)
+    # Purity-filtered, NOT the raw _settled_output_root_names() key set: a
+    # name only gets excluded/dropped wholesale below when its top-level
+    # directory holds nothing but known settled output. A name that also
+    # holds real, unrelated content stays a normal scan candidate -- see
+    # _directory_is_purely_settled_output()'s own docstring for why.
+    settled_output_roots = {
+        name
+        for name, subtrees in settled_output_subtrees.items()
+        if _directory_is_purely_settled_output(repo_root / name, subtrees)
+    }
+    module_names = [
+        n for n in _top_level_candidate_dirs(repo_root) if n not in settled_output_roots
+    ]
 
     in_degrees = {}
     node_counts = {}
@@ -945,6 +1100,20 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
 
         module_path = repo_root / name
         files = list(_iter_files(module_path))
+        # name only reaches settled_output_subtrees when it wasn't pure
+        # enough to be excluded outright above -- prune the specific known
+        # settled-output subtree(s)/file(s) here instead, so this module's
+        # own tiering is based on its real content, not inflated or
+        # otherwise skewed by CEP's own generated files sitting inside it.
+        known = settled_output_subtrees.get(name)
+        if known:
+            known_dirs = known.get("dirs", set())
+            known_files = known.get("files", set())
+            files = [
+                f for f in files
+                if f.resolve() not in known_files
+                and not any(d in f.resolve().parents for d in known_dirs)
+            ]
         generated = _is_generated_module(module_path, files)
 
         if graph_mode == "graphify":
@@ -983,10 +1152,20 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
         new_modules.append(entry)
 
     # A module no longer present on disk keeps its history -- state is a
-    # record of decisions made, not a live filesystem mirror.
+    # record of decisions made, not a live filesystem mirror. The one
+    # exception: a still-"pending" entry whose name is itself a settled
+    # output root (this exact reclassification bug, if it already ran once
+    # against an older build of this file before this fix existed) carries
+    # no real decision to preserve -- a "generated"/"skipped" entry always
+    # is preserved, but a lingering mistaken "pending" one is dropped here
+    # instead of being carried forward forever.
     for module_id, entry in existing.items():
-        if module_id not in seen_ids:
-            new_modules.append(entry)
+        if module_id in seen_ids:
+            continue
+        name = module_id[:-1] if module_id.endswith("/") else module_id
+        if entry.get("status") == "pending" and name in settled_output_roots:
+            continue
+        new_modules.append(entry)
 
     state["modules"] = new_modules
     state["repo_scan"] = {

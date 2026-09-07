@@ -949,6 +949,231 @@ class ScanTests(unittest.TestCase):
             ss.scan(state, root, "heuristic")
             self.assertEqual(state["interfaces"], [{"id": "prior--entry", "status": "pending"}])
 
+    def test_settled_output_root_is_excluded_from_rescan(self):
+        # The exact reclassification bug: core/'s draft is generated to
+        # org/core/CONTEXT.md (a resolved How-L2 output root sitting at the
+        # repo's own top level). A later rescan must not enumerate "org/"
+        # as a brand-new pending module just because it now exists on disk.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids)
+
+            # Idempotent: running the same rescan again changes nothing.
+            ss.scan(state, root, "heuristic", rescan=True)
+            ids_again = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids_again)
+
+    def test_settled_output_root_from_repo_doc_excluded_from_rescan(self):
+        # A repo-wide doc's output_path carries the exact same exposure as
+        # a module's -- e.g. coding_standards resolved to org/docs/....
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_repo_doc_generated(state, "coding_standards", "org/docs/CODING-STANDARDS.md")
+            _write(root / "org" / "docs" / "CODING-STANDARDS.md", "# standards")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids)
+
+    def test_bare_top_level_output_file_does_not_suppress_a_real_module(self):
+        # A repo doc's output_path with no subdirectory nesting (e.g. a
+        # root-level CEP-INDEX.md) has nothing underneath it to protect --
+        # it must not suppress an unrelated same-named top-level module.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(root / "docs" / "readme.md", "x")
+            state = ss.empty_state()
+            ss.mark_repo_doc_generated(state, "coding_standards", "docs")
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertIn("docs/", ids)
+
+    def test_stale_pending_entry_at_settled_output_root_is_dropped_on_rescan(self):
+        # Self-healing: a TRIAGE-STATE.json produced by an older, buggy
+        # build of this file may already have "org/" recorded as a
+        # mistaken "pending" module entry. A fixed rescan must drop that
+        # stale entry rather than carry it forward forever.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            # Simulate the pre-fix corruption directly, bypassing scan().
+            state["modules"].append({
+                "id": "org/", "tier": 2, "in_degree": None, "file_count": 1,
+                "basis": "heuristic:file-count", "status": "pending",
+                "generated_at": None, "output_path": None, "skip_reason": None,
+            })
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids)
+
+    def test_stale_settled_entry_at_output_root_is_still_preserved(self):
+        # A settled ("generated"/"skipped") entry is real decision history
+        # even if its id happens to collide with a settled output root --
+        # only "pending" (never a real decision) is dropped, per the
+        # docstring's own distinction.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            state["modules"].append({
+                "id": "org/", "tier": 2, "in_degree": None, "file_count": 1,
+                "basis": "heuristic:file-count", "status": "skipped",
+                "generated_at": None, "output_path": None,
+                "skip_reason": "manually reviewed",
+            })
+
+            ss.scan(state, root, "heuristic")
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("org/", by_id)
+            self.assertEqual(by_id["org/"]["status"], "skipped")
+
+    def test_settled_output_sharing_an_ancestor_with_a_real_module_is_not_dropped(self):
+        # The over-broad-exclusion-key bug: an earlier, buggy build keyed
+        # exclusion purely off output_path's first path segment, so a
+        # generation output resolved to e.g. "docs/style-guide/core/
+        # CONTEXT.md" would silently and unrecoverably delete any
+        # unrelated *pending* module that happened to already be named
+        # "docs/" -- with no skip_reason, no message, and (because the
+        # exclusion also removed "docs" from module_names) no way back via
+        # --rescan either. Unlike every other settled-output-root fixture
+        # above, "docs" here holds REAL, unrelated content of its own
+        # (architecture.md) alongside the nested generated file, so it
+        # must survive as a normal, still-pending module.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(root / "docs" / "architecture.md", "# architecture")
+            state = ss.empty_state()
+
+            ss.scan(state, root, "heuristic")
+            self.assertIn("docs/", {m["id"] for m in state["modules"]})
+
+            ss.mark_generated(state, "core/", "docs/style-guide/core/CONTEXT.md")
+            _write(root / "docs" / "style-guide" / "core" / "CONTEXT.md", "# core")
+
+            ss.scan(state, root, "heuristic")
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("docs/", by_id)
+            self.assertEqual(by_id["docs/"]["status"], "pending")
+
+            # Rescanning must re-tier "docs/" from its real content alone
+            # -- the generated CONTEXT.md sitting inside it must not count
+            # toward its own file_count/tier basis.
+            ss.scan(state, root, "heuristic", rescan=True)
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("docs/", by_id)
+            self.assertEqual(by_id["docs/"]["file_count"], 1)
+
+    def test_settled_output_at_top_level_does_not_swallow_its_own_directory(self):
+        # The same over-broad-exclusion bug as above, but in the narrower
+        # shape an adversarial review found survives the first fix: a
+        # repo doc's output_path with exactly TWO path components (e.g.
+        # "conventions/CODING-STANDARDS.md") has no intermediate directory
+        # of its own -- "the directory it lives in" IS the top-level
+        # directory itself. Treating that like the 3+-component case
+        # (recording resolved.parent, i.e. the top-level directory, as a
+        # "protected subtree") makes the purity check trivially true for
+        # ANY content under that name, so a real, pre-existing
+        # "conventions/" directory holding unrelated real files (e.g. a
+        # hand-written naming.md) would be silently misclassified as pure
+        # settled output and dropped, right along with its real content.
+        # "conventions/" must survive as a normal, still-pending module,
+        # with only the one generated file excluded from its tiering.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(root / "conventions" / "naming.md", "# naming")
+            state = ss.empty_state()
+
+            ss.scan(state, root, "heuristic")
+            self.assertIn("conventions/", {m["id"] for m in state["modules"]})
+
+            ss.mark_repo_doc_generated(
+                state, "coding_standards", "conventions/CODING-STANDARDS.md"
+            )
+            _write(root / "conventions" / "CODING-STANDARDS.md", "# standards")
+
+            ss.scan(state, root, "heuristic")
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("conventions/", by_id)
+            self.assertEqual(by_id["conventions/"]["status"], "pending")
+
+            # Rescanning must re-tier "conventions/" from its real content
+            # alone -- the generated CODING-STANDARDS.md sitting inside it
+            # must not count toward its own file_count/tier basis.
+            ss.scan(state, root, "heuristic", rescan=True)
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("conventions/", by_id)
+            self.assertEqual(by_id["conventions/"]["file_count"], 1)
+
+
+class SettledOutputRootNamesTests(unittest.TestCase):
+    def test_multi_component_module_output_path_yields_first_segment(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            state = ss.empty_state()
+            state["modules"].append({"id": "core/", "output_path": "org/core/CONTEXT.md"})
+            self.assertEqual(ss._settled_output_root_names(root, state), {"org"})
+
+    def test_bare_top_level_output_path_yields_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            state = ss.empty_state()
+            state["modules"].append({"id": "core/", "output_path": "CONTEXT.md"})
+            self.assertEqual(ss._settled_output_root_names(root, state), set())
+
+    def test_missing_or_none_output_path_is_ignored(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            state = ss.empty_state()
+            state["modules"].append({"id": "core/", "output_path": None})
+            state["modules"].append({"id": "utils/"})
+            self.assertEqual(ss._settled_output_root_names(root, state), set())
+
+    def test_output_path_escaping_repo_root_is_ignored(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            state = ss.empty_state()
+            state["modules"].append({"id": "core/", "output_path": "../outside/deep/file.md"})
+            self.assertEqual(ss._settled_output_root_names(root, state), set())
+
+    def test_repo_doc_output_path_counts(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            state = ss.empty_state()
+            state["repo_docs"]["coding_standards"]["output_path"] = "org/docs/CODING-STANDARDS.md"
+            self.assertEqual(ss._settled_output_root_names(root, state), {"org"})
+
+    def test_interface_output_path_counts(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            state = ss.empty_state()
+            state["interfaces"].append({
+                "id": "core--utils", "output_path": "org/interfaces/core--utils.md",
+            })
+            self.assertEqual(ss._settled_output_root_names(root, state), {"org"})
+
 
 class MarkGeneratedSkippedTests(unittest.TestCase):
     def _state_with_pending_module(self):

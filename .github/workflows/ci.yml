@@ -56,11 +56,31 @@ jobs:
 
   test-windows:
     # First windows-latest leg in this repo's CI history (D24 §18.2b / Risk R1).
-    # Scoped to ult-cep-wizard only, not a full-matrix duplication of the
-    # ubuntu-latest job above: os.path.isjunction()-adjacent reparse-tag inspection
-    # (wizard_containment.py) is a genuinely Windows-only code path, and this is the
-    # first point in the repo where that stops being theoretical. Every other skill
-    # suite and catalog/ check is platform-independent and stays ubuntu-only.
+    # Scoped to ult-cep-wizard's full suite plus, from ult-repo-layout, only
+    # test_install_scripts.py -- not a full-matrix duplication of the
+    # ubuntu-latest job above. Both slices have genuinely Windows-only code
+    # paths that stop being theoretical here: os.path.isjunction()-adjacent
+    # reparse-tag inspection (wizard_containment.py), and install.ps1's
+    # MAX_PATH/relative-TargetPath handling, which needs an actual Windows
+    # PowerShell 5.1 (powershell.exe) on a win32 host to exercise at all
+    # (TestInstallPs1LongPath's own skip guards require both; the
+    # ubuntu-latest job's run of this same file above only ever covers the
+    # pwsh-on-any-OS-reachable parts of it, e.g. TestInstallPs1RelativeTargetPath).
+    #
+    # ult-repo-layout's OTHER test file, test_discover_layers.py, is
+    # deliberately excluded here, not just left to the ubuntu-only job:
+    # running it surfaced a pre-existing, unrelated latent bug (not
+    # introduced by this workflow file or by anything else on this branch --
+    # last touched by #46) where discover_layers.py compares a
+    # repo_root that's sometimes passed through Path.resolve() and sometimes
+    # not, which is harmless on real Windows machines but breaks on
+    # GitHub-hosted windows-latest runners specifically: the runneradmin
+    # account's temp directory resolves to its 8.3 short-name alias
+    # (e.g. RUNNER~1), so a resolved and an unresolved path to the identical
+    # directory stop comparing equal. Tracked as a separate, follow-up fix;
+    # this job stays scoped to the file that actually motivated adding it.
+    # Every other skill suite and catalog/ check is platform-independent and
+    # stays ubuntu-only.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -71,6 +91,9 @@ jobs:
 
       - name: Run ult-cep-wizard test suite (Windows)
         run: python -m unittest discover -s .github/skills/ult-cep-wizard/scripts/tests -p "test_*.py" -v
+
+      - name: Run ult-repo-layout install-script test suite (Windows)
+        run: python -m unittest discover -s .github/skills/ult-repo-layout/scripts/tests -p "test_install_scripts.py" -v
 
   wizard-e2e:
     # D24 §18.10 exit criterion 3: "at least two real, named eval cases against real
