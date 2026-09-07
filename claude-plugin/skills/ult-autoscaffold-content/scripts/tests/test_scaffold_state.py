@@ -1047,6 +1047,43 @@ class ScanTests(unittest.TestCase):
             self.assertIn("org/", by_id)
             self.assertEqual(by_id["org/"]["status"], "skipped")
 
+    def test_settled_output_sharing_an_ancestor_with_a_real_module_is_not_dropped(self):
+        # The over-broad-exclusion-key bug: an earlier, buggy build keyed
+        # exclusion purely off output_path's first path segment, so a
+        # generation output resolved to e.g. "docs/style-guide/core/
+        # CONTEXT.md" would silently and unrecoverably delete any
+        # unrelated *pending* module that happened to already be named
+        # "docs/" -- with no skip_reason, no message, and (because the
+        # exclusion also removed "docs" from module_names) no way back via
+        # --rescan either. Unlike every other settled-output-root fixture
+        # above, "docs" here holds REAL, unrelated content of its own
+        # (architecture.md) alongside the nested generated file, so it
+        # must survive as a normal, still-pending module.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(root / "docs" / "architecture.md", "# architecture")
+            state = ss.empty_state()
+
+            ss.scan(state, root, "heuristic")
+            self.assertIn("docs/", {m["id"] for m in state["modules"]})
+
+            ss.mark_generated(state, "core/", "docs/style-guide/core/CONTEXT.md")
+            _write(root / "docs" / "style-guide" / "core" / "CONTEXT.md", "# core")
+
+            ss.scan(state, root, "heuristic")
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("docs/", by_id)
+            self.assertEqual(by_id["docs/"]["status"], "pending")
+
+            # Rescanning must re-tier "docs/" from its real content alone
+            # -- the generated CONTEXT.md sitting inside it must not count
+            # toward its own file_count/tier basis.
+            ss.scan(state, root, "heuristic", rescan=True)
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("docs/", by_id)
+            self.assertEqual(by_id["docs/"]["file_count"], 1)
+
 
 class SettledOutputRootNamesTests(unittest.TestCase):
     def test_multi_component_module_output_path_yields_first_segment(self):
