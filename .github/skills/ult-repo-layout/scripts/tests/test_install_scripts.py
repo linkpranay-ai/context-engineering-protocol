@@ -782,9 +782,21 @@ def _powershell_executable():
     return shutil.which("pwsh") or shutil.which("powershell")
 
 
-def _run_install_ps1(target, args):
+def _windows_powershell_executable():
+    """Unlike _powershell_executable() (which prefers pwsh for the general
+    installer suite), this pins Windows PowerShell 5.1 specifically. Some
+    regressions (see TestInstallPs1LongPath) are specific to powershell.exe's
+    own .NET Framework host and do not reproduce under pwsh, which declares
+    long-path awareness in its own manifest - a test that accepted either
+    interpreter for one of those would silently pass on any machine with
+    pwsh installed, regardless of whether the fix it's meant to guard is
+    actually correct."""
+    return shutil.which("powershell")
+
+
+def _run_install_ps1(target, args, exe=None):
     """See _run_install_sh - same rationale, PowerShell side."""
-    exe = _powershell_executable()
+    exe = exe or _powershell_executable()
     return subprocess.run(
         [exe, "-NoProfile", "-File", str(INSTALL_PS1), "-TargetPath", str(target), *args],
         cwd=str(REPO_ROOT),
@@ -855,18 +867,23 @@ def _extend_to_length(base, total_length):
     return path
 
 
-@unittest.skipUnless(_powershell_executable(), "neither pwsh nor powershell on PATH")
+@unittest.skipUnless(_windows_powershell_executable(), "powershell.exe (Windows PowerShell 5.1) not on PATH")
 @unittest.skipUnless(sys.platform == "win32", "MAX_PATH is a Windows-only constraint")
 class TestInstallPs1LongPath(unittest.TestCase):
     """Windows PowerShell 5.1's native filesystem cmdlets (Set-Content,
     New-Item, Test-Path, Get-Content) enforce the classic ~260-char
     MAX_PATH even when the OS's long-paths policy is enabled, because
     powershell.exe (unlike pwsh) doesn't declare long-path awareness in its
-    own manifest. The path handed to -TargetPath below is left unprefixed,
-    exactly like a real user's invocation would be - the whole point is
-    that install.ps1 must cope with an ordinary long path on its own, not
-    one already pre-blessed by its caller; see _win_long_path for why the
-    Python-side verification/cleanup calls need their own prefixing."""
+    own manifest. Deliberately pinned to powershell.exe specifically (not
+    the pwsh-preferring _powershell_executable()) for that reason - on a
+    machine with pwsh installed, this regression doesn't reproduce at all,
+    and a test that accepted either interpreter would pass regardless of
+    whether install.ps1's own fix is correct. The path handed to
+    -TargetPath below is left unprefixed, exactly like a real user's
+    invocation would be - the whole point is that install.ps1 must cope
+    with an ordinary long path on its own, not one already pre-blessed by
+    its caller; see _win_long_path for why the Python-side
+    verification/cleanup calls need their own prefixing."""
 
     def test_init_project_succeeds_under_long_spaced_target_path(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -874,8 +891,9 @@ class TestInstallPs1LongPath(unittest.TestCase):
             self.assertGreater(len(str(target)), 260)
             first_level = Path(tmp) / target.relative_to(tmp).parts[0]
             os.makedirs(_win_long_path(target), exist_ok=True)
+            exe = _windows_powershell_executable()
             try:
-                result = _run_install_ps1(target, ["-InitProject"])
+                result = _run_install_ps1(target, ["-InitProject"], exe=exe)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
                 def _exists(*parts):
@@ -892,10 +910,58 @@ class TestInstallPs1LongPath(unittest.TestCase):
                 # not just the create side - a fix that only long-path-safed
                 # the write half would pass the block above and still fail
                 # here.
-                second = _run_install_ps1(target, ["-InitProject"])
+                second = _run_install_ps1(target, ["-InitProject"], exe=exe)
                 self.assertEqual(second.returncode, 0, second.stderr)
             finally:
                 _force_rmtree(_win_long_path(first_level))
+
+
+@unittest.skipUnless(_powershell_executable(), "neither pwsh nor powershell on PATH")
+class TestInstallPs1RelativeTargetPath(unittest.TestCase):
+    """Regression test for a relative -TargetPath resolving against the
+    wrong directory. [System.IO.Path]::GetFullPath(path) alone resolves a
+    relative argument against .NET's own Environment.CurrentDirectory - but
+    PowerShell never keeps that in sync with Set-Location/cd, so as soon as
+    an interactive session has cd'd away from wherever the process actually
+    started, a bare GetFullPath silently resolves `-TargetPath .` against
+    the stale start directory instead of the user's actual current
+    location, and a non-dry-run install then writes into the wrong place
+    with no warning. Reproduced here by starting the process in one
+    directory (unrelated_start_dir, standing in for wherever the shell
+    happened to launch) and then Set-Location-ing to a different one
+    (intended_target, standing in for wherever the user actually `cd`-ed
+    to) before invoking install.ps1 with a relative `.` - exactly the
+    divergence a plain subprocess call with a matching cwd= can't produce,
+    which is why the rest of this suite never caught it."""
+
+    def test_relative_target_path_resolves_against_pwd_not_process_start_dir(self):
+        exe = _powershell_executable()
+        with tempfile.TemporaryDirectory() as tmp:
+            intended_target = Path(tmp) / "intended-target"
+            unrelated_start_dir = Path(tmp) / "unrelated-start-dir"
+            intended_target.mkdir()
+            unrelated_start_dir.mkdir()
+
+            command = (
+                f"Set-Location -LiteralPath '{intended_target}'; "
+                f"& '{INSTALL_PS1}' -TargetPath . -InitProject"
+            )
+            result = subprocess.run(
+                [exe, "-NoProfile", "-Command", command],
+                cwd=str(unrelated_start_dir),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(
+                (intended_target / "context-config.yaml").exists(),
+                "install should have written into the Set-Location'd target directory",
+            )
+            self.assertEqual(
+                list(unrelated_start_dir.iterdir()),
+                [],
+                "nothing should have been written into the process's unrelated start directory",
+            )
 
 
 @unittest.skipUnless(_git_bash_executable(), "no Git-Bash-compatible bash on PATH")

@@ -111,7 +111,18 @@ if ([string]::IsNullOrWhiteSpace($TargetPath)) {
 # it returns a provider-qualified string ("Microsoft.PowerShell.Core\
 # FileSystem::\\?\...") instead of a plain path, which would corrupt every
 # Join-Path built from $TargetPath afterward.
-$TargetPath = [System.IO.Path]::GetFullPath($TargetPath)
+#
+# A relative $TargetPath must be resolved against $PWD (PowerShell's own
+# working directory, e.g. after Set-Location/cd), NOT against
+# GetFullPath's own implicit base. PowerShell never keeps .NET's process
+# CurrentDirectory in sync with Set-Location, so a bare
+# [System.IO.Path]::GetFullPath($TargetPath) silently resolves a relative
+# argument against whatever directory the host process happened to start
+# in - which for a script invoked after `cd`-ing elsewhere is the wrong
+# directory entirely, and install would write into it without warning.
+# Combine() is a no-op when $TargetPath is already absolute (an absolute
+# second argument wins outright), so this is safe for both cases.
+$TargetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($PWD.ProviderPath, $TargetPath))
 
 if (-not (Test-Path -LiteralPath (ConvertTo-LongPathSafe $TargetPath) -PathType Container)) {
     Write-Error "Target directory does not exist: $TargetPath"
