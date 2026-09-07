@@ -67,18 +67,19 @@ jobs:
     # ubuntu-latest job's run of this same file above only ever covers the
     # pwsh-on-any-OS-reachable parts of it, e.g. TestInstallPs1RelativeTargetPath).
     #
-    # ult-repo-layout's OTHER test file, test_discover_layers.py, is
-    # deliberately excluded here, not just left to the ubuntu-only job:
-    # running it surfaced a pre-existing, unrelated latent bug (not
-    # introduced by this workflow file or by anything else on this branch --
-    # last touched by #46) where discover_layers.py compares a
-    # repo_root that's sometimes passed through Path.resolve() and sometimes
-    # not, which is harmless on real Windows machines but breaks on
-    # GitHub-hosted windows-latest runners specifically: the runneradmin
-    # account's temp directory resolves to its 8.3 short-name alias
-    # (e.g. RUNNER~1), so a resolved and an unresolved path to the identical
-    # directory stop comparing equal. Tracked as a separate, follow-up fix;
-    # this job stays scoped to the file that actually motivated adding it.
+    # ult-repo-layout's OTHER test files (test_discover_layers.py and the
+    # rest) are deliberately excluded here, not just left to the
+    # ubuntu-only job: running test_discover_layers.py surfaced a
+    # pre-existing, unrelated latent bug (not introduced by this workflow
+    # file or by anything else on this branch -- last touched by #46) where
+    # discover_layers.py compares a repo_root that's sometimes passed
+    # through Path.resolve() and sometimes not, which is harmless on real
+    # Windows machines but breaks on GitHub-hosted windows-latest runners
+    # specifically: the runneradmin account's temp directory resolves to
+    # its 8.3 short-name alias (e.g. RUNNER~1), so a resolved and an
+    # unresolved path to the identical directory stop comparing equal.
+    # Tracked as a separate, follow-up fix; this job stays scoped to the
+    # one file that actually motivated adding it.
     # Every other skill suite and catalog/ check is platform-independent and
     # stays ubuntu-only.
     runs-on: windows-latest
