@@ -1084,6 +1084,48 @@ class ScanTests(unittest.TestCase):
             self.assertIn("docs/", by_id)
             self.assertEqual(by_id["docs/"]["file_count"], 1)
 
+    def test_settled_output_at_top_level_does_not_swallow_its_own_directory(self):
+        # The same over-broad-exclusion bug as above, but in the narrower
+        # shape an adversarial review found survives the first fix: a
+        # repo doc's output_path with exactly TWO path components (e.g.
+        # "conventions/CODING-STANDARDS.md") has no intermediate directory
+        # of its own -- "the directory it lives in" IS the top-level
+        # directory itself. Treating that like the 3+-component case
+        # (recording resolved.parent, i.e. the top-level directory, as a
+        # "protected subtree") makes the purity check trivially true for
+        # ANY content under that name, so a real, pre-existing
+        # "conventions/" directory holding unrelated real files (e.g. a
+        # hand-written naming.md) would be silently misclassified as pure
+        # settled output and dropped, right along with its real content.
+        # "conventions/" must survive as a normal, still-pending module,
+        # with only the one generated file excluded from its tiering.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(root / "conventions" / "naming.md", "# naming")
+            state = ss.empty_state()
+
+            ss.scan(state, root, "heuristic")
+            self.assertIn("conventions/", {m["id"] for m in state["modules"]})
+
+            ss.mark_repo_doc_generated(
+                state, "coding_standards", "conventions/CODING-STANDARDS.md"
+            )
+            _write(root / "conventions" / "CODING-STANDARDS.md", "# standards")
+
+            ss.scan(state, root, "heuristic")
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("conventions/", by_id)
+            self.assertEqual(by_id["conventions/"]["status"], "pending")
+
+            # Rescanning must re-tier "conventions/" from its real content
+            # alone -- the generated CODING-STANDARDS.md sitting inside it
+            # must not count toward its own file_count/tier basis.
+            ss.scan(state, root, "heuristic", rescan=True)
+            by_id = {m["id"]: m for m in state["modules"]}
+            self.assertIn("conventions/", by_id)
+            self.assertEqual(by_id["conventions/"]["file_count"], 1)
+
 
 class SettledOutputRootNamesTests(unittest.TestCase):
     def test_multi_component_module_output_path_yields_first_segment(self):
