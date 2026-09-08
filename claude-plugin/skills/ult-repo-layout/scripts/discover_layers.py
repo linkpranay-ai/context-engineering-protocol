@@ -561,7 +561,20 @@ class LayerSection:
 # ---------------------------------------------------------------------------
 
 def discover_what_l2(repo_root, config):
-    repo_root = Path(repo_root)
+    # Resolved once, here, rather than trusting every caller to have done
+    # it first (discover_layers() does resolve before calling this, but
+    # this function is also called directly, e.g. by tests) - see the
+    # 2026-09-07 finding this fixes: _read_cep_manifest() below always
+    # resolves each owned_paths entry to an absolute Path, so leaving
+    # repo_root (and everything built from it - wr_dir, candidate dirs)
+    # unresolved makes relative_to()/equality comparisons against those
+    # manifest paths brittle on any host where Path.resolve() changes a
+    # path's string form for reasons that have nothing to do with content
+    # (symlinks; on Windows specifically, some accounts' profile
+    # directories resolve to an 8.3 short-name alias). Resolving both
+    # sides from the same repo_root, once, up front, makes every
+    # downstream comparison compare like with like regardless of host.
+    repo_root = Path(repo_root).resolve()
     configured_path = None
     what_l2 = (config.get("layers") or {}).get("what_l2")
     if isinstance(what_l2, dict) and isinstance(what_l2.get("path"), str) and what_l2["path"]:
@@ -882,7 +895,12 @@ def _render_include_roots(candidates, primary_path):
 # ---------------------------------------------------------------------------
 
 def discover_how_l2(repo_root, config):
-    repo_root = Path(repo_root)
+    # Resolved once, here, for the same reason as discover_what_l2() above -
+    # _read_cep_manifest() below always returns resolved paths, so an
+    # unresolved repo_root makes the cand vs. manifest_owned comparisons in
+    # _manifest_extra_ignored() brittle on hosts where Path.resolve()
+    # changes a path's string form.
+    repo_root = Path(repo_root).resolve()
     section_title = HOW_L2_TITLE
     configured_path = None
     how_l2 = (config.get("how_dimension") or {}).get("how_l2")
@@ -1403,20 +1421,33 @@ def run_discovery(repo_root, repo_name=None):
     `{workspace_root}/` if set (well-formed), else repo root (§17.2's
     placement convention, mirroring context-config.yaml). Applies §17.6
     drift tracking against any existing artifact before writing - see
-    `_apply_drift_tracking`."""
-    repo_root = Path(repo_root).resolve()
-    sections, config = discover_layers(repo_root)
+    `_apply_drift_tracking`.
+
+    Only resolves repo_root when it isn't already absolute (e.g. main()'s
+    "." default). An already-absolute repo_root - the common case for
+    programmatic callers, which typically resolve it themselves before
+    calling in - is used as-is for out_dir/out_path, so the returned
+    out_path matches what the caller passed in rather than a possibly
+    differently-spelled canonical form of the same path (symlinks; on
+    Windows, some accounts' directories resolve to an 8.3 short-name
+    alias). discover_layers() below still gets a fully resolved root
+    internally, since its own repo_root-comparison logic needs one."""
+    input_root = Path(repo_root)
+    if not input_root.is_absolute():
+        input_root = input_root.resolve()
+    resolved_root = input_root.resolve()
+    sections, config = discover_layers(resolved_root)
     wr = vl._normalize_workspace_root(config)
-    out_dir = (repo_root / wr) if wr and wr != "." else repo_root
+    out_dir = (input_root / wr) if wr and wr != "." else input_root
     out_path = out_dir / "context-layout-discovery.md"
 
     prior_confirmed = _load_prior_confirmed_state(out_path)
     if prior_confirmed:
         today = datetime.date.today().isoformat()
-        sections = _apply_drift_tracking(repo_root, sections, prior_confirmed, today)
+        sections = _apply_drift_tracking(input_root, sections, prior_confirmed, today)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    artifact = render_discovery_artifact(repo_name or repo_root.name, sections)
+    artifact = render_discovery_artifact(repo_name or input_root.name, sections)
     out_path.write_text(artifact, encoding="utf-8")
     return out_path, artifact
 
