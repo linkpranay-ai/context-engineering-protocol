@@ -768,6 +768,81 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertIn("CUSTOM: <path> | ACKNOWLEDGE", section.render())
 
+    def test_manifest_owned_file_directly_under_non_github_how_l2_candidate_is_excluded(self):
+        # A re-review found discover_how_l2's non-.github/ branch dropped
+        # extra_ignored_files from its has_other_evidence check even though
+        # doc_count (right above it) honored it - a manifest-owned file
+        # landing directly under a non-.github/ candidate could still
+        # single-handedly qualify that candidate via has_other_evidence
+        # alone, bypassing the doc_count exclusion entirely.
+        write(self.repo_root / "conventions" / "CEP-CONVENTIONS.md", "# CEP")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": ["conventions/CEP-CONVENTIONS.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config("")
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn("CONFIRM: conventions/", section.render())
+
+    def test_mixed_case_placeholder_file_still_reads_as_empty(self):
+        # PLACEHOLDER_FILE_NAMES was added case-sensitive in the same
+        # commit that fixed the identical hazard for SCAN_IGNORED_DIR_NAMES
+        # - a later re-review found a directory holding only a
+        # differently-cased placeholder (ordinary on case-insensitive
+        # filesystems, and used as-is by some scaffolders) still read as
+        # populated. This is the mixed-case twin of
+        # test_gitkeep_only_style_guide_directory_is_not_a_candidate above;
+        # .github/ itself cannot exercise this because a bare placeholder
+        # never qualifies it in the first place, with or without the fix.
+        write(self.repo_root / "docs" / "style-guide" / ".GitKeep", "")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn("CONFIRM: docs/style-guide/", section.render())
+
+    def test_github_readme_alone_does_not_inflate_candidacy(self):
+        # .github/README.md is GitHub's own designated repo-front-page
+        # location, not this project's conventions corpus - it passes the
+        # provenance bar (a human wrote it) while failing the content-type
+        # intent, the same class as the community-standards files above.
+        write(self.repo_root / ".github" / "README.md", "# Welcome")
+        config = self.config("")
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn("CONFIRM: .github/", section.render())
+
+    def test_other_agent_tool_root_files_do_not_inflate_candidacy(self):
+        # The directory form of this class (agents/, instructions/,
+        # chatmodes/) was already excluded; a later re-review found the
+        # matching single-file convention for other AI tools (analogous to
+        # copilot-instructions.md) was not.
+        write(self.repo_root / ".github" / "AGENTS.md", "# agents")
+        write(self.repo_root / ".github" / "CLAUDE.md", "# claude")
+        write(self.repo_root / ".github" / "GEMINI.md", "# gemini")
+        config = self.config("")
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn("CONFIRM: .github/", section.render())
+
+    def test_github_nested_only_conventions_get_suppression_notice(self):
+        # Failing closed on nested-only .github/ content (nothing directly
+        # under .github/ itself, no recognized signal filename) is the
+        # deliberate posture - but a re-review found the resulting status
+        # line ("all missing/empty") was actively misleading when .github/
+        # in fact holds several authored docs. This asserts the notice
+        # exists rather than asserting different qualification behavior.
+        write(self.repo_root / ".github" / "conventions" / "c0.md", "# c0")
+        write(self.repo_root / ".github" / "conventions" / "c1.md", "# c1")
+        config = self.config("")
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("CONFIRM: .github/", rendered)
+        self.assertIn("NOTICE: `.github/` contains 2 markdown file(s)", rendered)
+
 
 # ---------------------------------------------------------------------------
 # What-L1 / How-L1: opt-in 4-case enabled/found matrix.
@@ -849,6 +924,50 @@ class TestOptInLayerMatrix(TempRepoTestCase):
         config = self.config("how_dimension:\n  how_l1:\n    enabled: false\n")
         section, path = dl.discover_how_l1(self.repo_root, config)
         self.assertNotIn("CONFIRM: org/process-standards/", section.render())
+
+    def test_manifest_owned_child_dir_under_what_l1_candidate_is_excluded(self):
+        # The two tests above only cover a manifest owning the WHOLE
+        # candidate directory outright (the self-found whole-candidate-
+        # ownership fix). A second re-review found no test exercised the
+        # more common per-child threading this same commit added to
+        # _discover_opt_in_layer's own call to _manifest_extra_ignored -
+        # this covers a manifest-owned subdirectory alongside genuinely
+        # external content in the same candidate.
+        write(self.repo_root / "specs" / "external" / "genuine-spec.md", "# real spec")
+        write(self.repo_root / "specs" / "external" / "cep" / "notes.md", "# CEP notes")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": ["specs/external/cep"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config("layers:\n  what_l1:\n    enabled: true\n")
+        section, path = dl.discover_what_l1(self.repo_root, config)
+        # The genuine sibling still qualifies the candidate - only the
+        # CEP-owned child is excluded, not the whole directory.
+        self.assertIn("CONFIRM: specs/external/", section.render())
+
+    def test_manifest_owned_direct_file_under_what_l1_candidate_is_excluded(self):
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": ["specs/external/CEP-NOTES.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        write(self.repo_root / "specs" / "external" / "CEP-NOTES.md", "# CEP notes")
+        config = self.config("layers:\n  what_l1:\n    enabled: true\n")
+        section, path = dl.discover_what_l1(self.repo_root, config)
+        self.assertNotIn("CONFIRM: specs/external/", section.render())
 
 
 # ---------------------------------------------------------------------------

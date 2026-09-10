@@ -170,6 +170,17 @@ HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES = {
 HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES = {
     "issue_template.md", "code_of_conduct.md", "security.md", "support.md",
     "governance.md", "copilot-instructions.md",
+    # Other AI-tool root-level instruction files - a later re-review found
+    # the directory form of this class (agents/, instructions/, chatmodes/
+    # above) covered an installer's own subdirectory but not the same
+    # tool's single-file convention, the identical dir/file asymmetry
+    # already closed for issue_template/issue_template.md.
+    "agents.md", "claude.md", "gemini.md", "cursorrules.md",
+    # `.github/README.md` is GitHub's own designated repo-front-page
+    # location (rendered in place of a root README when one is absent) -
+    # authored by a human, but never this project's conventions corpus,
+    # so it belongs here rather than passing the provenance check alone.
+    "readme.md",
 }
 
 # §17.4's What-L2/How-L2 sibling-scan exclusion list, applied in addition to
@@ -218,6 +229,13 @@ _SCAN_IGNORED_DIR_NAMES_CF = {n.casefold() for n in SCAN_IGNORED_DIR_NAMES}
 # module checks for content, not just in the .github/ boilerplate case
 # above.
 PLACEHOLDER_FILE_NAMES = {".gitkeep", ".keep", ".placeholder"}
+# Case-insensitive filesystems (Windows, default macOS) make ".GitKeep" and
+# ".KEEP" ordinary on-disk spellings of the same convention, not different
+# files - a later re-review found this set compared raw in _iter_files
+# below while extra_ignored_files right next to it was already casefolded,
+# the identical hazard SCAN_IGNORED_DIR_NAMES had (see
+# _SCAN_IGNORED_DIR_NAMES_CF above).
+_PLACEHOLDER_FILE_NAMES_CF = {n.casefold() for n in PLACEHOLDER_FILE_NAMES}
 
 DOC_EXTENSIONS = (".md", ".rst", ".adoc")
 DIAGRAM_EXTENSIONS = (".drawio", ".puml")
@@ -346,7 +364,8 @@ def _iter_files(dirpath, extra_ignored=frozenset(), extra_ignored_files=frozense
     for root, dirnames, filenames in os.walk(dirpath):
         dirnames[:] = _prune_ignored(dirnames, extra_ignored)
         for fn in filenames:
-            if fn in PLACEHOLDER_FILE_NAMES or fn.casefold() in extra_ignored_files_cf:
+            fn_cf = fn.casefold()
+            if fn_cf in _PLACEHOLDER_FILE_NAMES_CF or fn_cf in extra_ignored_files_cf:
                 continue
             yield Path(root) / fn
 
@@ -1088,6 +1107,16 @@ def discover_how_l2(repo_root, config):
     manifest_owned = _read_cep_manifest(repo_root)
 
     ranked = []
+    # Set below when .github/ has real markdown (doc_count > 0) but none of
+    # it qualifies as How-L2 signal - a re-review found that failing closed
+    # here (the correct posture: nested-only docs are unusual for
+    # conventions and a human still has CUSTOM/ACKNOWLEDGE available) left
+    # the eventual "all missing/empty" status line actively misleading when
+    # .github/ in fact holds several authored docs, just not directly under
+    # it or under a recognized signal name. Surfaced as a notice on
+    # whichever no-ranked-candidate return this function reaches, rather
+    # than changing qualification itself.
+    github_suppressed_doc_count = None
     for cand_rel in HOW_L2_CANDIDATE_DIRS:
         cand = repo_root / cand_rel.rstrip("/")
         if cand.is_dir():
@@ -1140,8 +1169,19 @@ def discover_how_l2(repo_root, config):
                 # two originally reported directory names.
                 has_other_evidence = _github_candidate_has_signal(cand, extra_ignored, extra_ignored_files)
                 qualifies = has_other_evidence
+                if not qualifies and doc_count > 0:
+                    github_suppressed_doc_count = doc_count
             else:
-                has_other_evidence = any(True for _ in _iter_files(cand, extra_ignored))
+                # A later re-review found this branch still dropped
+                # extra_ignored_files - manifest-owned-file exclusion
+                # (see _manifest_extra_ignored) was honored for doc_count
+                # above but not here, so a manifest-owned plain file
+                # landing directly under a non-.github/ candidate could
+                # still single-handedly qualify it via has_other_evidence
+                # alone.
+                has_other_evidence = any(
+                    True for _ in _iter_files(cand, extra_ignored, extra_ignored_files)
+                )
                 qualifies = doc_count > 0 or has_other_evidence
             if qualifies:
                 ranked.append((cand_rel, doc_count, _dir_mtime(cand)))
@@ -1178,6 +1218,25 @@ def discover_how_l2(repo_root, config):
             warning=github_caution,
         ), None
 
+    # A re-review found "all missing/empty" below is actively misleading
+    # when .github/ in fact holds real markdown that simply didn't qualify
+    # (nested rather than directly under .github/, no recognized signal
+    # name) - failing closed there is the deliberate posture (see
+    # HOW_L2_GITHUB_SIGNAL_NAMES above), but the human reading this status
+    # line deserves to know that content exists before being told there's
+    # nothing here at all.
+    github_suppressed_notice = (
+        f"`.github/` contains {github_suppressed_doc_count} markdown file(s), but "
+        f"none is a recognized convention signal or sits directly under `.github/` "
+        f"itself - treated as boilerplate or nested tooling docs, not this "
+        f"project's conventions corpus. If those are genuinely this project's "
+        f"conventions, CUSTOM to that subdirectory."
+        if github_suppressed_doc_count
+        else None
+    )
+
+    github_suppressed_notices = [github_suppressed_notice] if github_suppressed_notice else []
+
     # Root-signal-only fallback (fixes H-3's "not a directory" framing):
     # evidence conventions exist, but not enough to name a directory.
     signals = _how_l2_root_signals(repo_root)
@@ -1185,6 +1244,7 @@ def discover_how_l2(repo_root, config):
         return LayerSection(
             section_title,
             status_lines=["**Status:** no hand-configured `how_l2.path`; CEP default and candidate directories all missing/empty."],
+            notices=github_suppressed_notices,
             decision_lines=["decision: PENDING   # CUSTOM: <path> | ACKNOWLEDGE"],
             warning=(
                 f"Root-level convention files found ({', '.join(signals)}), but no "
@@ -1197,6 +1257,7 @@ def discover_how_l2(repo_root, config):
     return LayerSection(
         section_title,
         status_lines=["**Status:** no hand-configured `how_l2.path`; CEP default and candidate directories all missing/empty."],
+        notices=github_suppressed_notices,
         decision_lines=["decision: PENDING   # CUSTOM: <path> | ACKNOWLEDGE"],
         warning=(
             "No conventions directory or root-level convention signal was found "
