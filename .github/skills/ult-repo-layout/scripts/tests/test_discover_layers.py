@@ -467,7 +467,7 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         # the 2026-08-31 Round-2 evaluation's finding on repo-layout discovery proposing unsuitable candidate directories after installation: skills/prompts exclusion
         # alone isn't enough - a bare CI workflow YAML (automation, not an
         # authored convention) is neither a doc nor a recognized
-        # HOW_L2_GITHUB_SIGNAL_NAMES/_DIRS entry, and previously the "any
+        # HOW_L2_GITHUB_SIGNAL_NAMES entry, and previously the "any
         # file at all" fallback let it single-handedly qualify .github/ once
         # skills/prompts were excluded. Nearly every real repo has a CI
         # workflow regardless of whether it has any authored conventions.
@@ -517,6 +517,122 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         config = self.config()
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_lowercase_issue_template_dir_still_pruned(self):
+        # _prune_ignored's extra_ignored match is case-insensitive so this
+        # exclusion works regardless of which casing a repo actually used -
+        # not just the uppercase GitHub-generated form covered above.
+        write(self.repo_root / ".github" / "issue_template" / "bug.md", "# Bug report")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_bare_ci_workflow_doc_no_longer_requalifies_github_via_doc_count(self):
+        # An adversarial re-review of the ISSUE_TEMPLATE/PULL_REQUEST_TEMPLATE
+        # fix found `doc_count > 0` (see the ranked-candidate loop) still
+        # qualified .github/ on its own, bypassing _github_candidate_has_signal
+        # entirely - any surviving markdown anywhere under .github/, not just
+        # the two pruned boilerplate dirs, reopened the door. This is the
+        # narrowest possible reproduction: one doc, nested (not directly
+        # under .github/), unrelated to any known boilerplate name.
+        write(self.repo_root / ".github" / "workflows" / "README.md", "# CI docs")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_github_one_click_community_standards_files_do_not_inflate_candidacy(self):
+        # CODE_OF_CONDUCT.md / SECURITY.md / SUPPORT.md / GOVERNANCE.md are
+        # populated by GitHub's "Community Standards" one-click UI the same
+        # way ISSUE_TEMPLATE/ is by "Set up templates" - stock text, not an
+        # authored convention, present on a huge fraction of public repos
+        # regardless of whether the repo has any authored conventions.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "CODE_OF_CONDUCT.md", "# Code of Conduct")
+        write(self.repo_root / ".github" / "SECURITY.md", "# Security Policy")
+        write(self.repo_root / ".github" / "SUPPORT.md", "# Support")
+        write(self.repo_root / ".github" / "GOVERNANCE.md", "# Governance")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_github_legacy_single_file_issue_template_does_not_inflate_candidacy(self):
+        # GitHub's legacy single-file form (pre-dating the ISSUE_TEMPLATE/
+        # directory form) - the dir/file asymmetry with PULL_REQUEST_TEMPLATE
+        # (dir pruned as boilerplate, a hand-authored .md file promoted to a
+        # signal) is deliberate; this is the equivalent legacy *file* form of
+        # ISSUE_TEMPLATE itself, which is boilerplate either way.
+        write(self.repo_root / ".github" / "ISSUE_TEMPLATE.md", "# Bug report")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_github_copilot_scaffolding_does_not_inflate_candidacy(self):
+        # GitHub Copilot's own .github/copilot-instructions.md,
+        # .github/instructions/, .github/chatmodes/, and .github/agents/ are
+        # another agent tool's installed content, not this project's
+        # authored conventions - the identical class of bug the original
+        # fix addressed, just a different vendor. Notable because this repo
+        # itself ships a .github/copilot-instructions.md.
+        write(self.repo_root / ".github" / "copilot-instructions.md", "# Copilot instructions")
+        write(self.repo_root / ".github" / "instructions" / "python.instructions.md", "# Python")
+        write(self.repo_root / ".github" / "chatmodes" / "plan.chatmode.md", "# Plan mode")
+        write(self.repo_root / ".github" / "agents" / "reviewer.md", "# Reviewer agent")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_genuine_security_md_still_wins_when_not_stock(self):
+        # HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES excludes the *filename*, not
+        # markdown content in general - a project's own hand-authored
+        # CONTRIBUTING.md sitting alongside a stock SECURITY.md must still
+        # surface .github/ as a candidate. (SECURITY.md itself is excluded
+        # regardless of whether its content happens to be hand-edited - the
+        # module has no way to distinguish an edited stock template from an
+        # unedited one, so genuine authorship is asserted here via a
+        # filename the boilerplate set does NOT know about, the same way
+        # test_genuine_contributing_md_still_wins_alongside_issue_template
+        # does for ISSUE_TEMPLATE/.)
+        write(self.repo_root / ".github" / "SECURITY.md", "# Security Policy")
+        write(self.repo_root / ".github" / "CONTRIBUTING.md", "# Contributing")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_manifest_owned_file_directly_under_github_is_excluded(self):
+        # _manifest_extra_ignored originally only ever returned directory
+        # names, even when a manifest-owned path IS the immediate child
+        # itself and that child is a plain file - e.g. a CEP-owned file
+        # landing directly under .github/ rather than nested in its own
+        # skills/prompts-style subdirectory. Such a file kept counting
+        # toward doc_count/has_other_evidence undetected. Splitting
+        # _manifest_extra_ignored's return into (dir_names, file_names)
+        # closes this.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "CEP-OWNED-NOTES.md", "# CEP notes")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": [".github/skills/some-skill", ".github/CEP-OWNED-NOTES.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_gitkeep_only_style_guide_directory_is_not_a_candidate(self):
+        # .gitkeep/.keep/.placeholder exist precisely because a directory
+        # has no real content - a version-control or scaffolding
+        # convention, not authored content, the same "auto-populated, not
+        # authored" theme as the .github/ boilerplate exclusions above.
+        write(self.repo_root / "docs" / "style-guide" / ".gitkeep", "")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn("docs/style-guide/", section.render())
 
     def test_github_candidate_carries_caution_about_nested_cep_tooling(self):
         # Even when .github/ legitimately ranks on real content, a human
@@ -570,9 +686,16 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         # fallback, and .github/ would wrongly surface as a candidate on
         # the strength of CEP's own content. With a manifest naming that
         # subtree explicitly, it's excluded correctly instead.
-        write(self.repo_root / ".github" / "agents" / "a.md", "# a")
-        write(self.repo_root / ".github" / "agents" / "b.md", "# b")
-        write(self.repo_root / ".github" / "agents" / "c.md", "# c")
+        #
+        # Deliberately uses "adapters" (a CEP-owned content type named in
+        # the original issue) rather than "agents" - a later adversarial
+        # re-review added "agents" to HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES
+        # (GitHub Copilot's own .github/agents/ scaffolding), which would
+        # exclude it via the hardcoded set alone and no longer demonstrate
+        # the manifest generalizing beyond that set.
+        write(self.repo_root / ".github" / "adapters" / "a.md", "# a")
+        write(self.repo_root / ".github" / "adapters" / "b.md", "# b")
+        write(self.repo_root / ".github" / "adapters" / "c.md", "# c")
         write(
             self.repo_root / ".cep-install.json",
             json.dumps({
@@ -580,7 +703,7 @@ class TestHowL2CandidateScan(TempRepoTestCase):
                 "runtime": ["claude", "copilot"],
                 "mode": "only",
                 "only_skills": ["some-skill"],
-                "owned_paths": [".github/agents"],
+                "owned_paths": [".github/adapters"],
                 "installed_at": "2026-01-01T00:00:00Z",
             }),
         )
@@ -684,6 +807,48 @@ class TestOptInLayerMatrix(TempRepoTestCase):
         config = self.config("how_dimension:\n  how_l1:\n    enabled: false\n")
         section, path = dl.discover_how_l1(self.repo_root, config)
         self.assertIn("CONFIRM: process/", section.render())
+
+    def test_manifest_owned_what_l1_candidate_is_excluded(self):
+        # An adversarial re-review of the How-L2 .github/ fix found the
+        # opt-in What-L1/How-L1 layers had no manifest exclusion at all,
+        # unlike discover_how_l2's ranked-candidate loop - a manifest-owned
+        # drop-zone could satisfy _has_content on CEP's own files alone and
+        # get proposed as if it were genuinely populated external reference
+        # material.
+        write(self.repo_root / "specs" / "external" / "cep-notes.md", "# CEP notes")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": ["specs/external"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config("layers:\n  what_l1:\n    enabled: true\n")
+        section, path = dl.discover_what_l1(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("CONFIRM: specs/external/", rendered)
+        self.assertIn("CUSTOM: <path> | DISABLE", rendered)
+
+    def test_manifest_owned_how_l1_candidate_is_excluded(self):
+        write(self.repo_root / "org" / "process-standards" / "cep-notes.md", "# CEP notes")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": ["org/process-standards"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config("how_dimension:\n  how_l1:\n    enabled: false\n")
+        section, path = dl.discover_how_l1(self.repo_root, config)
+        self.assertNotIn("CONFIRM: org/process-standards/", section.render())
 
 
 # ---------------------------------------------------------------------------
@@ -1053,6 +1218,47 @@ class TestScanIgnoredDirNamesParity(unittest.TestCase):
             "keep the two sets content-identical (see either module's "
             "comment on this pair).",
         )
+
+
+class TestPruneIgnoredCasing(unittest.TestCase):
+    """Direct unit coverage for _prune_ignored's case-insensitive matching.
+
+    The adversarial re-review that produced this class's siblings pointed
+    out that the only coverage of _prune_ignored's casefold() behavior was
+    indirect (via full discovery runs), which can pass for reasons unrelated
+    to casing. These assert the matching directly, across all three operand
+    sets, in both the on-disk casing and an alternate casing.
+    """
+
+    def test_scan_ignored_dir_names_matched_case_insensitively(self):
+        self.assertEqual(dl._prune_ignored(["node_modules", "src"]), ["src"])
+        self.assertEqual(dl._prune_ignored(["Node_Modules", "src"]), ["src"])
+        self.assertEqual(dl._prune_ignored(["NODE_MODULES", "src"]), ["src"])
+
+    def test_cep_bucket_dir_names_are_case_sensitive_by_design(self):
+        # CEP_BUCKET_DIR_NAMES is CEP's own exact, self-chosen directory
+        # naming (contexts/inputs/cache) rather than a third-party
+        # convention with casing variance in the wild - an alternate casing
+        # here is a different, unrelated directory name, not a match.
+        self.assertEqual(dl._prune_ignored(["contexts", "src"]), ["src"])
+        self.assertEqual(dl._prune_ignored(["Contexts", "src"]), ["Contexts", "src"])
+
+    def test_extra_ignored_matched_case_insensitively(self):
+        self.assertEqual(
+            dl._prune_ignored(["skills", "src"], extra_ignored={"skills"}),
+            ["src"],
+        )
+        self.assertEqual(
+            dl._prune_ignored(["Skills", "src"], extra_ignored={"skills"}),
+            ["src"],
+        )
+        self.assertEqual(
+            dl._prune_ignored(["skills", "src"], extra_ignored={"Skills"}),
+            ["src"],
+        )
+
+    def test_dot_prefixed_dirs_still_pruned_regardless_of_casing(self):
+        self.assertEqual(dl._prune_ignored([".git", ".Idea", "src"]), ["src"])
 
 
 if __name__ == "__main__":

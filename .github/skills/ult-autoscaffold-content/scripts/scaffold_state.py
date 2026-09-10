@@ -197,6 +197,13 @@ SCAN_IGNORED_DIR_NAMES = {
 }
 CEP_BUCKET_DIR_NAMES = {"contexts", "inputs", "cache"}
 
+# Precomputed casefolded mirror of SCAN_IGNORED_DIR_NAMES, matching
+# discover_layers.py's own _SCAN_IGNORED_DIR_NAMES_CF - a real-world repo
+# directory ("Vendor/", "Build/", "Node_Modules/") won't always match this
+# module's lowercase-by-convention names, so _prune_ignored below compares
+# case-insensitively rather than assuming callers casefold first.
+_SCAN_IGNORED_DIR_NAMES_CF = {n.casefold() for n in SCAN_IGNORED_DIR_NAMES}
+
 # Tier 0: directory-name signal for generated/vendor code, beyond the
 # scan-ignored set above (which is pruned from enumeration entirely -- a
 # GENERATED_DIR_NAME_RE match is still *seen* as a module, just assigned
@@ -292,7 +299,7 @@ def _now_iso():
 def _prune_ignored(dirnames):
     keep = []
     for d in dirnames:
-        if d in SCAN_IGNORED_DIR_NAMES or d in CEP_BUCKET_DIR_NAMES:
+        if d.casefold() in _SCAN_IGNORED_DIR_NAMES_CF or d in CEP_BUCKET_DIR_NAMES:
             continue
         if d.startswith("."):
             continue

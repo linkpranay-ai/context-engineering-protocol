@@ -1462,5 +1462,24 @@ class TestScanIgnoredDirNamesParity(unittest.TestCase):
         )
 
 
+class TestPruneIgnoredCasing(unittest.TestCase):
+    """Direct unit coverage for _prune_ignored's case-insensitive matching,
+    mirroring ult-repo-layout's own test of the same fix (see that module's
+    discover_layers.py for the shared rationale).
+    """
+
+    def test_scan_ignored_dir_names_matched_case_insensitively(self):
+        self.assertEqual(ss._prune_ignored(["node_modules", "src"]), ["src"])
+        self.assertEqual(ss._prune_ignored(["Node_Modules", "src"]), ["src"])
+        self.assertEqual(ss._prune_ignored(["NODE_MODULES", "src"]), ["src"])
+
+    def test_cep_bucket_dir_names_are_case_sensitive_by_design(self):
+        self.assertEqual(ss._prune_ignored(["contexts", "src"]), ["src"])
+        self.assertEqual(ss._prune_ignored(["Contexts", "src"]), ["Contexts", "src"])
+
+    def test_dot_prefixed_dirs_still_pruned_regardless_of_casing(self):
+        self.assertEqual(ss._prune_ignored([".git", ".Idea", "src"]), ["src"])
+
+
 if __name__ == "__main__":
     unittest.main()

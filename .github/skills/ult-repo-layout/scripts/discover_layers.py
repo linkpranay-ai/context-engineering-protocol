@@ -139,7 +139,38 @@ HOW_L2_GITHUB_SIGNAL_NAMES = {"codeowners", "contributing.md", "pull_request_tem
 # under `.github/` still counts via HOW_L2_GITHUB_SIGNAL_NAMES above -
 # writing one of those from scratch is a genuine authoring act the
 # auto-populated directory form is not.
-HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES = {"issue_template", "pull_request_template"}
+#
+# An adversarial re-review of the fix above found the same class one layer
+# deeper: `doc_count > 0` alone (see the ranked-candidate loop below) was
+# still enough to qualify `.github/` even with these two directories pruned,
+# because it never required `_github_candidate_has_signal` to actually find
+# anything - any *other* surviving `.md` re-opened the door. Reproduced with
+# nothing but `.github/workflows/README.md`, or with GitHub's own one-click
+# community-standards files (`CODE_OF_CONDUCT.md`, `SECURITY.md`,
+# `SUPPORT.md`, `GOVERNANCE.md`) - all populated by a GitHub UI affordance
+# the same way ISSUE_TEMPLATE/ is, all `.md`, all counted before any signal
+# check mattered. The legacy single-file `.github/ISSUE_TEMPLATE.md` form
+# (pre-dating the ISSUE_TEMPLATE/ directory form) and GitHub Copilot's own
+# `.github/copilot-instructions.md`, `.github/instructions/`,
+# `.github/chatmodes/`, and `.github/agents/` scaffolding are the identical
+# problem with a different vendor: another tool's installed content, not
+# this project's authored conventions.
+#
+# Membership rule for both sets below: populated by a GitHub UI affordance
+# or an agent/AI tool's own installer, never by a human authoring project
+# conventions. `_github_candidate_has_signal` (further down) now requires a
+# survivor from this pruning to actually qualify `.github/` - see the
+# ranked-candidate loop's `qualifies` computation - rather than falling back
+# to a bare doc_count, which closes the class rather than only the two
+# originally reported directory names.
+HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES = {
+    "issue_template", "pull_request_template",
+    "instructions", "chatmodes", "agents",
+}
+HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES = {
+    "issue_template.md", "code_of_conduct.md", "security.md", "support.md",
+    "governance.md", "copilot-instructions.md",
+}
 
 # §17.4's What-L2/How-L2 sibling-scan exclusion list, applied in addition to
 # CEP_BUCKET_DIR_NAMES. Mirrored by ult-autoscaffold-content/scaffold_state.py's
@@ -167,6 +198,26 @@ SCAN_IGNORED_DIR_NAMES = {
     "third_party", "starter_kit", "output_docs", "extern", "external",
     "deps", "submodules",
 }
+
+# Precomputed casefolded mirror of SCAN_IGNORED_DIR_NAMES for _prune_ignored
+# below. The re-review that added HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES above
+# also found this set was matched case-sensitively despite naming real-world
+# directories this module doesn't control the casing of (`Vendor/`, `Build/`,
+# `Node_Modules/` are routine casings in .NET/Java/C++ repos) - the same
+# hazard `extra_ignored` was already fixed for. CEP_BUCKET_DIR_NAMES is the
+# only one of the three sets in _prune_ignored genuinely fixed-casing by
+# this module's own construction; this one and extra_ignored both name
+# directories some other tool or convention created.
+_SCAN_IGNORED_DIR_NAMES_CF = {n.casefold() for n in SCAN_IGNORED_DIR_NAMES}
+
+# Files a directory-existence/placeholder convention creates so an empty
+# directory survives version control (`.gitkeep`) or a scaffolding tool
+# marks a spot reserved for later content (`.keep`, `.placeholder`) - never
+# a sign of real authored content. Pruned globally in _iter_files below so
+# a directory holding only one of these reads as empty everywhere this
+# module checks for content, not just in the .github/ boilerplate case
+# above.
+PLACEHOLDER_FILE_NAMES = {".gitkeep", ".keep", ".placeholder"}
 
 DOC_EXTENSIONS = (".md", ".rst", ".adoc")
 DIAGRAM_EXTENSIONS = (".drawio", ".puml")
@@ -257,18 +308,23 @@ def _prune_ignored(dirnames, extra_ignored=frozenset()):
     list checks for How-L2/What-L1/How-L1 (e.g. .github/), which probe exact
     paths via _has_content() rather than walking through this pruning.
 
-    `extra_ignored` is matched case-insensitively - unlike
-    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES (fixed, always-lowercase-by-
-    construction names this module controls), a caller-supplied name can
-    name a real-world directory whose casing this module doesn't control,
-    e.g. HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES's `issue_template` matching a
-    repo's actual `.github/ISSUE_TEMPLATE/` - a later rerun found a
-    case-sensitive comparison here let that exact boilerplate directory
-    slip back through."""
+    `extra_ignored` is matched case-insensitively - unlike CEP_BUCKET_DIR_NAMES
+    (fixed, always-lowercase-by-construction names this module controls), a
+    caller-supplied name can name a real-world directory whose casing this
+    module doesn't control, e.g. HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES's
+    `issue_template` matching a repo's actual `.github/ISSUE_TEMPLATE/` - a
+    later rerun found a case-sensitive comparison here let that exact
+    boilerplate directory slip back through. SCAN_IGNORED_DIR_NAMES has the
+    identical hazard (`Vendor/`, `Build/`, `Node_Modules/` are routine
+    real-world casings this module also doesn't control) and a follow-up
+    adversarial pass found it was still compared case-sensitively even
+    after the extra_ignored fix above - it's matched via the precomputed
+    _SCAN_IGNORED_DIR_NAMES_CF the same way."""
     keep = []
     extra_ignored_cf = {n.casefold() for n in extra_ignored}
     for d in dirnames:
-        if d in SCAN_IGNORED_DIR_NAMES or d in CEP_BUCKET_DIR_NAMES or d.casefold() in extra_ignored_cf:
+        d_cf = d.casefold()
+        if d_cf in _SCAN_IGNORED_DIR_NAMES_CF or d in CEP_BUCKET_DIR_NAMES or d_cf in extra_ignored_cf:
             continue
         if d.startswith("."):
             continue
@@ -276,18 +332,30 @@ def _prune_ignored(dirnames, extra_ignored=frozenset()):
     return keep
 
 
-def _iter_files(dirpath, extra_ignored=frozenset()):
+def _iter_files(dirpath, extra_ignored=frozenset(), extra_ignored_files=frozenset()):
     """Yield every file under dirpath, pruning SCAN_IGNORED_DIR_NAMES,
     CEP_BUCKET_DIR_NAMES, and extra_ignored at every level (§17.4's
-    unconditional CEP-bucket exclusion, resolves M2's first half)."""
+    unconditional CEP-bucket exclusion, resolves M2's first half),
+    PLACEHOLDER_FILE_NAMES (.gitkeep and friends - never real content, see
+    that constant), and extra_ignored_files - the file-name counterpart to
+    extra_ignored, added for HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES and
+    manifest-owned files that sit directly under a candidate rather than in
+    their own CEP-owned subdirectory (see _manifest_extra_ignored). Matched
+    case-insensitively for the same reason extra_ignored is."""
+    extra_ignored_files_cf = {n.casefold() for n in extra_ignored_files}
     for root, dirnames, filenames in os.walk(dirpath):
         dirnames[:] = _prune_ignored(dirnames, extra_ignored)
         for fn in filenames:
+            if fn in PLACEHOLDER_FILE_NAMES or fn.casefold() in extra_ignored_files_cf:
+                continue
             yield Path(root) / fn
 
 
-def _count_docs(dirpath, extra_ignored=frozenset()):
-    return sum(1 for f in _iter_files(dirpath, extra_ignored) if f.suffix.lower() in DOC_EXTENSIONS)
+def _count_docs(dirpath, extra_ignored=frozenset(), extra_ignored_files=frozenset()):
+    return sum(
+        1 for f in _iter_files(dirpath, extra_ignored, extra_ignored_files)
+        if f.suffix.lower() in DOC_EXTENSIONS
+    )
 
 
 def _count_by_ext(dirpath, extensions, extra_ignored=frozenset()):
@@ -336,14 +404,15 @@ def _read_cep_manifest(repo_root):
 
 def _manifest_extra_ignored(cand_dir, manifest_owned):
     """Given a HOW_L2_CANDIDATE_DIRS entry's absolute directory and the
-    manifest's `owned_paths` (or None), return the set of immediate child
-    directory *names* under `cand_dir` that are CEP-owned - the same
-    name-based `extra_ignored` shape `_prune_ignored` already expects (see
+    manifest's `owned_paths` (or None), return a `(dir_names, file_names)`
+    pair of immediate-child *names* under `cand_dir` that are CEP-owned -
+    the same name-based `extra_ignored`/`extra_ignored_files` shapes
+    `_prune_ignored`/`_iter_files` already expect (see
     HOW_L2_GITHUB_CANDIDATE_EXCLUDE, now generalized instead of hardcoded to
     `.github/`). Works for any candidate, not just `.github/` - e.g. an
     install that lands a candidate-adjacent CEP path elsewhere is excluded
-    the same way, with no new hardcoded pair needed. Returns an empty set
-    when there's no manifest (discover_how_l2 unions this with
+    the same way, with no new hardcoded pair needed. Returns `(set(),
+    set())` when there's no manifest (discover_how_l2 unions dir_names with
     HOW_L2_GITHUB_CANDIDATE_EXCLUDE for `.github/` in that case, rather than
     replacing it - see that call site).
 
@@ -353,28 +422,55 @@ def _manifest_extra_ignored(cand_dir, manifest_owned):
     `skills` when `cand_dir` is `.github/`, the same as a full-install
     entry of `.github/skills` itself would. An exact `owned.parent ==
     cand_dir` check misses this - it only matches an owned path that is
-    itself a direct child, not one nested inside a direct child."""
+    itself a direct child, not one nested inside a direct child.
+
+    An adversarial re-review found the original single-set return always
+    treated an immediate child as a directory name, even when the manifest
+    entry itself *is* the immediate child (`len(rel.parts) == 1`) and that
+    child is a plain file - e.g. a manifest-owned root file landing directly
+    inside a candidate. `_prune_ignored` only ever prunes directory names,
+    so a CEP-owned file in that shape silently kept counting toward
+    doc_count/has_other_evidence. An immediate child two or more levels
+    below `owned` is unambiguously a directory (something exists further
+    down inside it); an immediate child that *is* `owned` itself is
+    classified by its own `is_dir()`.
+
+    Deliberately silent (via `if not rel.parts: continue` below) when
+    `owned` IS `cand_dir` itself, rather than the usual child case - a
+    same-name-set-of-children return has no way to express "everything
+    under here is owned," and callers already need to special-case an
+    empty/nonexistent candidate before calling this at all. Each call site
+    checks whole-candidate ownership itself, before this function ever
+    runs (see discover_how_l2 and _discover_opt_in_layer)."""
+    dir_names, file_names = set(), set()
     if not manifest_owned:
-        return set()
-    names = set()
+        return dir_names, file_names
     for owned in manifest_owned:
         try:
             rel = owned.relative_to(cand_dir)
         except ValueError:
             continue
-        if rel.parts:
-            names.add(rel.parts[0])
-    return names
+        if not rel.parts:
+            continue
+        if len(rel.parts) > 1 or owned.is_dir():
+            dir_names.add(rel.parts[0])
+        else:
+            file_names.add(rel.parts[0])
+    return dir_names, file_names
 
 
-def _has_content(repo_root, rel_path):
+def _has_content(repo_root, rel_path, extra_ignored=frozenset(), extra_ignored_files=frozenset()):
     """§17.4 steps 1-2: does this path exist and contain at least one file
-    (after CEP-bucket exclusion)? Mirrors check_layer_paths_populated's own
-    existence+non-empty check in validate_layout.py."""
+    (after CEP-bucket exclusion, and after extra_ignored/extra_ignored_files
+    when the caller supplies manifest-owned or boilerplate names to also
+    exclude - see _discover_opt_in_layer, which passes manifest-owned names
+    per candidate the same way discover_how_l2 already does for `.github/`)?
+    Mirrors check_layer_paths_populated's own existence+non-empty check in
+    validate_layout.py."""
     target = Path(repo_root) / rel_path.rstrip("/")
     if not target.is_dir():
         return False
-    return any(True for _ in _iter_files(target))
+    return any(True for _ in _iter_files(target, extra_ignored, extra_ignored_files))
 
 
 def _top_level_candidate_dirs(repo_root, base=None, manifest_owned=None):
@@ -389,14 +485,16 @@ def _top_level_candidate_dirs(repo_root, base=None, manifest_owned=None):
     subdirectories already are for How-L2 (see `_manifest_extra_ignored`,
     reused here against `base` itself rather than a `.github/`-style fixed
     candidate). §17.4's "sibling directories" scan operates one level down
-    from `base`."""
+    from `base`. Only the directory-name half of `_manifest_extra_ignored`'s
+    return matters here - a manifest-owned *file* can never be one of the
+    directories `p.is_dir()` already restricts `names` to below."""
     base = Path(base) if base is not None else Path(repo_root)
     if not base.is_dir():
         return []
-    manifest_names = (
-        _manifest_extra_ignored(base, manifest_owned) if manifest_owned is not None else set()
+    manifest_dir_names = (
+        _manifest_extra_ignored(base, manifest_owned)[0] if manifest_owned is not None else set()
     )
-    names = _prune_ignored([p.name for p in base.iterdir() if p.is_dir()], manifest_names)
+    names = _prune_ignored([p.name for p in base.iterdir() if p.is_dir()], manifest_dir_names)
     return sorted(base / n for n in names)
 
 
@@ -898,18 +996,40 @@ def _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=(),
     return results
 
 
-def _github_candidate_has_signal(cand, extra_ignored):
+def _github_candidate_has_signal(cand, extra_ignored, extra_ignored_files=frozenset()):
     """`.github/`-only replacement for the generic "any file at all"
     fallback - see HOW_L2_GITHUB_SIGNAL_NAMES above for why. Walks the same
     pruned tree `_iter_files` already would (skills/prompts, the
-    ISSUE_TEMPLATE/PULL_REQUEST_TEMPLATE boilerplate dirs, and any
-    manifest-owned paths, all excluded via `extra_ignored` - see
-    HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES above for why those two dirs are
-    pruned rather than treated as a signal); a match on a recognized
-    convention-signal filename counts - a bare CI workflow or any other
-    unrecognized file does not."""
-    for f in _iter_files(cand, extra_ignored):
+    boilerplate dirs in HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES, boilerplate
+    files in HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES, and any manifest-owned
+    paths - directories via `extra_ignored`, files via `extra_ignored_files`,
+    see _manifest_extra_ignored). Two ways for a survivor to count:
+
+    1. An exact match on a recognized convention-signal filename
+       (HOW_L2_GITHUB_SIGNAL_NAMES, e.g. `CODEOWNERS`) anywhere in the
+       pruned tree.
+    2. Any OTHER markdown file sitting directly under `.github/` itself
+       (`f.parent == cand` - not nested in a subdirectory like
+       `.github/workflows/`). Everything GitHub/tool-native and *known*
+       has already been pruned by extra_ignored_files by the time this
+       runs, so a survivor here is - by construction - not one of the
+       named boilerplate files; this is deliberately inverted from
+       enumerating known-good filenames (which needs a new entry for every
+       future convention file a project might author) to enumerating
+       known-auto-generated ones (which needs a new entry only when GitHub
+       or an agent tool ships a new auto-populated file, the same
+       "populated by a UI affordance, not authored" test the two
+       boilerplate sets above already use). An adversarial re-review of the
+       original name-enumeration version found it still let a bare CI
+       workflow README, or GitHub's own one-click CODE_OF_CONDUCT.md /
+       SECURITY.md / SUPPORT.md, single-handedly qualify `.github/` -
+       restricting rule 2 to files directly under `.github/` (where these
+       conventionally live) rather than the whole recursive tree keeps a
+       stray nested doc from doing the same."""
+    for f in _iter_files(cand, extra_ignored, extra_ignored_files):
         if f.name.casefold() in HOW_L2_GITHUB_SIGNAL_NAMES:
+            return True
+        if f.parent == cand and f.suffix.lower() == ".md":
             return True
     return False
 
@@ -971,6 +1091,13 @@ def discover_how_l2(repo_root, config):
     for cand_rel in HOW_L2_CANDIDATE_DIRS:
         cand = repo_root / cand_rel.rstrip("/")
         if cand.is_dir():
+            if manifest_owned and cand in manifest_owned:
+                # The manifest records this WHOLE candidate as CEP's own
+                # doing, not just some names inside it - _manifest_extra_
+                # ignored only ever excludes names within cand, so a
+                # same-directory entry needs its own check here rather
+                # than silently falling through as unowned.
+                continue
             # Manifest-derived names are unioned with, never a replacement
             # for, the hardcoded .github/-only fallback below. A manifest
             # is a positive, additive signal - it tells us about paths CEP
@@ -978,28 +1105,45 @@ def discover_how_l2(repo_root, config):
             # else needs excluding (a narrower/older manifest, e.g. from a
             # single-skill --only install, must never make results worse
             # than having no manifest at all).
-            manifest_names = (
+            manifest_dir_names, manifest_file_names = (
                 _manifest_extra_ignored(cand, manifest_owned)
                 if manifest_owned is not None
-                else set()
+                else (set(), set())
             )
-            hardcoded_fallback = (
+            hardcoded_dir_fallback = (
                 HOW_L2_GITHUB_CANDIDATE_EXCLUDE | HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES
                 if cand_rel == ".github/" else frozenset()
             )
-            extra_ignored = manifest_names | hardcoded_fallback
-            doc_count = _count_docs(cand, extra_ignored)
+            hardcoded_file_fallback = (
+                HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES if cand_rel == ".github/" else frozenset()
+            )
+            extra_ignored = manifest_dir_names | hardcoded_dir_fallback
+            extra_ignored_files = manifest_file_names | hardcoded_file_fallback
+            doc_count = _count_docs(cand, extra_ignored, extra_ignored_files)
             if cand_rel == ".github/":
                 # Narrowed fallback - see HOW_L2_GITHUB_SIGNAL_NAMES above;
                 # a bare CI workflow or other unrecognized file no longer
-                # single-handedly qualifies `.github/`. `extra_ignored`
-                # already pruned the ISSUE_TEMPLATE/PULL_REQUEST_TEMPLATE
-                # boilerplate dirs above, so doc_count itself no longer
-                # counts them either - see HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES.
-                has_other_evidence = _github_candidate_has_signal(cand, extra_ignored)
+                # single-handedly qualifies `.github/`. `extra_ignored`/
+                # `extra_ignored_files` already pruned the boilerplate
+                # dirs/files above, so doc_count itself no longer counts
+                # them either - see HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES and
+                # HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES.
+                #
+                # An adversarial re-review found that even with the above,
+                # `doc_count > 0` alone (the `or` below, for every OTHER
+                # candidate) still let any surviving `.md` requalify
+                # `.github/` without has_other_evidence ever being
+                # consulted - reproduced with a bare
+                # `.github/workflows/README.md`. `.github/` now requires
+                # has_other_evidence itself rather than falling back to a
+                # bare doc_count, closing that class rather than only the
+                # two originally reported directory names.
+                has_other_evidence = _github_candidate_has_signal(cand, extra_ignored, extra_ignored_files)
+                qualifies = has_other_evidence
             else:
                 has_other_evidence = any(True for _ in _iter_files(cand, extra_ignored))
-            if doc_count > 0 or has_other_evidence:
+                qualifies = doc_count > 0 or has_other_evidence
+            if qualifies:
                 ranked.append((cand_rel, doc_count, _dir_mtime(cand)))
     ranked.sort(key=lambda r: (r[1], r[2]), reverse=True)
 
@@ -1086,7 +1230,14 @@ def _how_l2_root_signals(repo_root):
 
 def _discover_opt_in_layer(repo_root, config, *, section_title, config_section_getter,
                             resolve_path, resolve_enabled, candidate_dirs, layer_label):
-    repo_root = Path(repo_root)
+    # Resolved once, here, for the same reason discover_how_l2/
+    # discover_what_l2 resolve repo_root before their own _has_content
+    # calls - _read_cep_manifest() below always returns resolved paths, so
+    # an unresolved repo_root makes the per-candidate comparison in
+    # _manifest_extra_ignored() brittle on hosts where Path.resolve()
+    # changes a path's string form.
+    repo_root = Path(repo_root).resolve()
+    manifest_owned = _read_cep_manifest(repo_root)
     section_data = config_section_getter(config)
     configured_path = None
     if isinstance(section_data, dict) and isinstance(section_data.get("path"), str) and section_data["path"]:
@@ -1109,9 +1260,27 @@ def _discover_opt_in_layer(repo_root, config, *, section_title, config_section_g
             ],
         ), configured_path
 
+    # An adversarial re-review of the How-L2 .github/ fix found this loop's
+    # _has_content had no manifest exclusion at all, unlike discover_how_l2's
+    # ranked-candidate loop - a manifest-owned drop-zone (e.g. a `--only`
+    # install that happens to land CEP content under one of these opt-in
+    # candidates) could satisfy _has_content on CEP's own files alone. Each
+    # candidate gets its own manifest-derived exclusion the same way
+    # discover_how_l2 computes it per `.github/`, rather than a single
+    # exclusion set reused across differently-rooted candidates.
     found_rel = None
     for cand_rel in candidate_dirs:
-        if _has_content(repo_root, cand_rel):
+        cand = repo_root / cand_rel.rstrip("/")
+        if manifest_owned and cand in manifest_owned:
+            # Whole-candidate ownership (see discover_how_l2's own copy of
+            # this check for the full rationale) - _manifest_extra_ignored
+            # only ever excludes names within cand, so it can't express
+            # "cand itself is entirely CEP's own."
+            continue
+        manifest_dir_names, manifest_file_names = (
+            _manifest_extra_ignored(cand, manifest_owned) if manifest_owned is not None else (set(), set())
+        )
+        if _has_content(repo_root, cand_rel, manifest_dir_names, manifest_file_names):
             found_rel = cand_rel
             break
 
