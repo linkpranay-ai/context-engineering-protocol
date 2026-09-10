@@ -118,7 +118,28 @@ HOW_L2_GITHUB_CANDIDATE_EXCLUDE = {"skills", "prompts"}
 # named-signal approach, applied here inside `.github/` instead of at the
 # repo root) - a bare workflow file no longer qualifies by itself.
 HOW_L2_GITHUB_SIGNAL_NAMES = {"codeowners", "contributing.md", "pull_request_template.md"}
-HOW_L2_GITHUB_SIGNAL_DIRS = {"issue_template", "pull_request_template"}
+
+# A later rerun surfaced the gap this signal-narrowing left open: GitHub's
+# own "Set up templates" one-click feature (and plenty of hand-copied
+# boilerplate) populates `.github/ISSUE_TEMPLATE/` with `bug_report.md` /
+# `feature_request.md`-style files on a huge fraction of public repos,
+# authored-conventions or not - exactly the "issue/PR-template boilerplate"
+# the paragraph above already argues shouldn't count. Those files still
+# match DOC_EXTENSIONS, so `_count_docs` (called before any signal check
+# ever runs - see the ranked-candidate loop below) counted them and cleared
+# `doc_count > 0` on its own, on a real fresh-install repro whose `.github/`
+# held nothing else but this stock scaffolding and CEP's own installed
+# skills/prompts. Treating `issue_template`/`pull_request_template` as a
+# *directory* name that grants "signal" (the removed HOW_L2_GITHUB_SIGNAL_DIRS)
+# was self-contradictory with that same rationale, so instead of listing
+# them as a signal, they are pruned from `.github/`'s scan entirely - the
+# same tier as HOW_L2_GITHUB_CANDIDATE_EXCLUDE's skills/prompts below - so
+# neither the doc-count nor the "any file" fallback ever sees what's inside
+# them. A single hand-authored `PULL_REQUEST_TEMPLATE.md` *file* directly
+# under `.github/` still counts via HOW_L2_GITHUB_SIGNAL_NAMES above -
+# writing one of those from scratch is a genuine authoring act the
+# auto-populated directory form is not.
+HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES = {"issue_template", "pull_request_template"}
 
 # §17.4's What-L2/How-L2 sibling-scan exclusion list, applied in addition to
 # CEP_BUCKET_DIR_NAMES. Mirrored by ult-autoscaffold-content/scaffold_state.py's
@@ -234,10 +255,20 @@ def _prune_ignored(dirnames, extra_ignored=frozenset()):
     hidden directories are virtually always tooling/cache artifacts, never an
     intentionally-authored corpus. This does not affect the fixed-candidate-
     list checks for How-L2/What-L1/How-L1 (e.g. .github/), which probe exact
-    paths via _has_content() rather than walking through this pruning."""
+    paths via _has_content() rather than walking through this pruning.
+
+    `extra_ignored` is matched case-insensitively - unlike
+    SCAN_IGNORED_DIR_NAMES/CEP_BUCKET_DIR_NAMES (fixed, always-lowercase-by-
+    construction names this module controls), a caller-supplied name can
+    name a real-world directory whose casing this module doesn't control,
+    e.g. HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES's `issue_template` matching a
+    repo's actual `.github/ISSUE_TEMPLATE/` - a later rerun found a
+    case-sensitive comparison here let that exact boilerplate directory
+    slip back through."""
     keep = []
+    extra_ignored_cf = {n.casefold() for n in extra_ignored}
     for d in dirnames:
-        if d in SCAN_IGNORED_DIR_NAMES or d in CEP_BUCKET_DIR_NAMES or d in extra_ignored:
+        if d in SCAN_IGNORED_DIR_NAMES or d in CEP_BUCKET_DIR_NAMES or d.casefold() in extra_ignored_cf:
             continue
         if d.startswith("."):
             continue
@@ -869,17 +900,16 @@ def _composite_sibling_scan(repo_root, exclude_base=None, exclude_categories=(),
 
 def _github_candidate_has_signal(cand, extra_ignored):
     """`.github/`-only replacement for the generic "any file at all"
-    fallback - see HOW_L2_GITHUB_SIGNAL_NAMES/_DIRS above for why. Walks the
-    same pruned tree `_iter_files` already would (skills/prompts and any
-    manifest-owned paths excluded via `extra_ignored`); a match on a
-    recognized convention-signal filename, or a file anywhere inside a
-    recognized convention-signal directory, counts - a bare CI workflow or
-    any other unrecognized file does not."""
+    fallback - see HOW_L2_GITHUB_SIGNAL_NAMES above for why. Walks the same
+    pruned tree `_iter_files` already would (skills/prompts, the
+    ISSUE_TEMPLATE/PULL_REQUEST_TEMPLATE boilerplate dirs, and any
+    manifest-owned paths, all excluded via `extra_ignored` - see
+    HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES above for why those two dirs are
+    pruned rather than treated as a signal); a match on a recognized
+    convention-signal filename counts - a bare CI workflow or any other
+    unrecognized file does not."""
     for f in _iter_files(cand, extra_ignored):
         if f.name.casefold() in HOW_L2_GITHUB_SIGNAL_NAMES:
-            return True
-        parent_names = {p.casefold() for p in f.relative_to(cand).parts[:-1]}
-        if parent_names & HOW_L2_GITHUB_SIGNAL_DIRS:
             return True
     return False
 
@@ -954,14 +984,18 @@ def discover_how_l2(repo_root, config):
                 else set()
             )
             hardcoded_fallback = (
-                HOW_L2_GITHUB_CANDIDATE_EXCLUDE if cand_rel == ".github/" else frozenset()
+                HOW_L2_GITHUB_CANDIDATE_EXCLUDE | HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES
+                if cand_rel == ".github/" else frozenset()
             )
             extra_ignored = manifest_names | hardcoded_fallback
             doc_count = _count_docs(cand, extra_ignored)
             if cand_rel == ".github/":
-                # Narrowed fallback - see HOW_L2_GITHUB_SIGNAL_NAMES/_DIRS
-                # above; a bare CI workflow or other unrecognized file no
-                # longer single-handedly qualifies `.github/`.
+                # Narrowed fallback - see HOW_L2_GITHUB_SIGNAL_NAMES above;
+                # a bare CI workflow or other unrecognized file no longer
+                # single-handedly qualifies `.github/`. `extra_ignored`
+                # already pruned the ISSUE_TEMPLATE/PULL_REQUEST_TEMPLATE
+                # boilerplate dirs above, so doc_count itself no longer
+                # counts them either - see HOW_L2_GITHUB_BOILERPLATE_DIR_NAMES.
                 has_other_evidence = _github_candidate_has_signal(cand, extra_ignored)
             else:
                 has_other_evidence = any(True for _ in _iter_files(cand, extra_ignored))

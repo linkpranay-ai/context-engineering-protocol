@@ -478,8 +478,42 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertNotIn(".github/", section.render())
 
-    def test_github_issue_template_dir_still_counts_as_a_signal(self):
+    def test_github_issue_and_pr_template_dirs_do_not_count_as_a_signal(self):
+        # Regression test: a later rerun found ISSUE_TEMPLATE/PULL_REQUEST_TEMPLATE
+        # were themselves treated as a positive signal, even though they're
+        # the same "issue/PR-template boilerplate" the module's own
+        # candidacy rationale already argues shouldn't count - GitHub's
+        # "Set up templates" feature (and plain copy-pasting) populates
+        # .github/ISSUE_TEMPLATE/ with files like bug_report.md on a huge
+        # fraction of public repos regardless of whether the repo has any
+        # authored conventions. Matches DOC_EXTENSIONS too, so this content
+        # cleared doc_count on its own before any signal check ever ran.
         write(self.repo_root / ".github" / "ISSUE_TEMPLATE" / "bug.md", "# Bug report")
+        write(self.repo_root / ".github" / "PULL_REQUEST_TEMPLATE" / "default.md", "# PR")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_github_issue_template_alongside_cep_install_does_not_inflate_candidacy(self):
+        # The exact real-world shape a later rerun found on a freshly
+        # installed target: CEP's own skills/prompts plus nothing but stock
+        # GitHub issue-template scaffolding under .github/ - neither should
+        # contribute, so .github/ must not appear as a candidate at all.
+        write(self.repo_root / ".github" / "skills" / "some-skill" / "SKILL.md", "# Some Skill")
+        write(self.repo_root / ".github" / "prompts" / "do-thing.prompt.md", "# Do Thing")
+        write(self.repo_root / ".github" / "ISSUE_TEMPLATE" / "bug_report.md", "# Bug report")
+        write(self.repo_root / ".github" / "ISSUE_TEMPLATE" / "feature_request.md", "# Feature")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertNotIn(".github/", section.render())
+
+    def test_genuine_contributing_md_still_wins_alongside_issue_template(self):
+        # A hand-authored CONTRIBUTING.md sitting next to the same
+        # boilerplate ISSUE_TEMPLATE/ must still surface .github/ as a
+        # candidate - only the boilerplate directory itself is excluded,
+        # never genuine sibling content.
+        write(self.repo_root / ".github" / "ISSUE_TEMPLATE" / "bug.md", "# Bug report")
+        write(self.repo_root / ".github" / "CONTRIBUTING.md", "# Contributing")
         config = self.config()
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertIn("CONFIRM: .github/", section.render())
