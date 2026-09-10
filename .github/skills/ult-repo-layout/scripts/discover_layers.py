@@ -1135,8 +1135,30 @@ def discover_how_l2(repo_root, config):
     unconfigured_default = "org/"
     default_path = vl.resolve_how_l2_path(config)
 
+    # Moved up from just before the ranked-candidate loop below - both step
+    # 1 and step 2 need manifest exclusion applied to their own content
+    # checks the same way the ranked-candidate loop already applies it to
+    # its candidates (see discover_what_l2's step-2 workspace_root check for
+    # the identical precedent), not only to candidates discovered later.
+    manifest_owned = _read_cep_manifest(repo_root)
+
     if configured_path and configured_path.rstrip("/") != unconfigured_default.rstrip("/"):
-        if _has_content(repo_root, configured_path):
+        # Whole-directory manifest ownership is checked outright first
+        # (mirrors discover_what_l2's/_discover_opt_in_layer's own
+        # candidate-ownership check); a manifest-owned file nested inside an
+        # otherwise-content-bearing hand-configured path is excluded
+        # per-file via _manifest_extra_ignored. Neither exclusion was
+        # threaded through here before - a CEP-owned file alone under a
+        # hand-configured how_l2.path used to read as "hand-configured
+        # already" with nothing to decide.
+        configured_dir = repo_root / configured_path.rstrip("/")
+        configured_owned_outright = bool(manifest_owned) and configured_dir.resolve() in manifest_owned
+        configured_dir_names, configured_file_names = (
+            _manifest_extra_ignored(configured_dir, manifest_owned) if manifest_owned is not None else (set(), set())
+        )
+        if not configured_owned_outright and _has_content(
+            repo_root, configured_path, configured_dir_names, configured_file_names
+        ):
             return LayerSection(
                 section_title,
                 status_lines=["**Status:** hand-configured already."],
@@ -1147,7 +1169,15 @@ def discover_how_l2(repo_root, config):
                 ],
             ), configured_path
 
-    if _has_content(repo_root, default_path):
+    # Same exclusion, same reason, for the CEP-default path check - a
+    # manifest-owned file landing alone under the pre-existing default
+    # (`org/`) used to read as "enabled by default" with nothing to decide.
+    default_dir = repo_root / default_path.rstrip("/")
+    default_owned_outright = bool(manifest_owned) and default_dir.resolve() in manifest_owned
+    default_dir_names, default_file_names = (
+        _manifest_extra_ignored(default_dir, manifest_owned) if manifest_owned is not None else (set(), set())
+    )
+    if not default_owned_outright and _has_content(repo_root, default_path, default_dir_names, default_file_names):
         return LayerSection(
             section_title,
             status_lines=["**Status:** enabled by default."],
@@ -1156,8 +1186,6 @@ def discover_how_l2(repo_root, config):
                 f"has content (§17.4 step 2, shape 2a). Nothing to decide."
             ],
         ), default_path
-
-    manifest_owned = _read_cep_manifest(repo_root)
 
     ranked = []
     # Set below when .github/ has real markdown (doc_count > 0) but none of

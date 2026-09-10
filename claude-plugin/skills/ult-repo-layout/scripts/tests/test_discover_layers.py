@@ -67,6 +67,55 @@ class TestPrecedenceCheck(TempRepoTestCase):
         self.assertFalse(section.decision_lines)
         self.assertIn("hand-configured", section.render())
 
+    def test_how_l2_hand_configured_path_manifest_owned_only_file_is_excluded(self):
+        # discover_how_l2's step-1 hand-configured-path check never received
+        # manifest data at all, unlike the ranked-candidate loop further
+        # down in the same function - a manifest-owned file sitting alone
+        # under a hand-configured how_l2.path made this read
+        # "hand-configured already" purely on CEP's own generated content.
+        write(self.repo_root / "team-conventions" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["team-conventions/generated.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config("how_dimension:\n  how_l2:\n    path: team-conventions/\n")
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("hand-configured already", rendered)
+        self.assertNotEqual(path, "team-conventions/")
+
+    def test_how_l2_hand_configured_path_manifest_owned_outright_is_excluded(self):
+        # Companion to the nested-file case above - a manifest that owns the
+        # WHOLE hand-configured directory outright (not just a name inside
+        # it) must also be excluded. The sibling What-L2 fix this pattern
+        # was copied from never got an outright-ownership test of its own
+        # for this same check, so this closes that gap here too rather than
+        # repeating it.
+        write(self.repo_root / "team-conventions" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["team-conventions"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config("how_dimension:\n  how_l2:\n    path: team-conventions/\n")
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("hand-configured already", rendered)
+        self.assertNotEqual(path, "team-conventions/")
+
     def test_what_l1_hand_configured_path_wins_regardless_of_enabled(self):
         write(self.repo_root / "specs" / "external" / "rfc.md", "# rfc")
         config = self.config(
@@ -95,6 +144,56 @@ class TestDefaultPathCheck(TempRepoTestCase):
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertEqual(path, "org/")
         self.assertFalse(section.decision_lines)
+
+    def test_how_l2_default_org_manifest_owned_only_file_is_excluded(self):
+        # discover_how_l2's step-2 default-path check
+        # (`_has_content(repo_root, default_path)`) never received manifest
+        # data at all - manifest_owned wasn't even read yet at this point in
+        # the function - so a manifest-owned file sitting alone in the
+        # pre-existing default (`org/`) made this read "enabled by default,
+        # nothing to decide" purely on CEP's own generated content.
+        write(self.repo_root / "org" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["org/generated.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotEqual(path, "org/")
+        self.assertNotIn("Nothing to decide.", rendered)
+
+    def test_how_l2_default_org_manifest_owned_outright_is_excluded(self):
+        # Companion to the nested-file case above - a manifest that owns the
+        # default `org/` directory outright (not just a name inside it)
+        # must also be excluded. The sibling What-L2 fix this pattern was
+        # copied from never got an outright-ownership test of its own for
+        # this same check, so this closes that gap here too rather than
+        # repeating it.
+        write(self.repo_root / "org" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["org"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotEqual(path, "org/")
+        self.assertNotIn("Nothing to decide.", rendered)
 
 
 # ---------------------------------------------------------------------------
