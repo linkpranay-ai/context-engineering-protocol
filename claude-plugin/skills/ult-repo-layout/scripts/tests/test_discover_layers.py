@@ -262,6 +262,65 @@ class TestWhatL2ScanAndScore(TempRepoTestCase):
         self.assertNotIn("specification/", rendered)
         self.assertIsNone(path)
 
+    def test_manifest_owned_file_nested_inside_a_candidate_does_not_prune_whole_directory(self):
+        # _top_level_candidate_dirs's manifest exclusion reused
+        # _manifest_extra_ignored's "2+ levels down implies the whole
+        # immediate-child directory is CEP-owned" rule, which is only
+        # correct for the dedicated single-bucket scans that rule was
+        # built for (.github/, opt-in layers). Reused here against an
+        # arbitrary top-level directory, one incidental manifest-owned
+        # file nested two levels inside an otherwise-genuine,
+        # human-authored specification/ pruned the ENTIRE directory from
+        # What-L2 candidacy - unlike the outright-ownership case above,
+        # where the manifest really does own the whole directory.
+        for i in range(12):
+            write(self.repo_root / "specification" / f"{i}.md", "# x")
+        write(self.repo_root / "specification" / "generated" / "notes.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["specification/generated/notes.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        self.assertIn("specification/", section.render())
+
+    def test_manifest_owned_only_file_in_default_what_l2_path_is_excluded(self):
+        # Step 2's default-path content check
+        # (_discover_what_l2_workspace_root_unset) never received manifest
+        # data at all, even though the candidate-ranking code just below it
+        # already does - a manifest-owned file sitting alone in
+        # docs/requirements/ (CEP's pre-D21 default) made this read
+        # "enabled by default, nothing to decide" purely on CEP's own
+        # generated content. Asserted on the if-branch's own "Nothing to
+        # decide." notice text rather than on which Requirements candidate
+        # (if any) the fallback path finds, since REQUIREMENTS_NAME_RE
+        # matches "docs" as a bare substring and would name-match docs/ as
+        # a candidate regardless of this fix.
+        write(self.repo_root / "docs" / "requirements" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["docs/requirements/generated.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIsNone(path)
+        self.assertNotIn("Nothing to decide.", rendered)
+
 
 class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
     def test_populated_workspace_root_after_exclude_is_notice_only(self):
@@ -315,6 +374,37 @@ class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
         section, path, roots = dl.discover_what_l2(self.repo_root, config)
         self.assertNotIn("openapi/", roots)
         self.assertNotIn("openapi/", section.render())
+
+    def test_manifest_owned_only_file_in_workspace_root_is_excluded(self):
+        # The analogous step-2 has-content check for an explicitly
+        # configured workspace_root (this function, above) had the
+        # identical gap as the unset-workspace_root sibling function's
+        # default-path check: no manifest exclusion threaded through at
+        # all, so a manifest-owned file sitting alone in workspace_root
+        # made this read "has content, nothing to decide" purely on CEP's
+        # own generated content. The if/else branches share an identical
+        # status-line header, so this asserts on each branch's own
+        # distinguishing text instead.
+        write(self.repo_root / "docs" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["docs/generated.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIn("decision: PENDING   # CUSTOM: <path> | ACKNOWLEDGE", rendered)
+        self.assertNotIn("has content after the CEP-bucket exclusions", rendered)
 
     def test_sibling_examples_dir_with_proto_file_is_not_an_api_candidate(self):
         # Gap 3.1: categorize_candidate's Design/API signals were never gated
@@ -518,6 +608,18 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertIn("CONFIRM: .github/", section.render())
 
+    def test_github_rst_file_directly_under_github_qualifies_as_signal(self):
+        # _github_candidate_has_signal's rule 2 only recognized `.md`
+        # directly under .github/, even though _count_docs (scoring the
+        # same candidate) already recognizes the module's full
+        # DOC_EXTENSIONS set (.md/.rst/.adoc). A hand-authored
+        # .github/CONVENTIONS.rst was counted as a doc but could never
+        # qualify .github/ as a candidate on its own.
+        write(self.repo_root / ".github" / "CONVENTIONS.rst", "Conventions\n===========\n")
+        config = self.config("")
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        self.assertIn("CONFIRM: .github/", section.render())
+
     def test_lowercase_issue_template_dir_still_pruned(self):
         # _prune_ignored's extra_ignored match is case-insensitive so this
         # exclusion works regardless of which casing a repo actually used -
@@ -535,10 +637,19 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         # the two pruned boilerplate dirs, reopened the door. This is the
         # narrowest possible reproduction: one doc, nested (not directly
         # under .github/), unrelated to any known boilerplate name.
+        #
+        # Asserted narrowly (CONFIRM only) rather than a blanket ".github/"
+        # substring check: a later fix made this exact nested doc correctly
+        # count toward the suppressed-docs notice (it had been silently
+        # zeroed out by a since-fixed bug that over-matched boilerplate file
+        # names at every depth instead of just .github/'s immediate
+        # children), and that notice's own prose legitimately mentions
+        # `.github/` - what this test actually guards is that .github/ never
+        # becomes a CONFIRM-ranked candidate off a bare, unrecognized doc.
         write(self.repo_root / ".github" / "workflows" / "README.md", "# CI docs")
         config = self.config()
         section, path = dl.discover_how_l2(self.repo_root, config)
-        self.assertNotIn(".github/", section.render())
+        self.assertNotIn("CONFIRM: .github/", section.render())
 
     def test_github_one_click_community_standards_files_do_not_inflate_candidacy(self):
         # CODE_OF_CONDUCT.md / SECURITY.md / SUPPORT.md / GOVERNANCE.md are
@@ -597,6 +708,22 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         config = self.config()
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertIn("CONFIRM: .github/", section.render())
+
+    def test_nested_boilerplate_named_file_still_counts_toward_suppressed_notice(self):
+        # extra_ignored_files (HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES here)
+        # used to be matched at every depth of the walk, not just directly
+        # under .github/ itself, even though those names describe files
+        # GitHub/an agent tool auto-populates AT that top level. A
+        # hand-authored file that merely happens to share one of those
+        # names two levels down - nothing to do with GitHub's own
+        # scaffolding - was silently dropped from the suppressed-doc count
+        # entirely, undercounting it.
+        write(self.repo_root / ".github" / "templates" / "team" / "readme.md", "# Team readme")
+        config = self.config()
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("CONFIRM: .github/", rendered)
+        self.assertIn("NOTICE: `.github/` contains 1 markdown file(s)", rendered)
 
     def test_manifest_owned_file_directly_under_github_is_excluded(self):
         # _manifest_extra_ignored originally only ever returned directory
@@ -828,6 +955,21 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         section, path = dl.discover_how_l2(self.repo_root, config)
         self.assertNotIn("CONFIRM: .github/", section.render())
 
+    def test_boilerplate_file_names_use_cursor_dotfile_not_dotmd(self):
+        # HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES listed "cursorrules.md", but
+        # Cursor's real on-disk convention is the extensionless
+        # .cursorrules file - "cursorrules.md" never matched anything
+        # Cursor itself writes. A constant-content assertion rather than a
+        # behavioral one: .cursorrules has no suffix, so it can never
+        # affect any DOC_EXTENSIONS-gated doc_count/signal check either way
+        # - the entry was, and remains, inert for scoring purposes. Its
+        # only job is to actually name the real file so a project that
+        # deliberately excludes it via manifest ownership, or a future
+        # caller that inspects the set directly, sees the name that
+        # exists on disk.
+        self.assertIn(".cursorrules", dl.HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES)
+        self.assertNotIn("cursorrules.md", dl.HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES)
+
     def test_github_nested_only_conventions_get_suppression_notice(self):
         # Failing closed on nested-only .github/ content (nothing directly
         # under .github/ itself, no recognized signal filename) is the
@@ -842,6 +984,24 @@ class TestHowL2CandidateScan(TempRepoTestCase):
         rendered = section.render()
         self.assertNotIn("CONFIRM: .github/", rendered)
         self.assertIn("NOTICE: `.github/` contains 2 markdown file(s)", rendered)
+
+    def test_github_suppressed_notice_still_shown_when_another_candidate_ranks_first(self):
+        # The suppressed-.github/-docs notice used to be threaded into only
+        # the two no-ranked-candidate returns, not the ranked-candidate
+        # return - so it silently vanished whenever some other directory
+        # outranked .github/, even though .github/ still held real
+        # nested-only doc content worth surfacing either way. Same
+        # nested-.github/ fixture as the suppression-notice test above, but
+        # with a genuinely qualifying conventions/ sibling that wins the
+        # rank instead of .github/ being the only candidate.
+        write(self.repo_root / ".github" / "conventions" / "c0.md", "# c0")
+        write(self.repo_root / "conventions" / "README.md", "# Conventions")
+        config = self.config("")
+        section, path = dl.discover_how_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIn("CONFIRM: conventions/", rendered)
+        self.assertNotIn("CONFIRM: .github/", rendered)
+        self.assertIn("NOTICE: `.github/` contains 1 markdown file(s)", rendered)
 
 
 # ---------------------------------------------------------------------------

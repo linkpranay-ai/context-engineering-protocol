@@ -175,7 +175,13 @@ HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES = {
     # above) covered an installer's own subdirectory but not the same
     # tool's single-file convention, the identical dir/file asymmetry
     # already closed for issue_template/issue_template.md.
-    "agents.md", "claude.md", "gemini.md", "cursorrules.md",
+    "agents.md", "claude.md", "gemini.md",
+    # Cursor's own on-disk convention is the extensionless `.cursorrules`
+    # file, not `cursorrules.md` - the latter never matches anything Cursor
+    # itself writes. The newer `.cursor/rules/*.mdc` form needs no entry
+    # here at all: `.cursor/` is a dot-directory and `_prune_ignored`
+    # already excludes every dot-directory generically.
+    ".cursorrules",
     # `.github/README.md` is GitHub's own designated repo-front-page
     # location (rendered in place of a root README when one is absent) -
     # authored by a human, but never this project's conventions corpus,
@@ -358,14 +364,26 @@ def _iter_files(dirpath, extra_ignored=frozenset(), extra_ignored_files=frozense
     that constant), and extra_ignored_files - the file-name counterpart to
     extra_ignored, added for HOW_L2_GITHUB_BOILERPLATE_FILE_NAMES and
     manifest-owned files that sit directly under a candidate rather than in
-    their own CEP-owned subdirectory (see _manifest_extra_ignored). Matched
-    case-insensitively for the same reason extra_ignored is."""
+    their own CEP-owned subdirectory (see _manifest_extra_ignored).
+
+    Unlike extra_ignored, extra_ignored_files is matched only against files
+    directly inside dirpath itself, not at every depth of the walk - both of
+    its callers document an immediate-child contract (a nested file that
+    merely happens to share a boilerplate/manifest-owned name, e.g. a
+    hand-authored `templates/team/readme.md` two levels under `.github/`,
+    is real content and must not vanish just because `readme.md` is
+    excluded at the top level). Matched case-insensitively for the same
+    reason extra_ignored is."""
+    dirpath_str = os.fspath(dirpath)
     extra_ignored_files_cf = {n.casefold() for n in extra_ignored_files}
     for root, dirnames, filenames in os.walk(dirpath):
         dirnames[:] = _prune_ignored(dirnames, extra_ignored)
+        is_top = root == dirpath_str
         for fn in filenames:
             fn_cf = fn.casefold()
-            if fn_cf in _PLACEHOLDER_FILE_NAMES_CF or fn_cf in extra_ignored_files_cf:
+            if fn_cf in _PLACEHOLDER_FILE_NAMES_CF:
+                continue
+            if is_top and fn_cf in extra_ignored_files_cf:
                 continue
             yield Path(root) / fn
 
@@ -500,20 +518,31 @@ def _top_level_candidate_dirs(repo_root, base=None, manifest_owned=None):
     CEP-owned top-level directory outside those two hardcoded name sets
     (e.g. an install that lands its own directory at repo root rather than
     nesting everything under `.github/`) was never excluded from What-L2
-    sibling-directory candidacy the way `.github/`'s own manifest-owned
-    subdirectories already are for How-L2 (see `_manifest_extra_ignored`,
-    reused here against `base` itself rather than a `.github/`-style fixed
-    candidate). §17.4's "sibling directories" scan operates one level down
-    from `base`. Only the directory-name half of `_manifest_extra_ignored`'s
-    return matters here - a manifest-owned *file* can never be one of the
-    directories `p.is_dir()` already restricts `names` to below."""
+    sibling-directory candidacy. §17.4's "sibling directories" scan operates
+    one level down from `base`.
+
+    Deliberately does NOT reuse `_manifest_extra_ignored` here, unlike
+    `.github/`'s dedicated How-L2 scan and `_discover_opt_in_layer`. That
+    helper treats any manifest entry two or more path segments below its
+    `cand_dir` as making the *immediate-child directory name* CEP-owned -
+    correct for those two call sites, where the candidate is itself a
+    single CEP-managed bucket (e.g. `.github/skills/<name>`) and "owned
+    two levels down" really does mean "the whole immediate child is CEP's".
+    Reused against an arbitrary top-level directory here, the same rule
+    would prune an entire otherwise-genuine, human-authored directory (say
+    `docs/`) off a single incidental manifest-owned file nested somewhere
+    inside it (say `docs/generated/notes.md`) - that file being CEP-owned
+    says nothing about the rest of `docs/`. So only an immediate child that
+    the manifest owns *outright* (its own resolved path is in
+    `manifest_owned`, not merely something nested inside it) is pruned."""
     base = Path(base) if base is not None else Path(repo_root)
     if not base.is_dir():
         return []
-    manifest_dir_names = (
-        _manifest_extra_ignored(base, manifest_owned)[0] if manifest_owned is not None else set()
+    dirs = [p for p in base.iterdir() if p.is_dir()]
+    owned_names = (
+        {p.name for p in dirs if p.resolve() in manifest_owned} if manifest_owned else set()
     )
-    names = _prune_ignored([p.name for p in base.iterdir() if p.is_dir()], manifest_dir_names)
+    names = _prune_ignored([p.name for p in dirs], owned_names)
     return sorted(base / n for n in names)
 
 
@@ -775,9 +804,19 @@ def _discover_what_l2_workspace_root_set(repo_root, config, wr, default_path):
     )
 
     # Step 2: does {workspace_root}/ exist and have content after
-    # exclusions?
-    if wr_dir.is_dir() and any(
-        f for f in _iter_files(wr_dir) if not any(
+    # exclusions? Whole-directory manifest ownership is checked outright
+    # first (mirrors _discover_opt_in_layer/discover_how_l2's own
+    # candidate-ownership check); a manifest-owned file nested inside an
+    # otherwise-content-bearing workspace_root is excluded per-file via
+    # _manifest_extra_ignored, the same way _composite_sibling_scan above
+    # already excludes manifest-owned content outside workspace_root - this
+    # step had never threaded that exclusion through.
+    wr_owned_outright = bool(manifest_owned) and wr_dir.resolve() in manifest_owned
+    wr_dir_names, wr_file_names = (
+        _manifest_extra_ignored(wr_dir, manifest_owned) if manifest_owned is not None else (set(), set())
+    )
+    if not wr_owned_outright and wr_dir.is_dir() and any(
+        f for f in _iter_files(wr_dir, wr_dir_names, wr_file_names) if not any(
             f.relative_to(wr_dir).parts[:1] == (Path(e).parts[0],) for e in exclude if e
         )
     ):
@@ -849,7 +888,17 @@ def _discover_what_l2_workspace_root_unset(repo_root, config, default_path):
     # finding on top-level candidacy.
     manifest_owned = _read_cep_manifest(repo_root)
 
-    if _has_content(repo_root, default_path):
+    # Same manifest exclusion as the workspace_root-set sibling function
+    # above: whole-directory ownership checked outright first, then
+    # per-file exclusion threaded into the content check itself - this
+    # step-2 default-path check never had either, unlike the candidate
+    # ranking a few lines below, which already receives manifest_owned.
+    default_dir = Path(repo_root) / default_path.rstrip("/")
+    default_owned_outright = bool(manifest_owned) and default_dir.resolve() in manifest_owned
+    default_dir_names, default_file_names = (
+        _manifest_extra_ignored(default_dir, manifest_owned) if manifest_owned is not None else (set(), set())
+    )
+    if not default_owned_outright and _has_content(repo_root, default_path, default_dir_names, default_file_names):
         section = LayerSection(
             section_title,
             status_lines=["**Status:** enabled by default."],
@@ -1027,28 +1076,32 @@ def _github_candidate_has_signal(cand, extra_ignored, extra_ignored_files=frozen
     1. An exact match on a recognized convention-signal filename
        (HOW_L2_GITHUB_SIGNAL_NAMES, e.g. `CODEOWNERS`) anywhere in the
        pruned tree.
-    2. Any OTHER markdown file sitting directly under `.github/` itself
-       (`f.parent == cand` - not nested in a subdirectory like
-       `.github/workflows/`). Everything GitHub/tool-native and *known*
-       has already been pruned by extra_ignored_files by the time this
-       runs, so a survivor here is - by construction - not one of the
-       named boilerplate files; this is deliberately inverted from
-       enumerating known-good filenames (which needs a new entry for every
-       future convention file a project might author) to enumerating
-       known-auto-generated ones (which needs a new entry only when GitHub
-       or an agent tool ships a new auto-populated file, the same
-       "populated by a UI affordance, not authored" test the two
-       boilerplate sets above already use). An adversarial re-review of the
-       original name-enumeration version found it still let a bare CI
+    2. Any OTHER recognized doc file (DOC_EXTENSIONS - `.md`, `.rst`, or
+       `.adoc`) sitting directly under `.github/` itself (`f.parent ==
+       cand` - not nested in a subdirectory like `.github/workflows/`).
+       Everything GitHub/tool-native and *known* has already been pruned
+       by extra_ignored_files by the time this runs, so a survivor here is
+       - by construction - not one of the named boilerplate files; this is
+       deliberately inverted from enumerating known-good filenames (which
+       needs a new entry for every future convention file a project might
+       author) to enumerating known-auto-generated ones (which needs a new
+       entry only when GitHub or an agent tool ships a new auto-populated
+       file, the same "populated by a UI affordance, not authored" test the
+       two boilerplate sets above already use). An adversarial re-review of
+       the original name-enumeration version found it still let a bare CI
        workflow README, or GitHub's own one-click CODE_OF_CONDUCT.md /
        SECURITY.md / SUPPORT.md, single-handedly qualify `.github/` -
        restricting rule 2 to files directly under `.github/` (where these
        conventionally live) rather than the whole recursive tree keeps a
-       stray nested doc from doing the same."""
+       stray nested doc from doing the same. Matching the full
+       DOC_EXTENSIONS set (not just `.md`) keeps this in step with
+       _count_docs, which already recognizes `.rst`/`.adoc` for the same
+       candidate - a hand-authored `.github/CONVENTIONS.rst` was counted as
+       a doc but could never qualify `.github/` before this."""
     for f in _iter_files(cand, extra_ignored, extra_ignored_files):
         if f.name.casefold() in HOW_L2_GITHUB_SIGNAL_NAMES:
             return True
-        if f.parent == cand and f.suffix.lower() == ".md":
+        if f.parent == cand and f.suffix.lower() in DOC_EXTENSIONS:
             return True
     return False
 
@@ -1187,6 +1240,24 @@ def discover_how_l2(repo_root, config):
                 ranked.append((cand_rel, doc_count, _dir_mtime(cand)))
     ranked.sort(key=lambda r: (r[1], r[2]), reverse=True)
 
+    # Computed here, before the ranked/no-ranked branch below, rather than
+    # only inside the no-ranked-candidate tail - a re-review found this
+    # notice had been threaded into neither of the two no-ranked returns'
+    # sibling, the ranked-candidate return, so it silently disappeared
+    # whenever some other candidate outranked `.github/` even though
+    # `.github/` itself still held unqualified, potentially-relevant doc
+    # content the human deserves to know about either way.
+    github_suppressed_notice = (
+        f"`.github/` contains {github_suppressed_doc_count} markdown file(s), but "
+        f"none is a recognized convention signal or sits directly under `.github/` "
+        f"itself - treated as boilerplate or nested tooling docs, not this "
+        f"project's conventions corpus. If those are genuinely this project's "
+        f"conventions, CUSTOM to that subdirectory."
+        if github_suppressed_doc_count
+        else None
+    )
+    github_suppressed_notices = [github_suppressed_notice] if github_suppressed_notice else []
+
     if ranked:
         top_rel = ranked[0][0]
         github_caution = None
@@ -1214,28 +1285,10 @@ def discover_how_l2(repo_root, config):
         return LayerSection(
             section_title,
             status_lines=["**Status:** no hand-configured `how_l2.path`; CEP default missing/empty."],
+            notices=github_suppressed_notices,
             decision_lines=[f"decision: PENDING   # CONFIRM: {top_rel} | CUSTOM: <path> | SKIP"],
             warning=github_caution,
         ), None
-
-    # A re-review found "all missing/empty" below is actively misleading
-    # when .github/ in fact holds real markdown that simply didn't qualify
-    # (nested rather than directly under .github/, no recognized signal
-    # name) - failing closed there is the deliberate posture (see
-    # HOW_L2_GITHUB_SIGNAL_NAMES above), but the human reading this status
-    # line deserves to know that content exists before being told there's
-    # nothing here at all.
-    github_suppressed_notice = (
-        f"`.github/` contains {github_suppressed_doc_count} markdown file(s), but "
-        f"none is a recognized convention signal or sits directly under `.github/` "
-        f"itself - treated as boilerplate or nested tooling docs, not this "
-        f"project's conventions corpus. If those are genuinely this project's "
-        f"conventions, CUSTOM to that subdirectory."
-        if github_suppressed_doc_count
-        else None
-    )
-
-    github_suppressed_notices = [github_suppressed_notice] if github_suppressed_notice else []
 
     # Root-signal-only fallback (fixes H-3's "not a directory" framing):
     # evidence conventions exist, but not enough to name a directory.
