@@ -763,13 +763,25 @@ def discover_what_l2(repo_root, config):
     # always be false-positive-free-of-signal: configured value vs. itself).
     unconfigured_default = f"{wr}/" if wr and wr != "." else "docs/requirements/"
     default_path = vl.resolve_what_l2_path(config)
+    # Computed once, up front, so step 1 below can see it too - the sibling
+    # functions this falls through to each compute their own independent
+    # copy for their own checks (see discover_how_l2 for the precedent of
+    # hoisting this ahead of a step-1 check that previously had none).
+    manifest_owned = _read_cep_manifest(repo_root)
 
     # Step 1: hand-configured-path precedence (resolves H4). "Other than the
     # CEP default" - if the explicit value differs from what resolve_*
     # would compute in the ABSENCE of that override (i.e. it's not simply
     # restating the default).
     if configured_path and configured_path.rstrip("/") != unconfigured_default.rstrip("/"):
-        if _has_content(repo_root, configured_path):
+        configured_dir = repo_root / configured_path.rstrip("/")
+        configured_owned_outright = bool(manifest_owned) and configured_dir.resolve() in manifest_owned
+        configured_dir_names, configured_file_names = (
+            _manifest_extra_ignored(configured_dir, manifest_owned) if manifest_owned is not None else (set(), set())
+        )
+        if not configured_owned_outright and _has_content(
+            repo_root, configured_path, configured_dir_names, configured_file_names
+        ):
             return LayerSection(
                 WHAT_L2_TITLE,
                 status_lines=["**Status:** hand-configured already."],
@@ -1390,8 +1402,23 @@ def _discover_opt_in_layer(repo_root, config, *, section_title, config_section_g
     # "discovery does not re-score or challenge" a path a human already set,
     # regardless of the layer's current enabled value (§17.4 step 1 is
     # unconditional; the enabled/found matrix below only ever governs what
-    # happens when step 1 did NOT resolve the layer).
-    if configured_path and _has_content(repo_root, configured_path):
+    # happens when step 1 did NOT resolve the layer). This check had the
+    # same manifest-exclusion gap the ranked-candidate loop below it was
+    # fixed for - manifest_owned was already computed above but never
+    # reached this specific call, so a manifest-owned-only hand-configured
+    # path used to read as "hand-configured already" too.
+    configured_dir = repo_root / configured_path.rstrip("/") if configured_path else None
+    configured_owned_outright = bool(
+        configured_dir and manifest_owned and configured_dir.resolve() in manifest_owned
+    )
+    configured_dir_names, configured_file_names = (
+        _manifest_extra_ignored(configured_dir, manifest_owned)
+        if configured_dir is not None and manifest_owned is not None
+        else (set(), set())
+    )
+    if configured_path and not configured_owned_outright and _has_content(
+        repo_root, configured_path, configured_dir_names, configured_file_names
+    ):
         return LayerSection(
             section_title,
             status_lines=[f"**Status:** hand-configured already (`{layer_label}.enabled: {str(enabled).lower()}`)."],

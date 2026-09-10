@@ -116,6 +116,52 @@ class TestPrecedenceCheck(TempRepoTestCase):
         self.assertNotIn("hand-configured already", rendered)
         self.assertNotEqual(path, "team-conventions/")
 
+    def test_what_l2_hand_configured_path_manifest_owned_only_file_is_excluded(self):
+        # discover_what_l2's step-1 hand-configured-path check never received
+        # manifest data at all - manifest_owned wasn't even computed in this
+        # function before this fix - so a manifest-owned file sitting alone
+        # under a hand-configured what_l2.path made this read
+        # "hand-configured already" purely on CEP's own generated content.
+        write(self.repo_root / "my-specs" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["my-specs/generated.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config("layers:\n  what_l2:\n    path: my-specs/\n")
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("hand-configured already", rendered)
+        self.assertNotEqual(path, "my-specs/")
+
+    def test_what_l2_hand_configured_path_manifest_owned_outright_is_excluded(self):
+        # Companion to the nested-file case above - a manifest that owns the
+        # WHOLE hand-configured directory outright (not just a name inside
+        # it) must also be excluded.
+        write(self.repo_root / "my-specs" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["my-specs"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config("layers:\n  what_l2:\n    path: my-specs/\n")
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("hand-configured already", rendered)
+        self.assertNotEqual(path, "my-specs/")
+
     def test_what_l1_hand_configured_path_wins_regardless_of_enabled(self):
         write(self.repo_root / "specs" / "external" / "rfc.md", "# rfc")
         config = self.config(
@@ -124,6 +170,78 @@ class TestPrecedenceCheck(TempRepoTestCase):
         section, path = dl.discover_what_l1(self.repo_root, config)
         self.assertEqual(path, "specs/external/")
         self.assertFalse(section.decision_lines)
+
+    def test_what_l1_hand_configured_path_manifest_owned_only_file_is_excluded(self):
+        # _discover_opt_in_layer's step-1 hand-configured-path check never
+        # threaded manifest_owned into its _has_content call, even though the
+        # ranked-candidate loop just below it already does - a manifest-owned
+        # file sitting alone under a hand-configured what_l1.path made this
+        # read "hand-configured already" purely on CEP's own generated content.
+        write(self.repo_root / "specs" / "external" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": ["specs/external/generated.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config(
+            "layers:\n  what_l1:\n    enabled: true\n    path: specs/external/\n"
+        )
+        section, path = dl.discover_what_l1(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("hand-configured already", rendered)
+        self.assertNotEqual(path, "specs/external/")
+
+    def test_what_l1_hand_configured_path_manifest_owned_outright_is_excluded(self):
+        # Companion to the nested-file case above - a manifest that owns the
+        # WHOLE hand-configured directory outright must also be excluded.
+        write(self.repo_root / "specs" / "external" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": ["specs/external"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config(
+            "layers:\n  what_l1:\n    enabled: true\n    path: specs/external/\n"
+        )
+        section, path = dl.discover_what_l1(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("hand-configured already", rendered)
+        self.assertNotEqual(path, "specs/external/")
+
+    def test_how_l1_hand_configured_path_manifest_owned_only_file_is_excluded(self):
+        # Confirms the opt-in-layer step-1 fix isn't What-L1-specific - both
+        # layers share the exact same _discover_opt_in_layer code path.
+        write(self.repo_root / "org" / "process-standards" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "only",
+                "only_skills": ["some-skill"],
+                "owned_paths": ["org/process-standards/generated.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config(
+            "how_dimension:\n  how_l1:\n    enabled: false\n    path: org/process-standards/\n"
+        )
+        section, path = dl.discover_how_l1(self.repo_root, config)
+        rendered = section.render()
+        self.assertNotIn("hand-configured already", rendered)
+        self.assertNotEqual(path, "org/process-standards/")
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +538,29 @@ class TestWhatL2ScanAndScore(TempRepoTestCase):
         self.assertIsNone(path)
         self.assertNotIn("Nothing to decide.", rendered)
 
+    def test_manifest_owned_outright_default_what_l2_path_is_excluded(self):
+        # Companion to the nested-file case above - the
+        # default_owned_outright guard (whole default-path directory owned
+        # outright, not just a name inside it) had no test of its own even
+        # though the code has existed since the prior fix cycle.
+        write(self.repo_root / "docs" / "requirements" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["docs/requirements"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config()
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIsNone(path)
+        self.assertNotIn("Nothing to decide.", rendered)
+
 
 class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
     def test_populated_workspace_root_after_exclude_is_notice_only(self):
@@ -493,6 +634,32 @@ class TestWhatL2WorkspaceRootSet(TempRepoTestCase):
                 "mode": "full",
                 "only_skills": None,
                 "owned_paths": ["docs/generated.md"],
+                "installed_at": "2026-01-01T00:00:00Z",
+            }),
+        )
+        config = self.config(
+            "layout:\n  workspace_root: docs/\n"
+            "layers:\n  what_l2:\n    exclude:\n      - contexts/\n      - inputs/\n      - cache/\n"
+        )
+        section, path, roots = dl.discover_what_l2(self.repo_root, config)
+        rendered = section.render()
+        self.assertIn("decision: PENDING   # CUSTOM: <path> | ACKNOWLEDGE", rendered)
+        self.assertNotIn("has content after the CEP-bucket exclusions", rendered)
+
+    def test_manifest_owned_outright_workspace_root_is_excluded(self):
+        # Companion to the nested-file case above - the wr_owned_outright
+        # guard (whole workspace_root owned outright, not just a name
+        # inside it) had no test of its own even though the code has
+        # existed since the prior fix cycle.
+        write(self.repo_root / "docs" / "generated.md", "# generated")
+        write(
+            self.repo_root / ".cep-install.json",
+            json.dumps({
+                "schema_version": 1,
+                "runtime": ["claude"],
+                "mode": "full",
+                "only_skills": None,
+                "owned_paths": ["docs"],
                 "installed_at": "2026-01-01T00:00:00Z",
             }),
         )
