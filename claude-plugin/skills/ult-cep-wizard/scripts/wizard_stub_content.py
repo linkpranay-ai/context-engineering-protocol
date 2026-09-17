@@ -26,13 +26,15 @@ shared by two callers, not two small independent helpers that happen to look ali
 genuinely standalone helpers on purpose).
 
 §18.6 designs two handoff modes for generative steps, but only one is meaningfully
-previewable in Phase 0: **agent-writes-in-place** (the coding agent, which already
-has ordinary filesystem access to the repo, writes the file directly; the wizard
-later re-reads the expected path on an explicit "Check now" click). The other mode,
+supported here: **agent-writes-in-place** (the coding agent, which already has
+ordinary filesystem access to the repo, writes the file directly; the wizard later
+re-reads the expected path on an explicit "Check now" click). The other mode,
 **paste-back**, ends with "the wizard writes the content to the resolved target path
-itself, through the same write endpoint" - that endpoint does not exist until Phase
-1, so a Phase-0 paste-back card would end in a dead affordance. This module therefore
-only builds agent-writes-in-place cards. All three boxes now converge on the same
+itself, through the same write endpoint" - no route does that for box content today
+(the live mutating routes commit staged decisions, apply a specific retrofit edit, or
+run discovery; none of them accepts pasted-back generated content and writes it to a
+box's resolved target path), so a paste-back card here would end in a dead
+affordance. This module therefore only builds agent-writes-in-place cards. All three boxes now converge on the same
 card shape (D24 Phase D): each card's `prompt_text` points at running a real skill
 rather than authoring a freeform generation prompt this module would have to keep
 in sync with that skill's own `SKILL.md` by hand. Guidelines points at
