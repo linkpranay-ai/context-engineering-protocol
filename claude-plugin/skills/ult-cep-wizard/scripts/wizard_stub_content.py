@@ -4,11 +4,13 @@ only (D24 §18.6/§18.10, locked).
 
 **Pure preview, zero filesystem writes.** This module contains no `write_text`,
 `os.replace`, or any other mutating call anywhere - it only ever builds and returns
-`StubCard` values describing what a user *could* paste into their coding agent.
-Phase 0 registers zero mutating routes anywhere in wizard_server.py (§18.7, §18.10);
-if this module ever grows a write call, that is a Phase-1-or-later change, not a
-Phase 0 one, and should not land here without the accompanying §18.2b write-path
-security spec (see wizard_atomic_write.py's own docstring).
+`StubCard` values describing what a user *could* paste into their coding agent. That
+stays true even though `wizard_server.py` itself has, since Phase 1, grown real
+mutating routes (`/api/stage`, `/api/apply`, `/api/discover`, and others) backed by
+`wizard_atomic_write.write_text_atomic()` elsewhere in the skill - this module in
+particular was never one of their callers and was never meant to be. If this module
+ever grows a write call, it should use that same already-landed §18.2b write-path
+primitive (see wizard_atomic_write.py) rather than inventing a new one.
 
 §18.10 scopes this precisely: "`ult-scaffold-content` generates for the **empty**
 case only." "Empty" means a directory that doesn't exist, or exists but contains no

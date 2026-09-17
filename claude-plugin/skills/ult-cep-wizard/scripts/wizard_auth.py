@@ -24,9 +24,10 @@ Auth model (Jupyter/mkdocs-serve precedent, adapted for single-use tokens):
      silent extension by an unauthenticated probe).
   5. Any state-changing request must additionally present the session's CSRF nonce in
      a request *header* (never read from a cookie or query string) via
-     `SessionStore.check_csrf()`. Phase 0 registers zero mutating routes, but the
-     plumbing exists end-to-end now so Phase 1's first write endpoint has nothing new
-     to design here.
+     `SessionStore.check_csrf()`. This is live and enforced today - `wizard_server.py`'s
+     mutating POST routes (`/api/stage`, `/api/apply`, `/api/discover`, and others) all
+     go through `check_csrf()` before dispatch, not a placeholder awaiting a future
+     write endpoint.
 
 There is deliberately no session renewal/refresh-token mechanism: idle timeout or
 process exit (whichever first) ends the session, full stop - restart the server for a

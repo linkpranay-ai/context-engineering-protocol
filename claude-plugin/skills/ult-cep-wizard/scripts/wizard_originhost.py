@@ -11,10 +11,10 @@ default-allow):
      hostname mismatch even though the IP resolves correctly.
   2. **Origin/Referer presence** - any *mutating-shaped* request (state-changing
      method) missing both an `Origin` and a `Referer` header is rejected outright, and
-     any header that *is* present must resolve to the same Host allowlist. Phase 0
-     registers zero mutating routes, so this only exercises the reject path for now
-     (there's nothing yet these headers are allowed to match) - the plumbing exists
-     end-to-end so Phase 1's first write endpoint has nothing new to design here.
+     any header that *is* present must resolve to the same Host allowlist. This is live
+     and enforced today against `wizard_server.py`'s real mutating routes (`/api/stage`,
+     `/api/apply`, `/api/discover`, and others), not a reject-only placeholder awaiting
+     a future write endpoint.
 
 GET/HEAD requests are exempt from the Origin/Referer presence check (they shouldn't be
 mutating in the first place; requiring these headers on every GET would also break a
