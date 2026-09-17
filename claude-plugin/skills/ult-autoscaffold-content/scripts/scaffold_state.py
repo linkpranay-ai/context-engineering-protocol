@@ -275,6 +275,30 @@ LARGE_REPO_MIN_MODULES = 8
 # flag here.
 REPO_DOC_KINDS = ("coding_standards", "testing_guidelines")
 
+# Filenames _directory_is_purely_settled_output() tolerates sitting
+# directly at the top level of an already-recognized CEP output root even
+# when their own output_path was never individually recorded in state.
+# This can never apply to a directory with no tracked output at all --
+# _directory_is_purely_settled_output() is only ever called for names
+# already present in _settled_output_subtrees()'s result, i.e. names with
+# at least one *other* genuinely tracked output_path underneath them -- so
+# an unrelated top-level directory that happens to hold a file with one of
+# these names is never at risk of being silently excluded.
+#
+# Two real gaps closed by this, both found by adversarial review of the
+# original router-file-tracking fix:
+#   - SKILL.md Step 5c's "already exists: skip it silently" branch for
+#     CODING-STANDARDS.md/TESTING-GUIDELINES.md calls no mark-* command at
+#     all, so a pre-existing repo doc's output_path is never recorded even
+#     though every other generated file is.
+#   - A TRIAGE-STATE.json written before the "index" key existed has no
+#     record of CEP-INDEX.md even though the file is already on disk, and
+#     a finished run never gets a second chance to record it: render-index
+#     is only called during generation, not on a mere resumed scan.
+_CONVENTIONAL_OUTPUT_FILENAMES = frozenset(
+    {"CEP-INDEX.md", "CODING-STANDARDS.md", "TESTING-GUIDELINES.md"}
+)
+
 
 class GraphRepoRootMismatchError(ValueError):
     """Raised when a graphify-mode graph shares ZERO top-level module names
@@ -421,14 +445,25 @@ def _settled_output_subtrees(repo_root, state):
       narrow enough that it can only ever cover that one known file,
       never a directory's other, unrelated content.
 
-    A 1-component output_path (a bare top-level output file, e.g. a
-    repo_doc's output_path of "CEP-INDEX.md") still contributes nothing at
-    all: nothing exists at the top level for a later scan to mistake for
-    a module.
+    A 1-component output_path (a bare top-level output file sitting at the
+    repo's own root, outside any resolved How-L2 directory) still
+    contributes nothing at all: nothing exists under a candidate top-level
+    name for a later scan to mistake for a module.
 
     Every state section that can carry an `output_path` is checked --
-    modules, repo_docs, and interfaces all persist one, and the same
-    reclassification risk applies to all three, not just modules.
+    modules, repo_docs, interfaces, and the router index all persist one,
+    and the same reclassification risk applies to all four, not just
+    modules. The router index is the easiest of the four to miss: SKILL.md
+    Step 5b writes CEP-INDEX.md straight to disk under the resolved How-L2
+    root (e.g. "org/CEP-INDEX.md" -- a 2-component path exactly like a
+    repo_doc written directly into a pre-existing top-level directory) on
+    every single `render-index` call, not just once at the end, and that
+    write has no pending/generated lifecycle of its own the way modules
+    and repo_docs do. Skipping it here is exactly what let a resolved
+    How-L2 root fail its purity check on the very next scan even after
+    every module and repo_doc it contains was properly tracked -- the
+    router file was the one piece of real content that check couldn't
+    account for.
 
     A malformed, empty, or outside-repo_root output_path is skipped rather
     than raising -- this is a defensive read of persisted state, not a
@@ -458,6 +493,7 @@ def _settled_output_subtrees(repo_root, state):
             _consider(doc.get("output_path"))
     for interface in state.get("interfaces", []):
         _consider(interface.get("output_path"))
+    _consider((state.get("index") or {}).get("output_path"))
 
     names = set(dir_subtrees) | set(file_subtrees)
     return {
@@ -506,14 +542,44 @@ def _directory_is_purely_settled_output(module_path, subtrees):
 
     A directory that doesn't exist on disk, or holds no files at all,
     counts as pure: there's no real content there for scan() to lose
-    either way."""
+    either way.
+
+    Two narrow, defense-in-depth tolerances sit on top of the tracked-path
+    check above, for files that were never individually recorded in state
+    at all -- see _CONVENTIONAL_OUTPUT_FILENAMES for why these are safe
+    even though nothing tracks them. Both are scoped to this directory's
+    own top level (`resolved.parent == module_path`), not any nested
+    subdirectory: a nested ".env"/".eslintrc"/etc. several levels down is
+    real, human-authored project content (e.g. a config/ directory's own
+    dotfiles), not an inert CEP-adjacent placeholder, and must still fail
+    purity like any other untracked file would.
+
+    - A dot-prefixed file directly at the top level (".gitkeep",
+      ".gitignore", ...) is tolerated, mirroring _prune_ignored()'s
+      existing precedent that dot-*directories* are already invisible to
+      this whole mechanism. These are inert placeholders, essentially
+      guaranteed to exist on any git-tracked repo, and never something
+      scan() should treat as a reason to reclassify a resolved output
+      root as pending.
+
+    - A file whose name is in _CONVENTIONAL_OUTPUT_FILENAMES, also
+      directly at the top level, is tolerated too. This is deliberately
+      narrow: it does NOT extend to arbitrary untracked content like a
+      stray "README.md", which stays a real reason to fail purity,
+      consistent with this function's whole point of never silently
+      swallowing unrelated content."""
     dirs = subtrees.get("dirs", set())
     files = subtrees.get("files", set())
+    module_path = Path(module_path).resolve()
     for f in _iter_files(module_path):
         resolved = f.resolve()
         if resolved in files:
             continue
         if any(d in resolved.parents for d in dirs):
+            continue
+        if resolved.parent == module_path and (
+            resolved.name.startswith(".") or resolved.name in _CONVENTIONAL_OUTPUT_FILENAMES
+        ):
             continue
         return False
     return True
@@ -970,6 +1036,7 @@ def empty_state():
         "modules": [],
         "interfaces": [],
         "repo_docs": _ensure_repo_docs({}),
+        "index": {"output_path": None, "rendered_at": None},
     }
 
 
@@ -990,6 +1057,7 @@ def load_state(path):
     state.setdefault("modules", [])
     state.setdefault("interfaces", [])
     state["repo_docs"] = _ensure_repo_docs(state.get("repo_docs"))
+    state.setdefault("index", {"output_path": None, "rendered_at": None})
     return state
 
 
@@ -1006,6 +1074,7 @@ def save_state(path, state):
         "modules": state.get("modules", []),
         "interfaces": state.get("interfaces", []),
         "repo_docs": _ensure_repo_docs(state.get("repo_docs")),
+        "index": state.get("index") or {"output_path": None, "rendered_at": None},
     }
     path.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
 
@@ -1237,6 +1306,23 @@ def mark_repo_doc_skipped(state, kind, reason):
     doc["status"] = "skipped"
     doc["skip_reason"] = reason
     return doc
+
+
+def mark_index_rendered(state, output_path):
+    """Record where `render-index` last wrote CEP-INDEX.md.
+
+    Unlike a module or repo doc, the router file has no pending/generated
+    lifecycle to gate -- SKILL.md Step 5b calls `render-index` again after
+    every single module, deliberately overwriting the same path each time
+    so the checkpoint stays current mid-run. So this just always records
+    the latest path, with no "already generated" guard. Without recording
+    it at all, the settled-output-root purity check in `scan()` never
+    learns that CEP-INDEX.md exists on disk under a resolved How-L2 output
+    root, and reports that root as impure (real, unaccounted-for content)
+    on the very next scan -- reclassifying CEP's own router file as if it
+    were unscanned application code."""
+    state["index"] = {"output_path": output_path, "rendered_at": _now_iso()}
+    return state["index"]
 
 
 def mark_interface_generated(state, interface_id, output_path):
@@ -1514,6 +1600,8 @@ def _cmd_render_index(args):
         out_path = Path(args.out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(text, encoding="utf-8")
+        mark_index_rendered(state, args.out)
+        save_state(args.state, state)
         print("wrote {}".format(out_path))
     else:
         print(text)

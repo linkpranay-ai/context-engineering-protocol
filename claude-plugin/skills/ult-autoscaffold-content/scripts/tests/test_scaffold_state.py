@@ -971,6 +971,39 @@ class ScanTests(unittest.TestCase):
             ids_again = {m["id"] for m in state["modules"]}
             self.assertNotIn("org/", ids_again)
 
+    def test_settled_output_root_survives_rescan_alongside_a_rendered_router_file(self):
+        # Real-world shape the synthetic fixture above misses: SKILL.md
+        # Step 5b writes CEP-INDEX.md straight to disk under the resolved
+        # How-L2 root on every `render-index` call, alongside the tracked
+        # module/repo_doc/interface drafts -- not just the drafts alone.
+        # That router file is real content sitting under "org/" that the
+        # settled-output-root purity check must also account for, or the
+        # whole directory fails purity and "org/" comes back as a pending
+        # module on the very next scan even though every module inside it
+        # was properly marked generated. This is the exact gap the fixed
+        # regression test (`test_settled_output_root_is_excluded_from_rescan`)
+        # did not cover: it never wrote a router file to disk at all, so a
+        # build of this file that dropped index tracking still passed it.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            ss.mark_index_rendered(state, "org/CEP-INDEX.md")
+            _write(root / "org" / "CEP-INDEX.md", "# CEP Index")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids)
+
+            # SKILL.md re-renders the index after every module, so the
+            # router file keeps being (re)written between scans too.
+            ss.scan(state, root, "heuristic", rescan=True)
+            ids_again = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids_again)
+
     def test_settled_output_root_from_repo_doc_excluded_from_rescan(self):
         # A repo-wide doc's output_path carries the exact same exposure as
         # a module's -- e.g. coding_standards resolved to org/docs/....
@@ -1125,6 +1158,153 @@ class ScanTests(unittest.TestCase):
             by_id = {m["id"]: m for m in state["modules"]}
             self.assertIn("conventions/", by_id)
             self.assertEqual(by_id["conventions/"]["file_count"], 1)
+
+    def test_settled_output_root_tolerates_pre_existing_repo_doc_never_marked(self):
+        # Adversarial-review finding F1 against the router-file-tracking
+        # fix: SKILL.md Step 5c's "already exists: skip it silently"
+        # branch for CODING-STANDARDS.md/TESTING-GUIDELINES.md calls no
+        # mark-* command at all when the doc was already on disk before
+        # this run started -- so its output_path is never recorded in
+        # state, even though the file is real, CEP-authored content
+        # sitting right under the resolved output root. A later
+        # same-state rescan must not reclassify that output root as
+        # pending just because this one conventionally-named file was
+        # never tracked.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            # Already on disk but never tracked via
+            # mark-repo-doc-generated -- the exact Step 5c gap.
+            _write(root / "org" / "CODING-STANDARDS.md", "# standards")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids)
+
+    def test_settled_output_root_tolerates_dotfiles(self):
+        # A ".gitkeep" (or similar) placeholder is essentially guaranteed
+        # to exist in any git-tracked repo's output directory (adversarial
+        # review finding F1c) and is never a reason to reclassify a
+        # resolved output root as pending -- mirrors the existing
+        # precedent that dot-*directories* are already invisible to this
+        # whole mechanism (see _prune_ignored()).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            _write(root / "org" / ".gitkeep", "")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids)
+
+    def test_settled_output_root_does_not_tolerate_nested_dotfile(self):
+        # The dotfile tolerance above is deliberately scoped to this
+        # directory's own top level only (round-2 adversarial review
+        # finding C1). A dotfile several levels *below* the output root's
+        # top level -- e.g. a config/ subdirectory's own .eslintrc/.env,
+        # real human-authored project content, not an inert CEP-adjacent
+        # placeholder -- must still fail purity like any other untracked
+        # file, so the directory correctly stays a pending candidate.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            _write(root / "org" / "nested" / ".env", "SECRET=1")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertIn("org/", ids)
+
+    def test_settled_output_root_still_flags_untracked_unconventional_file(self):
+        # Control for the two tolerances directly above: an untracked
+        # file with an ordinary, non-CEP-conventional name must still
+        # fail purity. Both new tolerances are deliberately narrow --
+        # they must not swallow arbitrary real, unrelated content, the
+        # same design intent that already governs the 2-component
+        # "files" tracking above.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            _write(root / "org" / "README.md", "# untracked, unrelated")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertIn("org/", ids)
+
+    def test_settled_output_root_survives_rescan_with_legacy_state_missing_index_key(self):
+        # Adversarial-review finding F2: a TRIAGE-STATE.json written by a
+        # run that predates the "index" key entirely (i.e. before the
+        # router-file-tracking fix existed) has no record of CEP-INDEX.md
+        # at all -- not even a null placeholder, the key is simply
+        # absent -- even though the file is already on disk from that
+        # earlier run's own render-index calls. A finished run never gets
+        # a second chance to record it, since render-index is only called
+        # during generation, not on a mere resumed/continued scan. That
+        # must not perpetually reclassify the output root as pending on
+        # every subsequent same-state rescan.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            _write(root / "org" / "CEP-INDEX.md", "# CEP Index")
+            # Simulate a pre-fix state file: no "index" key present.
+            self.assertIn("index", state)
+            del state["index"]
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids)
+
+    def test_settled_output_root_requires_tracking_for_nonconventional_router_filename(self):
+        # Negative control isolating what actually does the work for the
+        # general case (responds to F4's critique that the original
+        # router-file regression test's negative control was weak -- it
+        # failed pre-fix with AttributeError, not a behavioral assertion
+        # failure): a router file rendered to a *non*-default filename
+        # (an --out override) is NOT covered by the narrow
+        # conventional-filename tolerance above, so it must still be
+        # tracked via mark_index_rendered. This proves that mechanism,
+        # not the tolerance list, is what makes the router-file fix hold
+        # in the general case -- the tolerance list only ever helps the
+        # one default filename.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            # On disk but never tracked, and not a conventional filename.
+            _write(root / "org" / "ROUTER.md", "# router")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertIn("org/", ids)
+
+            # Tracking it via mark_index_rendered fixes it, same as the
+            # conventional CEP-INDEX.md case above.
+            ss.mark_index_rendered(state, "org/ROUTER.md")
+            ss.scan(state, root, "heuristic", rescan=True)
+            ids_again = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids_again)
 
 
 class SettledOutputRootNamesTests(unittest.TestCase):

@@ -547,21 +547,27 @@ def _directory_is_purely_settled_output(module_path, subtrees):
     Two narrow, defense-in-depth tolerances sit on top of the tracked-path
     check above, for files that were never individually recorded in state
     at all -- see _CONVENTIONAL_OUTPUT_FILENAMES for why these are safe
-    even though nothing tracks them:
+    even though nothing tracks them. Both are scoped to this directory's
+    own top level (`resolved.parent == module_path`), not any nested
+    subdirectory: a nested ".env"/".eslintrc"/etc. several levels down is
+    real, human-authored project content (e.g. a config/ directory's own
+    dotfiles), not an inert CEP-adjacent placeholder, and must still fail
+    purity like any other untracked file would.
 
-    - A dot-prefixed file (".gitkeep", ".gitignore", ...) is always
-      tolerated, mirroring _prune_ignored()'s existing precedent that
-      dot-*directories* are already invisible to this whole mechanism.
-      These are inert placeholders, essentially guaranteed to exist on
-      any git-tracked repo, and never something scan() should treat as a
-      reason to reclassify a resolved output root as pending.
+    - A dot-prefixed file directly at the top level (".gitkeep",
+      ".gitignore", ...) is tolerated, mirroring _prune_ignored()'s
+      existing precedent that dot-*directories* are already invisible to
+      this whole mechanism. These are inert placeholders, essentially
+      guaranteed to exist on any git-tracked repo, and never something
+      scan() should treat as a reason to reclassify a resolved output
+      root as pending.
 
-    - A file whose name is in _CONVENTIONAL_OUTPUT_FILENAMES, sitting
-      directly at this directory's own top level (not nested deeper), is
-      tolerated too. This is deliberately narrow: it does NOT extend to
-      arbitrary untracked content like a stray "README.md", which stays a
-      real reason to fail purity, consistent with this function's whole
-      point of never silently swallowing unrelated content."""
+    - A file whose name is in _CONVENTIONAL_OUTPUT_FILENAMES, also
+      directly at the top level, is tolerated too. This is deliberately
+      narrow: it does NOT extend to arbitrary untracked content like a
+      stray "README.md", which stays a real reason to fail purity,
+      consistent with this function's whole point of never silently
+      swallowing unrelated content."""
     dirs = subtrees.get("dirs", set())
     files = subtrees.get("files", set())
     module_path = Path(module_path).resolve()
@@ -571,9 +577,9 @@ def _directory_is_purely_settled_output(module_path, subtrees):
             continue
         if any(d in resolved.parents for d in dirs):
             continue
-        if resolved.name.startswith("."):
-            continue
-        if resolved.parent == module_path and resolved.name in _CONVENTIONAL_OUTPUT_FILENAMES:
+        if resolved.parent == module_path and (
+            resolved.name.startswith(".") or resolved.name in _CONVENTIONAL_OUTPUT_FILENAMES
+        ):
             continue
         return False
     return True

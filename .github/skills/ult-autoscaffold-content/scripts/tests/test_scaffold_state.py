@@ -1205,6 +1205,27 @@ class ScanTests(unittest.TestCase):
             ids = {m["id"] for m in state["modules"]}
             self.assertNotIn("org/", ids)
 
+    def test_settled_output_root_does_not_tolerate_nested_dotfile(self):
+        # The dotfile tolerance above is deliberately scoped to this
+        # directory's own top level only (round-2 adversarial review
+        # finding C1). A dotfile several levels *below* the output root's
+        # top level -- e.g. a config/ subdirectory's own .eslintrc/.env,
+        # real human-authored project content, not an inert CEP-adjacent
+        # placeholder -- must still fail purity like any other untracked
+        # file, so the directory correctly stays a pending candidate.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            _write(root / "org" / "nested" / ".env", "SECRET=1")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertIn("org/", ids)
+
     def test_settled_output_root_still_flags_untracked_unconventional_file(self):
         # Control for the two tolerances directly above: an untracked
         # file with an ordinary, non-CEP-conventional name must still
