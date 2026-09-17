@@ -946,9 +946,13 @@
   // Per-card "drop from batch at the last second" state for the batch diff
   // preview (Journey 3 plan's Phase B UI requirement). Deliberately
   // client-side/in-memory only, keyed by unit_id, never persisted to
-  // RETROFIT-STATE.json: it's a preview-only nicety over an Apply button
-  // that's disabled by design until Phase C wires up an actual write, so
-  // there's nothing here worth surviving a refresh.
+  // RETROFIT-STATE.json. This is NOT cosmetic - it directly determines
+  // retrofitBatchUnitIds()'s output, which is the literal POST
+  // /api/retrofit/apply request body (Phase C's real write path, live
+  // today). Losing it on refresh just means the exclusions reset and the
+  // checkboxes re-render checked (see loadRetrofitInventory), so the user
+  // sees the full batch again before Apply is clickable - not a case of a
+  // disabled button masking the gap.
   var retrofitBatchExcludedUnitIds = {};
   // Best-effort default same-repo contract locations (GET
   // /api/retrofit/contract-locations) - fetched once and cached; a per-unit

@@ -34,7 +34,8 @@ itself, through the same write endpoint" - no route does that for box content to
 (the live mutating routes commit staged decisions, apply a specific retrofit edit, or
 run discovery; none of them accepts pasted-back generated content and writes it to a
 box's resolved target path), so a paste-back card here would end in a dead
-affordance. This module therefore only builds agent-writes-in-place cards. All three boxes now converge on the same
+affordance. This module therefore only builds agent-writes-in-place cards.
+All three boxes now converge on the same
 card shape (D24 Phase D): each card's `prompt_text` points at running a real skill
 rather than authoring a freeform generation prompt this module would have to keep
 in sync with that skill's own `SKILL.md` by hand. Guidelines points at
@@ -76,9 +77,11 @@ class StubCard:
     # to the agent's discretion, so a later "Check now" click has a real path to test).
     prompt_text: str  # copy-button block - plain text, agent-agnostic (§18.6).
     expect_description: str  # plain-language statement of what should come back.
-    mode: str = "agent-writes-in-place"  # the only mode Phase 0 previews (see module
-    # docstring) - carried on the card so the frontend never has to hardcode it and
-    # a future Phase-1 paste-back card is a value this field can simply also take.
+    mode: str = "agent-writes-in-place"  # the only mode this module builds cards for
+    # (see module docstring: no live route writes pasted-back content to a box's
+    # target path) - carried on the card so the frontend never has to hardcode it,
+    # and a future paste-back card is a value this field can simply also take if a
+    # route for it is ever added.
 
 
 def _has_content(repo_root: Path, rel_path: str) -> bool:
