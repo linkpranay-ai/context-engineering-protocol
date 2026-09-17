@@ -101,13 +101,23 @@ class TestWriteTextAtomic(unittest.TestCase):
 
         with mock.patch(
             "os.replace", side_effect=PermissionError(5, "Access is denied")
-        ):
+        ), mock.patch("time.sleep"):
             with self.assertRaises(waw.AtomicWriteError):
                 waw.write_text_atomic(target, "attempted overwrite\n")
 
         self.assertEqual(target.read_text(encoding="utf-8"), "original\n")
         leftovers = [p for p in self.root.iterdir() if p != target]
         self.assertEqual(leftovers, [])
+
+    def test_replace_with_retry_misconfigured_to_zero_attempts_raises_assertion_not_typeerror(self):
+        # Defensive guard: if _REPLACE_RETRY_ATTEMPTS were ever misconfigured
+        # to 0, the retry loop body never runs, so last_exc stays None --
+        # `raise None` would be a confusing TypeError masking the real
+        # misconfiguration. Must fail loudly and specifically instead.
+        target = self.root / "misconfigured.md"
+        with mock.patch.object(waw, "_REPLACE_RETRY_ATTEMPTS", 0):
+            with self.assertRaises(AssertionError):
+                waw._replace_with_retry(self.root / "src.tmp", target)
 
 
 if __name__ == "__main__":

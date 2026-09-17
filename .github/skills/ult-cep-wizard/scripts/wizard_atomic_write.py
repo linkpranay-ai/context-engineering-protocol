@@ -39,6 +39,13 @@ class AtomicWriteError(Exception):
     docstring)."""
 
 
+# Not empirically tuned against the real AV/indexer race -- there's no
+# reliable way to reproduce that race on demand to measure how long it
+# actually holds the handle. 5 attempts / 50ms apart is a cheap, generous
+# default (4 sleeps, ~200ms worst case before giving up) chosen to be well
+# above a plausible momentary-scan window while staying imperceptible in
+# an interactive wizard flow; revisit if it's ever observed to still be
+# too short in practice.
 _REPLACE_RETRY_ATTEMPTS = 5
 _REPLACE_RETRY_DELAY_SECONDS = 0.05
 
@@ -67,6 +74,8 @@ def _replace_with_retry(tmp_path: Path, target: Path) -> None:
             last_exc = exc
             if attempt < _REPLACE_RETRY_ATTEMPTS - 1:
                 time.sleep(_REPLACE_RETRY_DELAY_SECONDS)
+    if last_exc is None:
+        raise AssertionError("_REPLACE_RETRY_ATTEMPTS must be >= 1")
     raise last_exc
 
 
