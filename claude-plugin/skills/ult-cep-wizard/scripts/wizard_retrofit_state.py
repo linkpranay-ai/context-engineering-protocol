@@ -19,10 +19,12 @@ for what units *exist*; this file only ever remembers what a human decided
 about them.
 
 Never records file *content* - only selections, drafted text, and the target
-file's content hash at draft time (wizard_content_hash.hash_file), so a
-future Phase C freshness check can detect the target file changing
-underneath a stale draft before ever writing to it (mirrors
-wizard_apply.py's StaleArtifactError pattern).
+file's content hash at draft time (wizard_content_hash.hash_file), so
+Phase C's freshness check can detect the target file changing underneath a
+stale draft before ever writing to it (mirrors wizard_apply.py's
+StaleArtifactError pattern). That check is live today, not a future one -
+see wizard_retrofit_apply.py's own docstring step 2 and its
+current_hash != unit_input.target_file_hash gate.
 
 Written via wizard_atomic_write.write_text_atomic (same primitive Phase 1's
 write path uses). The containing directory is also registered in the
