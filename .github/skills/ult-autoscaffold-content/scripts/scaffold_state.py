@@ -421,14 +421,25 @@ def _settled_output_subtrees(repo_root, state):
       narrow enough that it can only ever cover that one known file,
       never a directory's other, unrelated content.
 
-    A 1-component output_path (a bare top-level output file, e.g. a
-    repo_doc's output_path of "CEP-INDEX.md") still contributes nothing at
-    all: nothing exists at the top level for a later scan to mistake for
-    a module.
+    A 1-component output_path (a bare top-level output file sitting at the
+    repo's own root, outside any resolved How-L2 directory) still
+    contributes nothing at all: nothing exists under a candidate top-level
+    name for a later scan to mistake for a module.
 
     Every state section that can carry an `output_path` is checked --
-    modules, repo_docs, and interfaces all persist one, and the same
-    reclassification risk applies to all three, not just modules.
+    modules, repo_docs, interfaces, and the router index all persist one,
+    and the same reclassification risk applies to all four, not just
+    modules. The router index is the easiest of the four to miss: SKILL.md
+    Step 5b writes CEP-INDEX.md straight to disk under the resolved How-L2
+    root (e.g. "org/CEP-INDEX.md" -- a 2-component path exactly like a
+    repo_doc written directly into a pre-existing top-level directory) on
+    every single `render-index` call, not just once at the end, and that
+    write has no pending/generated lifecycle of its own the way modules
+    and repo_docs do. Skipping it here is exactly what let a resolved
+    How-L2 root fail its purity check on the very next scan even after
+    every module and repo_doc it contains was properly tracked -- the
+    router file was the one piece of real content that check couldn't
+    account for.
 
     A malformed, empty, or outside-repo_root output_path is skipped rather
     than raising -- this is a defensive read of persisted state, not a
@@ -458,6 +469,7 @@ def _settled_output_subtrees(repo_root, state):
             _consider(doc.get("output_path"))
     for interface in state.get("interfaces", []):
         _consider(interface.get("output_path"))
+    _consider((state.get("index") or {}).get("output_path"))
 
     names = set(dir_subtrees) | set(file_subtrees)
     return {
@@ -970,6 +982,7 @@ def empty_state():
         "modules": [],
         "interfaces": [],
         "repo_docs": _ensure_repo_docs({}),
+        "index": {"output_path": None, "rendered_at": None},
     }
 
 
@@ -990,6 +1003,7 @@ def load_state(path):
     state.setdefault("modules", [])
     state.setdefault("interfaces", [])
     state["repo_docs"] = _ensure_repo_docs(state.get("repo_docs"))
+    state.setdefault("index", {"output_path": None, "rendered_at": None})
     return state
 
 
@@ -1006,6 +1020,7 @@ def save_state(path, state):
         "modules": state.get("modules", []),
         "interfaces": state.get("interfaces", []),
         "repo_docs": _ensure_repo_docs(state.get("repo_docs")),
+        "index": state.get("index") or {"output_path": None, "rendered_at": None},
     }
     path.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
 
@@ -1237,6 +1252,23 @@ def mark_repo_doc_skipped(state, kind, reason):
     doc["status"] = "skipped"
     doc["skip_reason"] = reason
     return doc
+
+
+def mark_index_rendered(state, output_path):
+    """Record where `render-index` last wrote CEP-INDEX.md.
+
+    Unlike a module or repo doc, the router file has no pending/generated
+    lifecycle to gate -- SKILL.md Step 5b calls `render-index` again after
+    every single module, deliberately overwriting the same path each time
+    so the checkpoint stays current mid-run. So this just always records
+    the latest path, with no "already generated" guard. Without recording
+    it at all, the settled-output-root purity check in `scan()` never
+    learns that CEP-INDEX.md exists on disk under a resolved How-L2 output
+    root, and reports that root as impure (real, unaccounted-for content)
+    on the very next scan -- reclassifying CEP's own router file as if it
+    were unscanned application code."""
+    state["index"] = {"output_path": output_path, "rendered_at": _now_iso()}
+    return state["index"]
 
 
 def mark_interface_generated(state, interface_id, output_path):
@@ -1514,6 +1546,8 @@ def _cmd_render_index(args):
         out_path = Path(args.out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(text, encoding="utf-8")
+        mark_index_rendered(state, args.out)
+        save_state(args.state, state)
         print("wrote {}".format(out_path))
     else:
         print(text)

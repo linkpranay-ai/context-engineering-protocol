@@ -971,6 +971,39 @@ class ScanTests(unittest.TestCase):
             ids_again = {m["id"] for m in state["modules"]}
             self.assertNotIn("org/", ids_again)
 
+    def test_settled_output_root_survives_rescan_alongside_a_rendered_router_file(self):
+        # Real-world shape the synthetic fixture above misses: SKILL.md
+        # Step 5b writes CEP-INDEX.md straight to disk under the resolved
+        # How-L2 root on every `render-index` call, alongside the tracked
+        # module/repo_doc/interface drafts -- not just the drafts alone.
+        # That router file is real content sitting under "org/" that the
+        # settled-output-root purity check must also account for, or the
+        # whole directory fails purity and "org/" comes back as a pending
+        # module on the very next scan even though every module inside it
+        # was properly marked generated. This is the exact gap the fixed
+        # regression test (`test_settled_output_root_is_excluded_from_rescan`)
+        # did not cover: it never wrote a router file to disk at all, so a
+        # build of this file that dropped index tracking still passed it.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            state = ss.empty_state()
+            ss.scan(state, root, "heuristic")
+            ss.mark_generated(state, "core/", "org/core/CONTEXT.md")
+            _write(root / "org" / "core" / "CONTEXT.md", "# core")
+            ss.mark_index_rendered(state, "org/CEP-INDEX.md")
+            _write(root / "org" / "CEP-INDEX.md", "# CEP Index")
+
+            ss.scan(state, root, "heuristic")
+            ids = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids)
+
+            # SKILL.md re-renders the index after every module, so the
+            # router file keeps being (re)written between scans too.
+            ss.scan(state, root, "heuristic", rescan=True)
+            ids_again = {m["id"] for m in state["modules"]}
+            self.assertNotIn("org/", ids_again)
+
     def test_settled_output_root_from_repo_doc_excluded_from_rescan(self):
         # A repo-wide doc's output_path carries the exact same exposure as
         # a module's -- e.g. coding_standards resolved to org/docs/....
