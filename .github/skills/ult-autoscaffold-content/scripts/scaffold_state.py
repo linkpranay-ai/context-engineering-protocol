@@ -275,6 +275,30 @@ LARGE_REPO_MIN_MODULES = 8
 # flag here.
 REPO_DOC_KINDS = ("coding_standards", "testing_guidelines")
 
+# Filenames _directory_is_purely_settled_output() tolerates sitting
+# directly at the top level of an already-recognized CEP output root even
+# when their own output_path was never individually recorded in state.
+# This can never apply to a directory with no tracked output at all --
+# _directory_is_purely_settled_output() is only ever called for names
+# already present in _settled_output_subtrees()'s result, i.e. names with
+# at least one *other* genuinely tracked output_path underneath them -- so
+# an unrelated top-level directory that happens to hold a file with one of
+# these names is never at risk of being silently excluded.
+#
+# Two real gaps closed by this, both found by adversarial review of the
+# original router-file-tracking fix:
+#   - SKILL.md Step 5c's "already exists: skip it silently" branch for
+#     CODING-STANDARDS.md/TESTING-GUIDELINES.md calls no mark-* command at
+#     all, so a pre-existing repo doc's output_path is never recorded even
+#     though every other generated file is.
+#   - A TRIAGE-STATE.json written before the "index" key existed has no
+#     record of CEP-INDEX.md even though the file is already on disk, and
+#     a finished run never gets a second chance to record it: render-index
+#     is only called during generation, not on a mere resumed scan.
+_CONVENTIONAL_OUTPUT_FILENAMES = frozenset(
+    {"CEP-INDEX.md", "CODING-STANDARDS.md", "TESTING-GUIDELINES.md"}
+)
+
 
 class GraphRepoRootMismatchError(ValueError):
     """Raised when a graphify-mode graph shares ZERO top-level module names
@@ -518,14 +542,38 @@ def _directory_is_purely_settled_output(module_path, subtrees):
 
     A directory that doesn't exist on disk, or holds no files at all,
     counts as pure: there's no real content there for scan() to lose
-    either way."""
+    either way.
+
+    Two narrow, defense-in-depth tolerances sit on top of the tracked-path
+    check above, for files that were never individually recorded in state
+    at all -- see _CONVENTIONAL_OUTPUT_FILENAMES for why these are safe
+    even though nothing tracks them:
+
+    - A dot-prefixed file (".gitkeep", ".gitignore", ...) is always
+      tolerated, mirroring _prune_ignored()'s existing precedent that
+      dot-*directories* are already invisible to this whole mechanism.
+      These are inert placeholders, essentially guaranteed to exist on
+      any git-tracked repo, and never something scan() should treat as a
+      reason to reclassify a resolved output root as pending.
+
+    - A file whose name is in _CONVENTIONAL_OUTPUT_FILENAMES, sitting
+      directly at this directory's own top level (not nested deeper), is
+      tolerated too. This is deliberately narrow: it does NOT extend to
+      arbitrary untracked content like a stray "README.md", which stays a
+      real reason to fail purity, consistent with this function's whole
+      point of never silently swallowing unrelated content."""
     dirs = subtrees.get("dirs", set())
     files = subtrees.get("files", set())
+    module_path = Path(module_path).resolve()
     for f in _iter_files(module_path):
         resolved = f.resolve()
         if resolved in files:
             continue
         if any(d in resolved.parents for d in dirs):
+            continue
+        if resolved.name.startswith("."):
+            continue
+        if resolved.parent == module_path and resolved.name in _CONVENTIONAL_OUTPUT_FILENAMES:
             continue
         return False
     return True
