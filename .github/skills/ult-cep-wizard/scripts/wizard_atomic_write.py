@@ -2,18 +2,14 @@
 """wizard_atomic_write.py - atomic same-directory temp-file-plus-rename write
 utility for ult-cep-wizard (D24 §18.2b, locked).
 
-**Not called by anything yet.** Phase 0 (this build order step) registers zero
-mutating routes anywhere in wizard_server.py - the picker is browse-only (§18.7,
-§18.10), and wizard_stub_content.py only ever *previews* text, it never writes any
-of it to disk. This module exists now, ahead of its first caller, because §18.2b's
-write-path security spec is a single deliverable landing together with Phase 1's
-write endpoint (§18.10: "Gated on §18.2b's full write-path security spec ... landing
-as one deliverable together with the containment/auth test suite, not written ahead
-of or separately from it") - building the primitive now and exercising it with its
-own direct unit tests lets that later landing be "wire this in" rather than "design
-and build this from scratch under Phase-1 time pressure." **Phase 1 will be the
-first caller** - do not remove this module for looking unused; grep the repo for
-`wizard_atomic_write` before assuming it's dead code.
+**Live in production since Phase 1.** `wizard_server.py`'s `do_POST` handler wires
+`POST /api/stage` to `wizard_decision_staging.stage_decision()`, which calls
+`write_text_atomic()` directly (see `wizard_decision_staging.py`). Two further
+production callers were added since: `wizard_retrofit_apply.py` (applying a
+retrofit edit to a target file) and `wizard_retrofit_state.py` (writing
+`.gitignore` and the retrofit state JSON). Grep the repo for `write_text_atomic`
+before assuming any particular caller is the only one, or that this module is
+still unused - it is not.
 
 The core guarantee: a reader of the target path never observes a partially-written
 file. `os.replace` is atomic on both POSIX and Windows when source and destination
