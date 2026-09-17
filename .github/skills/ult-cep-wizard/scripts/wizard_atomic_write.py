@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -36,6 +37,37 @@ class AtomicWriteError(Exception):
     doesn't exist, or the underlying filesystem operation fails. Never leaves a
     partially-written file at the target path in either case (see module
     docstring)."""
+
+
+_REPLACE_RETRY_ATTEMPTS = 5
+_REPLACE_RETRY_DELAY_SECONDS = 0.05
+
+
+def _replace_with_retry(tmp_path: Path, target: Path) -> None:
+    """`os.replace` with a few short retries on `PermissionError`.
+
+    Windows-only race, harmless elsewhere: a just-written file can be held
+    open momentarily by AV/indexer scanning, so the very next `os.replace`
+    onto it (or onto the temp file about to replace it) raises
+    `PermissionError` (WinError 5) even though nothing is actually wrong.
+    This surfaced in practice as a flaky failure in a caller that replaces
+    the same target file several times in quick succession
+    (`wizard_decision_staging.stage_decision`, called repeatedly against
+    `context-layout-discovery.md`). POSIX rename has no equivalent window,
+    so this loop is a no-op there - the first attempt always succeeds. A
+    *persistent* `PermissionError` (the lock never clears) still exhausts
+    the retries and raises, same as before - this only smooths over a
+    transient race, it does not mask a real failure."""
+    last_exc: OSError | None = None
+    for attempt in range(_REPLACE_RETRY_ATTEMPTS):
+        try:
+            os.replace(tmp_path, target)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            if attempt < _REPLACE_RETRY_ATTEMPTS - 1:
+                time.sleep(_REPLACE_RETRY_DELAY_SECONDS)
+    raise last_exc
 
 
 def write_text_atomic(target_path, content: str, encoding: str = "utf-8") -> None:
@@ -60,7 +92,7 @@ def write_text_atomic(target_path, content: str, encoding: str = "utf-8") -> Non
             fh.write(content)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp_path, target)
+        _replace_with_retry(tmp_path, target)
     except OSError as exc:
         tmp_path.unlink(missing_ok=True)
         raise AtomicWriteError(f"could not atomically write '{target}': {exc}") from exc

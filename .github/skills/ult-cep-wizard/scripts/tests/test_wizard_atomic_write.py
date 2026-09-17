@@ -4,6 +4,7 @@ unittest only. Run with:
     python -m unittest discover -s scripts/tests -v
 """
 
+import os
 import sys
 import tempfile
 import unittest
@@ -62,6 +63,51 @@ class TestWriteTextAtomic(unittest.TestCase):
         content = "café — 日本語\n"
         waw.write_text_atomic(target, content)
         self.assertEqual(target.read_text(encoding="utf-8"), content)
+
+    def test_transient_windows_permission_error_on_replace_is_retried(self):
+        # Real-world failure this reproduces: CEP_RERUN_V3 issue "Windows
+        # focused suite has a fresh atomic-write failure" - repeatedly
+        # replacing the same context-layout-discovery.md target in quick
+        # succession (wizard_decision_staging.stage_decision, called once
+        # per staged decision) occasionally hit PermissionError (WinError 5)
+        # on os.replace, almost certainly AV/indexer holding a momentary
+        # handle on the file just written. A single transient PermissionError
+        # must not fail the whole write.
+        target = self.root / "flaky.md"
+        real_replace = os.replace
+        calls = {"n": 0}
+
+        def flaky_replace(src, dst):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise PermissionError(5, "Access is denied")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", side_effect=flaky_replace):
+            waw.write_text_atomic(target, "content\n")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "content\n")
+        self.assertEqual(calls["n"], 2)
+        leftovers = [p for p in self.root.iterdir() if p != target]
+        self.assertEqual(leftovers, [])
+
+    def test_persistent_permission_error_on_replace_still_fails_closed(self):
+        # The retry above must not mask a *real* lock: if PermissionError
+        # never clears, write_text_atomic must still raise AtomicWriteError,
+        # leave the target's original content untouched, and clean up the
+        # temp file - same contract as any other replace failure.
+        target = self.root / "locked.md"
+        target.write_text("original\n", encoding="utf-8")
+
+        with mock.patch(
+            "os.replace", side_effect=PermissionError(5, "Access is denied")
+        ):
+            with self.assertRaises(waw.AtomicWriteError):
+                waw.write_text_atomic(target, "attempted overwrite\n")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "original\n")
+        leftovers = [p for p in self.root.iterdir() if p != target]
+        self.assertEqual(leftovers, [])
 
 
 if __name__ == "__main__":
