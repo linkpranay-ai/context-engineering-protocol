@@ -51,10 +51,21 @@ does NOT cover the same artifact being concurrently rewritten by
 apply_confirmed()`) or by `discover_layers.run_discovery()` (reached via
 `/api/discover`), neither of which takes this lock. A `/api/stage` call
 racing a same-tick `/api/apply`/`/api/discover` call against the same
-artifact remains an open, unserialized read-merge-write window; closing it
-would mean sharing this lock across all three modules, which is deferred,
-tracked scope, not part of this fix (see `issues_v4.md`'s closure entry
-for the `/api/stage`-vs-`/api/stage` race this session closed).
+artifact remains an open, unserialized read-merge-write window. Closing it
+does NOT require reaching into `confirm_layers.py`/`discover_layers.py`
+(neither needs to import or take this lock directly): all three code paths
+already flow through `wizard_server.py`'s three HTTP handlers, each of
+which already resolves `artifact_path` before calling out, so the same
+`_lock_for_target(artifact_path)` context manager could be taken at those
+three call sites instead. The one real obstacle is that `_TARGET_LOCKS`
+currently holds plain `threading.Lock` instances, which are not reentrant -
+wrapping `_handle_api_stage`'s call to `stage_decision` in the same lock
+`stage_decision` already acquires internally would deadlock, so this would
+also need `_TARGET_LOCKS` switched to `threading.RLock`. Still a small,
+single-file change, not a three-module one; deferred as tracked scope
+because it wants its own dedicated regression test rather than being folded
+into this fix's commit (see `issues_v4.md`'s closure entry for the
+`/api/stage`-vs-`/api/stage` race this session closed).
 """
 from __future__ import annotations
 
@@ -88,7 +99,10 @@ _DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
 # under test) never contend with each other. This closes `stage_decision`-
 # vs-`stage_decision` contention only; `confirm_layers.run_confirm()` and
 # `discover_layers.run_discovery()` also rewrite this artifact and do not
-# share this lock (see module docstring's Thread-safety note).
+# share this lock. Closing that gap only needs `wizard_server.py`'s three
+# handlers to take this lock too (plus switching this dict to
+# `threading.RLock` so the nested acquisition inside `stage_decision`
+# doesn't deadlock) - see module docstring's Thread-safety note.
 _TARGET_LOCKS_GUARD = threading.Lock()
 _TARGET_LOCKS: "dict[str, threading.Lock]" = {}
 
