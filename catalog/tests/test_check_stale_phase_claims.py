@@ -73,7 +73,7 @@ class TestCheckStalePhaseClaims(unittest.TestCase):
         # not just its own regex in isolation.
         samples = {
             "future Phase": "a future Phase C freshness check can detect this",
-            "exist until Phase": "that endpoint does not exist until Phase 1",
+            "until Phase": "that endpoint does not exist until Phase 1",
             "disabled by design": "that's disabled by design until Phase C wires it up",
             "not called by anything yet": "**Not called by anything yet.** Phase 0.",
             "registers zero mutating routes": "Phase 0 registers zero mutating routes",
@@ -150,6 +150,36 @@ class TestCheckStalePhaseClaims(unittest.TestCase):
         with _captured_stdout() as out:
             code = cspc.run_check(self.root)
         self.assertEqual(code, 0)
+
+    def test_html_file_is_scanned(self):
+        # static/index.html sits in the same served-UI directory that
+        # produced one of the ten historical fix commits (6c61e2c, in its
+        # sibling wizard.js) - .html must be in scope, not just .py/.js/.md.
+        _write_and_track(
+            self.root,
+            "static/index.html",
+            "<p>this route will be the first caller once wired up</p>\n",
+        )
+        with _captured_stdout() as out:
+            code = cspc.run_check(self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("static/index.html:1:", out.getvalue())
+
+    def test_until_phase_catches_the_disabled_until_phase_shape(self):
+        # The broader "until Phase" pattern (not just "exist until Phase")
+        # exists specifically to catch 6c61e2c's shape: a feature described
+        # as disabled/gated "until Phase N", independent of the word
+        # "exist". Confirms the widened pattern actually fires on wording
+        # the narrower predecessor pattern would have missed.
+        _write_and_track(
+            self.root,
+            "module.py",
+            '"""the write endpoint stays disabled until Phase C wires it up."""\n',
+        )
+        with _captured_stdout() as out:
+            code = cspc.run_check(self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("module.py:1: [until Phase]", out.getvalue())
 
     def test_own_test_file_path_is_exempt_from_the_scan(self):
         _write_and_track(

@@ -50,8 +50,10 @@ THIS_SCRIPTS_TEST_FILE_REL = "catalog/tests/test_check_stale_phase_claims.py"
 
 # Extensions this check applies to - per the task this gate exists for:
 # stale forward-looking claims in Python/JS comments and docstrings, and in
-# markdown prose (SKILL.md files, references/, case studies).
-SCANNED_SUFFIXES = {".py", ".js", ".md"}
+# markdown prose (SKILL.md files, references/, case studies, and the
+# wizard's own served static/index.html - the same directory that produced
+# one of the ten historical fix commits, 6c61e2c, in its sibling wizard.js).
+SCANNED_SUFFIXES = {".py", ".js", ".md", ".html"}
 
 # Each pattern is calibrated against real wording removed by one of the ten
 # historical stale-phase-claim fix commits, narrowed just enough that it does
@@ -60,7 +62,10 @@ SCANNED_SUFFIXES = {".py", ".js", ".md"}
 # non-existence ("the file doesn't exist yet"). See the module docstring.
 STALE_PHASE_PATTERNS = (
     ("future Phase", re.compile(r"future phase", re.I)),
-    ("exist until Phase", re.compile(r"(doesn.?t|does not) exist until phase", re.I)),
+    # Broader than just "exist until Phase" - also catches the "disabled ...
+    # until Phase C" shape from 6c61e2c. Checked against the live tree at
+    # authoring time: zero hits outside genuinely stale wording.
+    ("until Phase", re.compile(r"until phase\b", re.I)),
     ("disabled by design", re.compile(r"disabled by design", re.I)),
     ("not called by anything yet", re.compile(r"not called by anything yet", re.I)),
     (
