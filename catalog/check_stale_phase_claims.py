@@ -20,8 +20,9 @@ in dozens of legitimate, permanently-true sentences about filesystem state
 ("the file doesn't exist yet", "an empty skeleton if it doesn't exist yet") -
 completely unrelated to a feature or phase not having landed. Every pattern
 below was checked against the current tree (`git ls-files` over `.py`/`.js`/
-`.md`) and produces zero hits - so a fresh false positive here means new prose
-actually resembles a past staleness bug, not that the checker is noisy.
+`.md`/`.html`) and produces zero hits - so a fresh false positive here means
+new prose actually resembles a past staleness bug, not that the checker is
+noisy.
 
 A handful of prior legitimate uses of nearby words (e.g. D22's "a deferred
 follow-on, not yet implemented" in `references/design-scratchpad-glossary.md`,
@@ -31,7 +32,7 @@ legitimate use ever does collide with one, mark it in place with an inline
 the pattern for everyone, mirroring `check_private_refs.py`'s own convention.
 
 Exits 1 if any un-allow-listed match is found anywhere in the tracked working
-tree's `.py`, `.js`, or `.md` files.
+tree's `.py`, `.js`, `.md`, or `.html` files.
 """
 import re
 import subprocess
@@ -84,8 +85,8 @@ ALLOW_MARKER_RE = re.compile(r"<!--\s*stale-phase-claim-allow\s*:.*-->")
 
 
 def _tracked_files(library_root: Path):
-    """Every `.py`/`.js`/`.md` file `git` tracks in `library_root` - not a
-    filesystem walk, so untracked scratch files are never in scope."""
+    """Every `.py`/`.js`/`.md`/`.html` file `git` tracks in `library_root` -
+    not a filesystem walk, so untracked scratch files are never in scope."""
     out = subprocess.run(
         ["git", "ls-files"],
         cwd=library_root,
@@ -134,10 +135,10 @@ def scan_file(path: Path):
 
 
 def run_check(library_root: Path) -> int:
-    """Scans every tracked `.py`/`.js`/`.md` file under `library_root` and
-    returns the process exit code (0 clean, 1 on any un-allow-listed match),
-    printing the same report `main()` does. Factored out so tests can point
-    this at a disposable fixture repo instead of the real one."""
+    """Scans every tracked `.py`/`.js`/`.md`/`.html` file under `library_root`
+    and returns the process exit code (0 clean, 1 on any un-allow-listed
+    match), printing the same report `main()` does. Factored out so tests can
+    point this at a disposable fixture repo instead of the real one."""
     failures = []
     files_scanned = 0
     for path in _tracked_files(library_root):
