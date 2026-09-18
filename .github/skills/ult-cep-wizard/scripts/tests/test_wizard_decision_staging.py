@@ -378,11 +378,13 @@ def _concurrency_artifact() -> str:
 
 
 class TestStageDecisionConcurrency(unittest.TestCase):
-    """Genuine multi-thread regression coverage for the v3/v4-carried-forward
-    live `/api/stage` concurrency race (`issues_v4.md`): real OS threads
-    calling `stage_decision` at (as close to) the same instant against the
-    same artifact - not two sequential calls made from a single thread,
-    which would never exercise the read-merge-write interleaving at all."""
+    """Genuine multi-thread regression coverage for the live `/api/stage`
+    read-merge-write concurrency race (reported against an unsynchronized
+    `stage_decision`, then closed by the per-target lock this module adds):
+    real OS threads calling `stage_decision` at (as close to) the same
+    instant against the same artifact - not two sequential calls made from
+    a single thread, which would never exercise the read-merge-write
+    interleaving at all."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -424,10 +426,9 @@ class TestStageDecisionConcurrency(unittest.TestCase):
         return errors
 
     def test_concurrent_stages_on_distinct_fields_never_lose_a_decision(self):
-        # Outcome-level check mirroring issues_v4.md's acceptance criteria:
-        # after N genuinely concurrent stages, every single one of them
-        # must have survived in the final artifact - none silently
-        # overwritten by another thread's whole-file write.
+        # Outcome-level check: after N genuinely concurrent stages, every
+        # single one of them must have survived in the final artifact -
+        # none silently overwritten by another thread's whole-file write.
         errors = self._stage_all_concurrently()
         self.assertEqual(errors, [], f"stage_decision raised under concurrency: {errors}")
 

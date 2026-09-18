@@ -67,8 +67,9 @@ return annotation all live in this file, not in `wizard_server.py`). Still
 a small, two-file change (this module's lock type plus `wizard_server.py`'s
 three call sites), not a three-module one; deferred as tracked scope
 because it wants its own dedicated regression test rather than being folded
-into this fix's commit (see `issues_v4.md`'s closure entry for the
-`/api/stage`-vs-`/api/stage` race this session closed).
+into this fix's commit (the `/api/stage`-vs-`/api/stage` read-merge-write
+race itself was closed this session via the per-target lock described
+above).
 """
 from __future__ import annotations
 

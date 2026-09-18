@@ -940,13 +940,19 @@ def _make_handler(ctx: _ServerContext):
             # ever having been shown to the caller - a fail-open race, not
             # just a display artifact. This closes every single-intervening-
             # write case; a caller could still be fooled by a byte-identical
-            # revert landing between this hash read and /api/apply's own
-            # freshness check (write, then write back the original bytes,
-            # both after this hash was taken) - a content-hash token can't
-            # distinguish "unchanged" from "changed and changed back", and
-            # that ambiguity is inherent to hashing bytes rather than
-            # tracking a monotonic version, not something this ordering
-            # fix can close.
+            # revert: a write landing after this hash read but before the
+            # fields read below (so the fields returned reflect that
+            # intervening state), followed at any later point - and no
+            # later than /api/apply's own freshness check re-reading the
+            # file - by a revert back to the exact bytes this hash was
+            # taken over. A content-hash token can't distinguish "unchanged"
+            # from "changed and changed back", and that ambiguity is
+            # inherent to hashing bytes rather than tracking a monotonic
+            # version, not something this ordering fix can close. (A write
+            # and revert that both land after the fields read below, with
+            # nothing shown to the caller in between, is not this case -
+            # the caller never saw the intervening state, so nothing was
+            # misrepresented.)
             artifact_hash = wizard_content_hash.hash_artifact(artifact_path)
             fields = source.read_decisions()
             self._send_json(

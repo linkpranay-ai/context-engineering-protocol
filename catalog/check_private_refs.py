@@ -23,7 +23,12 @@ is the private adversarial-review report those two fed into. `CONTEXT-ENGINEERIN
 is the pre-existing internal design scratchpad this repo was originally built against
 (ROADMAP.md item 15's "pre-1.0 citation cleanup") - already scrubbed once before; kept
 in this denylist so a future contributor can't reintroduce the same dead-end citation
-under a different feature.
+under a different feature. `issues_v1.md` through `issues_v4.md` and
+`CEP_RERUN_REPORT.md`/`CEP_RERUN_V2_REPORT.md`/`CEP_RERUN_V3_REPORT.md`/
+`CEP_RERUN_V4_REPORT.md` are the same kind of private, untracked rerun-evaluation
+working files as `ISSUES.md` - a 2026-09-18 adversarial review caught this same
+dead-end citation pattern recurring against them and the remedy was identical:
+state a finding's substance inline instead of naming the file.
 
 A handful of tracked files legitimately *name* these documents while describing the
 past cleanup itself (this docstring, `CONTRIBUTING.md`'s citation note,
@@ -67,6 +72,14 @@ DENYLIST_FILENAMES = (
     "CEP_INSTALLATION_REPORT.md",
     "CEP-HANDOFF.md",
     "CONTEXT-ENGINEERING-DESIGN.md",
+    "issues_v1.md",
+    "issues_v2.md",
+    "issues_v3.md",
+    "issues_v4.md",
+    "CEP_RERUN_REPORT.md",
+    "CEP_RERUN_V2_REPORT.md",
+    "CEP_RERUN_V3_REPORT.md",
+    "CEP_RERUN_V4_REPORT.md",
 )
 
 ALLOW_MARKER_RE = re.compile(r"<!--\s*private-ref-allow\s*:.*-->")

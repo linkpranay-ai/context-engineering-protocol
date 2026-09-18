@@ -677,71 +677,115 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     caller that later submits that hash to `/api/apply` as
     `loaded_artifact_hash` must then see the freshness check correctly
     refuse it (409), rather than committing a field value the caller was
-    never shown. See `issues_v4.md`'s "Additional fix landed during this
-    review loop" entry for the pre-fix fail-open shape this replaces:
-    hashing *after* the fields read let a same-tick concurrent write raise
-    the on-disk hash to match what the caller was about to submit, so a
-    stale set of fields could sail through /api/apply's freshness check
-    unnoticed.
+    never shown. Before this fix, hashing *after* the fields read let a
+    same-tick concurrent write raise the on-disk hash to match what the
+    caller was about to submit, so a stale set of fields could sail through
+    /api/apply's freshness check unnoticed.
+
+    The simulated concurrent write below resolves BOTH decision fields, not
+    just one, because `/api/apply` refuses any still-PENDING field
+    (`ValidationError`, 400) before it ever reaches the hash-freshness
+    check (`StaleArtifactError`, 409, checked first) - see
+    `wizard_apply.apply_confirmed`. A fixture that leaves either field
+    PENDING would return 400 regardless of hash freshness under both the
+    fixed and the reverted read order, and so could never actually
+    discriminate between them at the /api/apply call.
 
     Proven non-vacuous the same way TestStageDecisionConcurrency proves its
     own lock is not a no-op: this test exercises the real handler order
-    end-to-end through a real `/api/apply` call, not just an internal hash
-    comparison, so swapping `_handle_api_decisions`'s two read lines back to
-    the pre-fix order (fields, then hash) makes the final assertion below
-    fail (`/api/apply` would return 200, not 409) - manually verified while
-    authoring this test, then reverted.
+    end-to-end, not an internal hash comparison. Manually verified while
+    authoring this test (then reverted): swapping `_handle_api_decisions`'s
+    two read lines back to the pre-fix order (fields, then hash) makes this
+    test fail - but at the "returned hash must not match the post-race
+    on-disk state" assertion below, not at the final `/api/apply` one,
+    because under that order the hash is computed only after the simulated
+    write has already landed, so it is identical to the current on-disk
+    hash by the time this test checks it, and the test refuses to proceed
+    past that point without knowing what `/api/apply` would actually do
+    with an already-matching hash. Confirmed separately (not asserted by
+    this test, to keep that assertion's own failure message accurate): with
+    the two read lines swapped back AND this test's hash-mismatch assertion
+    removed, `/api/apply` does go on to return 200 - a legitimate-looking
+    idempotent-success response (`{"config_changed": false, "idempotent":
+    true, ...}`, since both fields resolve to their default paths and write
+    no new config key), not the 409 refusal a stale hash should draw -
+    proving the reordering fix is what stands between a caller and that
+    outcome, not merely between a caller and an assertion in this test.
     """
 
     def test_concurrent_write_between_hash_and_fields_read_is_caught_by_apply(self):
         _write_discovery_artifact(self.repo_root)
         cookie, csrf = self._authenticated_session()
-
         real_hash_artifact = ws.wizard_content_hash.hash_artifact
-        concurrent_write_content = SINGLE_DECISION_ARTIFACT.replace(
+        artifact_path = self.repo_root / "context-layout-discovery.md"
+        pre_test_hash = real_hash_artifact(artifact_path)
+
+        real_read_decisions = ws.wizard_layout_source.LayoutSource.read_decisions
+        fully_confirmed_content = SINGLE_DECISION_ARTIFACT.replace(
             "decision: PENDING   # CONFIRM: docs/reqs/ | CUSTOM: <path> | SKIP",
             "decision: CONFIRM: docs/reqs/   # CONFIRMED 2026-01-01",
+        ).replace(
+            "decision: PENDING   # CONFIRM: org/ | CUSTOM: <path> | SKIP",
+            "decision: CONFIRM: org/   # CONFIRMED 2026-01-01",
         )
 
-        def hash_then_simulate_concurrent_stage(path):
+        def read_decisions_then_simulate_concurrent_stage(self_source):
             # This runs where _handle_api_decisions calls
-            # wizard_content_hash.hash_artifact(artifact_path) - the first
-            # of its two reads, per the fix under test. Capture the hash of
-            # the still-PENDING state first, then simulate a concurrent
-            # /api/stage landing in the window before read_decisions() runs
-            # next.
-            pre_race_hash = real_hash_artifact(path)
-            _write_discovery_artifact(self.repo_root, content=concurrent_write_content)
-            return pre_race_hash
+            # source.read_decisions() - the *second* of its two reads, per
+            # the fix under test (the hash is read first, above). Capture
+            # the still-PENDING fields via the real implementation first,
+            # then simulate a concurrent /api/stage landing in the window
+            # right after this call returns, fully resolving both fields.
+            pre_race_fields = real_read_decisions(self_source)
+            _write_discovery_artifact(self.repo_root, content=fully_confirmed_content)
+            return pre_race_fields
 
         with mock.patch.object(
-            ws.wizard_content_hash,
-            "hash_artifact",
-            side_effect=hash_then_simulate_concurrent_stage,
+            ws.wizard_layout_source.LayoutSource,
+            "read_decisions",
+            new=read_decisions_then_simulate_concurrent_stage,
         ):
             resp = self._get("/api/decisions", cookie=cookie)
         self.assertEqual(resp.status, 200)
         decisions = json.loads(resp.read().decode("utf-8"))
+        current_on_disk_hash = real_hash_artifact(artifact_path)
 
-        # read_decisions() ran after the simulated write, so the fields
-        # reflect the post-race CONFIRM state...
+        # Setup-validity check, independent of read order: the simulated
+        # race must actually have changed the on-disk content, or the rest
+        # of this test would pass vacuously regardless of which order is
+        # active.
+        self.assertNotEqual(
+            pre_test_hash,
+            current_on_disk_hash,
+            "test setup bug: the simulated race didn't change the on-disk content",
+        )
+
         what_field = next(
             f for f in decisions["fields"] if f["section_title"] == WHAT_L2_TITLE
         )
-        self.assertEqual(what_field["state"], "confirmed")
-        # ...while the returned hash is the pre-race one, and therefore
-        # already stale with respect to the real on-disk artifact.
-        current_on_disk_hash = real_hash_artifact(
-            self.repo_root / "context-layout-discovery.md"
-        )
+        self.assertEqual(what_field["state"], "pending")
+
+        # The real discriminator: under the fix, the hash is read before
+        # read_decisions() triggers the simulated write, so it describes
+        # the pre-race state the fields above were paired with, not the
+        # post-race state now on disk. Reverted (fields, then hash), the
+        # hash would instead be read after read_decisions() has already
+        # triggered the write, making it identical to current_on_disk_hash
+        # here - see this class's docstring for what that lets a
+        # subsequent /api/apply call do.
         self.assertNotEqual(
             decisions["artifact_hash"],
             current_on_disk_hash,
-            "test setup bug: the simulated race didn't change the on-disk hash",
+            "the returned hash matches the current (post-race) on-disk "
+            "state, even though the fields above describe the pre-race "
+            "state - a caller could not tell this response was already "
+            "stale",
         )
 
-        # A caller trusting this hash as its /api/apply freshness token must
-        # be refused, not allowed to silently commit a field it never saw.
+        # A caller trusting this stale hash as its /api/apply freshness
+        # token must be refused (409), even though the real on-disk
+        # artifact - which /api/apply actually re-reads - is now fully
+        # resolved and would otherwise apply cleanly.
         apply_resp = self._post_json(
             "/api/apply",
             {"loaded_artifact_hash": decisions["artifact_hash"]},
