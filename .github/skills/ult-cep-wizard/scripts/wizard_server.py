@@ -132,6 +132,18 @@ STATIC_ASSETS = {
 # method's docstring (the 2026-08-31 Round-2 evaluation's finding on external (out-of-repo) retrofit-target containment).
 _EXTERNAL_ROOT_INVALID = object()
 
+# Bounds for _reject()'s pre-response body drain. A gate rejection can be
+# reached before any authentication has succeeded (Origin/session/CSRF
+# checks all call _reject on failure), so the Content-Length it reads
+# is attacker-controlled input, not a value _read_json_body has already
+# validated. _MAX_DRAINED_REJECT_BODY caps how much a single malicious or
+# misbehaving client can make this handler thread buffer in memory before
+# giving up and closing without draining; _REJECT_DRAIN_TIMEOUT_SECONDS
+# bounds how long the read may block waiting for bytes that a slow-trickle
+# or silent client may never actually send.
+_MAX_DRAINED_REJECT_BODY = 16 * 1024 * 1024  # 16 MiB
+_REJECT_DRAIN_TIMEOUT_SECONDS = 5.0
+
 
 class _ServerContext:
     """Mutable holder populated right after bind (once the real OS-assigned port is
@@ -166,19 +178,72 @@ def _make_handler(ctx: _ServerContext):
             # Drain any request body still in flight before responding. This
             # handler closes the connection after every response (the
             # stdlib default, since protocol_version is left at HTTP/1.0),
-            # and a gate rejection (Origin/session/CSRF/route-not-found) can
-            # fire before a POST body has ever been read via
-            # _read_json_body. If that body is still larger than the OS
-            # socket buffer and the client is mid-write when this close
-            # happens, the client can see a spurious connection reset
-            # (observed as ConnectionAbortedError on Windows) instead of
-            # this response, even though the rejection has nothing to do
-            # with the body. Reading it out first (same Content-Length
-            # handling as _read_json_body) avoids racing the client's write
-            # against our close.
-            length = int(self.headers.get("Content-Length", 0) or 0)
-            if length:
-                self.rfile.read(length)
+            # and any _reject call reached from do_POST's own gates (Origin/
+            # session/CSRF, or an unrecognized route) can fire before a POST
+            # body has ever been read via _read_json_body. If that body is
+            # still larger than the OS socket buffer and the client is
+            # mid-write when this close happens, the client can see a
+            # spurious connection reset (observed as ConnectionAbortedError
+            # on Windows) instead of this response, even though the
+            # rejection has nothing to do with the body. Reading it out
+            # first (same Content-Length handling as _read_json_body)
+            # avoids racing the client's write against our close. Every
+            # other _reject call site (e.g. the exchange/static/docs 401s
+            # and 404s) is reached from do_GET, which never has a body to
+            # drain in the first place.
+            #
+            # do_POST's own gate failures land here before _read_json_body
+            # ever gets called, so on those paths the header is
+            # attacker-controlled input, not a value any earlier check has
+            # already validated - unlike _read_json_body's post-auth read
+            # of the same header, this parsing must be defensive:
+            #   - a non-numeric value (e.g. "abc") must not crash this
+            #     method via an uncaught ValueError, which would otherwise
+            #     leave the client with no response at all;
+            #   - a negative value (e.g. "-1") must not reach
+            #     self.rfile.read(), whose contract for a negative size is
+            #     "read to EOF" - on a connection the client intends to
+            #     keep open, that blocks forever;
+            #   - draining is capped at _MAX_DRAINED_REJECT_BODY so a
+            #     declared-huge Content-Length can't make this thread
+            #     buffer unbounded memory (a body larger than the cap is
+            #     only partially drained - the client may still observe a
+            #     reset instead of this response for the un-drained
+            #     remainder, but that's the pre-existing race this fix
+            #     narrows, not a new failure mode);
+            #   - the read is bounded by a temporary socket timeout so a
+            #     client that declares a length and then sends less than
+            #     that (or nothing) cannot hang this handler thread
+            #     indefinitely; the previous timeout is always restored
+            #     afterward, and a timeout/OSError here just means we skip
+            #     the drain and send the response anyway.
+            #
+            # This drain assumes the body is still unread: if a call site
+            # reached _reject() after _read_json_body() had already consumed
+            # it from the socket for the same request, this second read
+            # would find nothing left to drain and just idle out the full
+            # _REJECT_DRAIN_TIMEOUT_SECONDS before sending the response - a
+            # needless delay, not a correctness bug (the timeout above still
+            # bounds it), but worth avoiding. No current call site does
+            # this: do_POST's own gates all run before routing to a
+            # handler, so they precede any _read_json_body() call; every
+            # handler that does call _read_json_body() does so as its first
+            # statement and never calls _reject() afterward in the same
+            # request. A future POST handler that reads its body and only
+            # then calls _reject() would reintroduce this idle delay.
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                length = 0
+            if length > 0:
+                previous_timeout = self.connection.gettimeout()
+                self.connection.settimeout(_REJECT_DRAIN_TIMEOUT_SECONDS)
+                try:
+                    self.rfile.read(min(length, _MAX_DRAINED_REJECT_BODY))
+                except OSError:
+                    pass
+                finally:
+                    self.connection.settimeout(previous_timeout)
             body = message.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "text/plain; charset=utf-8")

@@ -18,6 +18,7 @@ test_wizard_server.py`) matters more here than the few lines saved.
 import json
 import re
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -322,18 +323,19 @@ class TestUnknownRoute(WizardServerTestCase):
 
 
 class TestRejectDrainsRequestBody(WizardServerTestCase):
-    """`_reject()` backs every Origin/session/CSRF/route-not-found gate and must
-    drain any request body still in flight before responding - see its own
-    docstring in wizard_server.py. This server never overrides
+    """`_reject()` backs every Origin/session/CSRF/route-not-found gate and
+    must drain any request body still in flight before responding - see its
+    own docstring in wizard_server.py. This server never overrides
     protocol_version, so it stays at the stdlib HTTP/1.0 default and closes
     the connection after every response; a gate rejection fires before
     _read_json_body ever reads the declared Content-Length, so an undrained
     body left in the kernel receive buffer at close time can make the OS
     send a raw connection reset instead of a graceful close (observed in the
     wild as ConnectionAbortedError on Windows, intermittently, even for
-    small bodies - the race is timing-dependent, not size-dependent). A body
-    comfortably larger than any platform's default socket receive buffer
-    makes that race reproducible on demand rather than relying on the same
+    small bodies - the underlying race is about close/write timing, not body
+    size, so it can in principle happen at any size). A body comfortably
+    larger than any platform's default socket receive buffer just makes that
+    same race reproducible on demand instead of depending on the same
     timing window that made the original failure intermittent: reverting
     the drain in _reject and running this test repeatedly reliably fails it
     with a connection error, not just occasionally."""
@@ -342,8 +344,82 @@ class TestRejectDrainsRequestBody(WizardServerTestCase):
         cookie = self._authenticated_cookie()
         large_payload = {"padding": "x" * 8_000_000}
         for _ in range(10):
-            resp = self._post_json("/api/discover", large_payload, cookie=cookie)
+            resp = self._post_json(
+                "/api/discover", large_payload, cookie=cookie
+            )
             self.assertEqual(resp.status, 403)
+
+
+class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
+    """A 2026-09 follow-up review on TestRejectDrainsRequestBody's drain fix
+    found that _reject()'s Content-Length parsing is reachable *pre*-
+    authentication, at every Origin/session/CSRF/route-not-found gate - so
+    unlike _read_json_body's own copy of this same parsing pattern (only
+    reached after all three gates pass), the header here is attacker-
+    controlled input, not a value any earlier check has vetted. Three
+    distinct failure modes, all needing a raw socket to construct (urllib
+    always computes a correct Content-Length itself, so _post_json's
+    helper cannot put a malformed one on the wire):
+
+    - a non-numeric value (e.g. "abc") must not crash _reject via an
+      uncaught ValueError - that would propagate out of do_POST, and the
+      threaded request handler's default error handling sends no response
+      at all, leaving the client with a bare closed connection instead of
+      even the rejection it was about to get;
+    - a negative value (e.g. "-1") is truthy, so a bare `if length:` guard
+      lets it through to self.rfile.read(-1), whose contract for a
+      negative size is "read to EOF" - on a connection the client has no
+      intention of closing, that blocks the handler thread forever;
+    - a body that is honestly declared but only partially sent (a stalled
+      or slow-trickle client) must not be able to block the handler thread
+      indefinitely either - the drain read needs its own bounded timeout,
+      separate from whatever timeout the rest of the handler uses, so a
+      client that never finishes writing still gets the rejection instead
+      of tying up a thread forever.
+
+    Each request below is a POST with no Origin/Referer header, so it
+    fails wizard_originhost's very first do_POST gate - no cookie or CSRF
+    token is needed to reach _reject this way. Reverting _reject to the
+    version without this hardening (guard changed back to `if length:`,
+    the int() parse unwrapped, the settimeout/finally removed) makes the
+    negative- and partial-body cases here hang until this test's own
+    client-side socket timeout fires - a clear, reliable failure, not a
+    flaky one - and makes the non-numeric case get back an empty response
+    instead of a 403."""
+
+    def _raw_reject_request(self, content_length_header, body=b"", client_timeout=5.0):
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=client_timeout)
+        try:
+            request_line = (
+                "POST /api/discover HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{self.port}\r\n"
+                f"Content-Length: {content_length_header}\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+            ).encode("ascii")
+            sock.sendall(request_line + body)
+            chunks = []
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            sock.close()
+
+    def test_non_numeric_content_length_still_gets_the_403_not_a_dropped_connection(self):
+        response = self._raw_reject_request("abc", body=b"irrelevant")
+        self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
+
+    def test_negative_content_length_still_gets_the_403_not_a_hang(self):
+        response = self._raw_reject_request("-1", body=b"irrelevant")
+        self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
+
+    def test_declared_but_unsent_body_gets_the_403_after_the_drain_timeout_not_a_hang(self):
+        with mock.patch.object(ws, "_REJECT_DRAIN_TIMEOUT_SECONDS", 0.3):
+            response = self._raw_reject_request("1000", body=b"only ten b")
+        self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
 
 
 class TestApiStatusRequiresSession(WizardServerTestCase):
@@ -707,9 +783,11 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     returned hash describing the file's already-advanced *post-write*
     state - the same hash `/api/apply`'s own freshness check would
     independently recompute - even though the fields paired with it were
-    read *before* that write. The freshness check only compares hashes, so
-    it saw no drift and let that now-stale set of fields sail through
-    unnoticed.
+    read *before* that write and so describe an older state than what a
+    caller approving that hash would actually get committed. The freshness
+    check only compares hashes, so it saw no drift: it had no way to know
+    the caller was shown one state while a different, newer state was the
+    one about to be confirmed.
 
     The simulated concurrent write below resolves BOTH decision fields, not
     just one, because `wizard_apply.apply_confirmed` checks hash freshness
@@ -747,14 +825,21 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     write - `{"config_changed": true, "idempotent": false, "messages":
     ["Confirmed 2 field(s), wrote 2 config key(s)."], ...}`, with
     `context-config.yaml` created on disk - a full, silent success rather
-    than any refusal, even though the fields it just committed are the same
-    stale ones read before the concurrent write landed. That is precisely
-    the danger the reordering fix closes: not a stale hash (the submitted
-    hash matches the on-disk file throughout, under the reverted order),
-    but a stale field/hash *pairing* that a hash comparison alone can no
-    longer catch once the hash itself has already caught up - proving the
-    reordering fix is what stands between a caller and that fail-open
-    commit, not merely between a caller and an assertion in this test.
+    than any refusal. What actually gets committed there is the CURRENT
+    on-disk state at apply time - the resolved CONFIRM values from the
+    simulated concurrent write - not the still-PENDING fields the caller
+    actually saw in the `/api/decisions` response that hash came from.
+    That is precisely the danger the reordering fix closes: not a stale
+    hash (the submitted hash matches the on-disk file throughout, under
+    the reverted order), but a stale *picture* of the state, paired with a
+    hash that, because of the bug, had already caught up to a write the
+    caller never reviewed. A hash comparison alone cannot catch that,
+    since the hash and the current file agree with each other; only
+    reading the hash before the fields, as the fix does, keeps the hash
+    tied to the same moment as what the caller was actually shown -
+    proving the reordering fix is what stands between a caller and that
+    fail-open commit, not merely between a caller and an assertion in
+    this test.
     """
 
     def test_concurrent_write_between_hash_and_fields_read_is_caught_by_apply(self):
@@ -947,11 +1032,13 @@ class TestApplyRoute(WizardServerTestCase):
 
     def test_omitted_artifact_hash_is_409_not_a_bespoke_400(self):
         # Covers the claim in _handle_api_apply's own comment: an omitted
-        # loaded_artifact_hash key (not merely an explicit null/wrong
-        # string, which the two tests above already cover) is deliberately
-        # not given its own missing-field check and instead falls through
-        # to apply_confirmed as None, which naturally fails the freshness
-        # check the same way any other mismatch does.
+        # loaded_artifact_hash key is deliberately not given its own
+        # missing-field check and instead falls through to
+        # apply_confirmed as None, which naturally fails the freshness
+        # check the same way any other mismatch does (the test above
+        # covers a present-but-wrong string; body.get() collapses an
+        # omitted key and an explicit null to the same None, so that
+        # case takes the identical code path this test already proves).
         _write_discovery_artifact(self.repo_root)
         cookie, csrf = self._authenticated_session()
         resp = self._post_json("/api/apply", {}, cookie=cookie, csrf=csrf)
