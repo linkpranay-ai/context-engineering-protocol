@@ -61,8 +61,11 @@ three call sites instead. The one real obstacle is that `_TARGET_LOCKS`
 currently holds plain `threading.Lock` instances, which are not reentrant -
 wrapping `_handle_api_stage`'s call to `stage_decision` in the same lock
 `stage_decision` already acquires internally would deadlock, so this would
-also need `_TARGET_LOCKS` switched to `threading.RLock`. Still a small,
-single-file change, not a three-module one; deferred as tracked scope
+also need `_TARGET_LOCKS`'s values switched to `threading.RLock` (here, in
+this module - the dict, its type annotation, and `_lock_for_target`'s
+return annotation all live in this file, not in `wizard_server.py`). Still
+a small, two-file change (this module's lock type plus `wizard_server.py`'s
+three call sites), not a three-module one; deferred as tracked scope
 because it wants its own dedicated regression test rather than being folded
 into this fix's commit (see `issues_v4.md`'s closure entry for the
 `/api/stage`-vs-`/api/stage` race this session closed).
