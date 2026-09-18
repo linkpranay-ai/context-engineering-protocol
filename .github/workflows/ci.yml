@@ -45,6 +45,9 @@ jobs:
       - name: Check for citations of private, unpublished documents
         run: python catalog/check_private_refs.py
 
+      - name: Check for stale forward-looking phase claims (e.g. "future Phase", "disabled by design")
+        run: python catalog/check_stale_phase_claims.py
+
       - name: Check NOTICE is up to date with adapted_from frontmatter
         run: python catalog/generate_notice.py --check
 
