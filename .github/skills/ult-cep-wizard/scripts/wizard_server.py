@@ -938,7 +938,15 @@ def _make_handler(ctx: _ServerContext):
             # *newer* state than the fields the caller actually saw, so a
             # same-tick write could pass /api/apply's freshness check without
             # ever having been shown to the caller - a fail-open race, not
-            # just a display artifact.
+            # just a display artifact. This closes every single-intervening-
+            # write case; a caller could still be fooled by a byte-identical
+            # revert landing between this hash read and /api/apply's own
+            # freshness check (write, then write back the original bytes,
+            # both after this hash was taken) - a content-hash token can't
+            # distinguish "unchanged" from "changed and changed back", and
+            # that ambiguity is inherent to hashing bytes rather than
+            # tracking a monotonic version, not something this ordering
+            # fix can close.
             artifact_hash = wizard_content_hash.hash_artifact(artifact_path)
             fields = source.read_decisions()
             self._send_json(
