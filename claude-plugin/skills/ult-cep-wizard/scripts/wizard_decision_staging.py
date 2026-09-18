@@ -44,6 +44,17 @@ genuinely concurrent calls against the same artifact - the shape
 POST `/api/stage` at once - can never both read the same pre-write text
 and clobber each other's change. Concurrent calls against *different*
 resolved paths never contend.
+
+This lock covers only `stage_decision`-vs-`stage_decision` contention. It
+does NOT cover the same artifact being concurrently rewritten by
+`confirm_layers.run_confirm()` (reached via `/api/apply` -> `wizard_apply.
+apply_confirmed()`) or by `discover_layers.run_discovery()` (reached via
+`/api/discover`), neither of which takes this lock. A `/api/stage` call
+racing a same-tick `/api/apply`/`/api/discover` call against the same
+artifact remains an open, unserialized read-merge-write window; closing it
+would mean sharing this lock across all three modules, which is deferred,
+tracked scope, not part of this fix (see `issues_v4.md`'s closure entry
+for the `/api/stage`-vs-`/api/stage` race this session closed).
 """
 from __future__ import annotations
 
@@ -74,9 +85,10 @@ _DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
 # call's change lost the write race). One `threading.Lock` per resolved
 # target path, created lazily under a short-lived guard lock so unrelated
 # artifacts (different repos/wizard instances sharing a process, e.g.
-# under test) never contend with each other. `stage_decision` is the only
-# writer of this artifact (see module docstring), so serializing here is
-# sufficient - no other code path rewrites `context-layout-discovery.md`.
+# under test) never contend with each other. This closes `stage_decision`-
+# vs-`stage_decision` contention only; `confirm_layers.run_confirm()` and
+# `discover_layers.run_discovery()` also rewrite this artifact and do not
+# share this lock (see module docstring's Thread-safety note).
 _TARGET_LOCKS_GUARD = threading.Lock()
 _TARGET_LOCKS: "dict[str, threading.Lock]" = {}
 

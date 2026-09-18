@@ -1086,6 +1086,16 @@ def _make_handler(ctx: _ServerContext):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
 
+            # This hash is computed after stage_decision's lock has already
+            # been released, so a same-tick concurrent write to this
+            # artifact (another /api/stage call, or /api/apply's own
+            # confirm_layers.run_confirm rewrite) can land in between and be
+            # reflected in the hash this response returns. A caller that
+            # then uses this hash as loaded_artifact_hash for /api/apply
+            # would pass that freshness check without having seen the other
+            # write - the same residual cross-endpoint race documented in
+            # wizard_decision_staging.py's Thread-safety note, not
+            # introduced or closed by this response.
             self._send_json(
                 HTTPStatus.OK,
                 {"staged": True, "artifact_hash": wizard_content_hash.hash_artifact(artifact_path)},
