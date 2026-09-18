@@ -683,17 +683,25 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     /api/apply's freshness check unnoticed.
 
     The simulated concurrent write below resolves BOTH decision fields, not
-    just one, because `/api/apply` refuses any still-PENDING field
-    (`ValidationError`, 400) before it ever reaches the hash-freshness
-    check (`StaleArtifactError`, 409, checked first) - see
-    `wizard_apply.apply_confirmed`. A fixture that leaves either field
-    PENDING would return 400 regardless of hash freshness under both the
-    fixed and the reverted read order, and so could never actually
-    discriminate between them at the /api/apply call.
+    just one, because `wizard_apply.apply_confirmed` checks hash freshness
+    (`StaleArtifactError`, 409) BEFORE it checks that every field is
+    resolved (`ValidationError`, 400) - see `apply_confirmed`'s own
+    ordering. A fixture that left a field PENDING would still discriminate
+    fixed-vs-reverted read order at this test's final `/api/apply` call
+    (409 either way under the fix; 409-vs-400 under the revert, since a
+    fresh-looking hash would then reach the resolved-fields check and find
+    one still PENDING) - but only as a *different refusal*. Resolving both
+    fields instead makes the reverted order's outcome a full, silent
+    *success* (a real `context-config.yaml` write the caller never saw
+    coming), which is the actual failure mode this fix closes and the
+    stronger thing worth proving here.
 
     Proven non-vacuous the same way TestStageDecisionConcurrency proves its
-    own lock is not a no-op: this test exercises the real handler order
-    end-to-end, not an internal hash comparison. Manually verified while
+    own lock is not a no-op: this test drives the real handler through a
+    real HTTP request rather than calling an internal function directly,
+    and its discriminating assertion compares the handler's own JSON
+    response against the real on-disk state, not a value it computed
+    itself. Manually verified while
     authoring this test (then reverted): swapping `_handle_api_decisions`'s
     two read lines back to the pre-fix order (fields, then hash) makes this
     test fail - but at the "returned hash must not match the post-race
@@ -705,12 +713,13 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     with an already-matching hash. Confirmed separately (not asserted by
     this test, to keep that assertion's own failure message accurate): with
     the two read lines swapped back AND this test's hash-mismatch assertion
-    removed, `/api/apply` does go on to return 200 - a legitimate-looking
-    idempotent-success response (`{"config_changed": false, "idempotent":
-    true, ...}`, since both fields resolve to their default paths and write
-    no new config key), not the 409 refusal a stale hash should draw -
-    proving the reordering fix is what stands between a caller and that
-    outcome, not merely between a caller and an assertion in this test.
+    removed, `/api/apply` does go on to return 200 and commit a real config
+    write - `{"config_changed": true, "idempotent": false, "messages":
+    ["Confirmed 2 field(s), wrote 2 config key(s)."], ...}`, with
+    `context-config.yaml` created on disk - not the 409 refusal a stale
+    hash should draw, proving the reordering fix is what stands between a
+    caller and that fail-open commit, not merely between a caller and an
+    assertion in this test.
     """
 
     def test_concurrent_write_between_hash_and_fields_read_is_caught_by_apply(self):
@@ -721,12 +730,20 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
         pre_test_hash = real_hash_artifact(artifact_path)
 
         real_read_decisions = ws.wizard_layout_source.LayoutSource.read_decisions
-        fully_confirmed_content = SINGLE_DECISION_ARTIFACT.replace(
+        # Shaped like a real /api/stage write (see
+        # wizard_decision_staging.format_decision_line): the original
+        # grammar comment is preserved verbatim, not replaced with a
+        # CONFIRMED stamp - only confirm_layers.stamp_field (reached via
+        # /api/apply, never /api/stage) writes that stamp. Using the real
+        # stamp here would make confirm_layers treat both fields as
+        # already_confirmed and short-circuit to a "Nothing to confirm"
+        # no-op, masking the actual fail-open commit this test proves.
+        staged_content = SINGLE_DECISION_ARTIFACT.replace(
             "decision: PENDING   # CONFIRM: docs/reqs/ | CUSTOM: <path> | SKIP",
-            "decision: CONFIRM: docs/reqs/   # CONFIRMED 2026-01-01",
+            "decision: CONFIRM: docs/reqs/   # CONFIRM: docs/reqs/ | CUSTOM: <path> | SKIP",
         ).replace(
             "decision: PENDING   # CONFIRM: org/ | CUSTOM: <path> | SKIP",
-            "decision: CONFIRM: org/   # CONFIRMED 2026-01-01",
+            "decision: CONFIRM: org/   # CONFIRM: org/ | CUSTOM: <path> | SKIP",
         )
 
         def read_decisions_then_simulate_concurrent_stage(self_source):
@@ -737,7 +754,7 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
             # then simulate a concurrent /api/stage landing in the window
             # right after this call returns, fully resolving both fields.
             pre_race_fields = real_read_decisions(self_source)
-            _write_discovery_artifact(self.repo_root, content=fully_confirmed_content)
+            _write_discovery_artifact(self.repo_root, content=staged_content)
             return pre_race_fields
 
         with mock.patch.object(

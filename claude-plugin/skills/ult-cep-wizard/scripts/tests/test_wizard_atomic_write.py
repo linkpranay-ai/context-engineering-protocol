@@ -65,9 +65,9 @@ class TestWriteTextAtomic(unittest.TestCase):
         self.assertEqual(target.read_text(encoding="utf-8"), content)
 
     def test_transient_windows_permission_error_on_replace_is_retried(self):
-        # Real-world failure this reproduces: CEP_RERUN_V3 issue "Windows
-        # focused suite has a fresh atomic-write failure" - repeatedly
-        # replacing the same context-layout-discovery.md target in quick
+        # Real-world failure this reproduces: a fresh Windows-only
+        # atomic-write failure observed during a product-focused rerun -
+        # repeatedly replacing the same context-layout-discovery.md target in quick
         # succession (wizard_decision_staging.stage_decision, called once
         # per staged decision) occasionally hit PermissionError (WinError 5)
         # on os.replace, almost certainly AV/indexer holding a momentary

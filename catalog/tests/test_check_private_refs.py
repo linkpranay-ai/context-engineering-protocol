@@ -114,11 +114,12 @@ class TestCheckPrivateRefs(unittest.TestCase):
         self.assertIn("test_something_else.py:1:", out.getvalue())
 
     def test_other_denylisted_filenames_are_each_caught(self):
-        for name in (
-            "CEP_INSTALLATION_REPORT.md",
-            "CEP-HANDOFF.md",
-            "CONTEXT-ENGINEERING-DESIGN.md",
-        ):
+        # ISSUES.md gets its own dedicated coverage above (allow-marker,
+        # untracked-file, sibling-file cases); every other denylisted name
+        # just needs the same plain single-line-citation check, so iterate
+        # the real list rather than a hand-copied subset that silently
+        # stops growing when the list does.
+        for name in [n for n in cpr.DENYLIST_FILENAMES if n != "ISSUES.md"]:
             with self.subTest(name=name):
                 root = Path(tempfile.mkdtemp())
                 try:
