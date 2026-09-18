@@ -13,6 +13,8 @@ a paraphrase that could silently drift from them.
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -355,6 +357,124 @@ class TestStageDecisionMultiCandidate(unittest.TestCase):
         text = self._reread()
         self.assertIn("include_roots_decision: ADD: vendor/spec-a/   # ADD: vendor/spec-a/ | SKIP", text)
         self.assertIn("include_roots_decision: PENDING   # ADD: vendor/spec-b/ | SKIP", text)
+
+
+CONCURRENCY_FIELD_COUNT = 8
+
+
+def _concurrency_artifact() -> str:
+    """`CONCURRENCY_FIELD_COUNT` independent single-candidate sections, one
+    PENDING `decision:` each, so `CONCURRENCY_FIELD_COUNT` threads can each
+    stage a distinct field in the same artifact without hitting the
+    ambiguous-candidate or already-staged refusals - the only thing under
+    test here is the read-merge-write race, not those unrelated checks."""
+    sections = "\n".join(
+        f"## Concurrency field {i} - synthetic test section\n"
+        "**Status:** enabled by default.\n\n"
+        f"    decision: PENDING   # CONFIRM: target-{i}/ | SKIP\n"
+        for i in range(CONCURRENCY_FIELD_COUNT)
+    )
+    return f"# Context Layout Discovery - test-repo\n\n{sections}"
+
+
+class TestStageDecisionConcurrency(unittest.TestCase):
+    """Genuine multi-thread regression coverage for the v3/v4-carried-forward
+    live `/api/stage` concurrency race (`issues_v4.md`): real OS threads
+    calling `stage_decision` at (as close to) the same instant against the
+    same artifact - not two sequential calls made from a single thread,
+    which would never exercise the read-merge-write interleaving at all."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _install_ult_repo_layout(self.root)
+        self.artifact_path = _write_artifact(self.root, _concurrency_artifact())
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _reread(self):
+        return self.artifact_path.read_text(encoding="utf-8")
+
+    def _stage_all_concurrently(self):
+        """Starts `CONCURRENCY_FIELD_COUNT` threads, each staging a
+        different field, released together via a `Barrier` so their
+        `stage_decision` calls genuinely overlap rather than merely being
+        scheduled close together. Returns the list of `(index, exception)`
+        pairs for any thread whose call raised."""
+        barrier = threading.Barrier(CONCURRENCY_FIELD_COUNT)
+        errors = []
+
+        def worker(i):
+            try:
+                barrier.wait(timeout=5)
+                wds.stage_decision(
+                    self.root, self.artifact_path,
+                    f"Concurrency field {i} - synthetic test section",
+                    "decision", "CONFIRM",
+                )
+            except Exception as exc:  # pragma: no cover - surfaced via assertion below
+                errors.append((i, exc))
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(CONCURRENCY_FIELD_COUNT)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        return errors
+
+    def test_concurrent_stages_on_distinct_fields_never_lose_a_decision(self):
+        # Outcome-level check mirroring issues_v4.md's acceptance criteria:
+        # after N genuinely concurrent stages, every single one of them
+        # must have survived in the final artifact - none silently
+        # overwritten by another thread's whole-file write.
+        errors = self._stage_all_concurrently()
+        self.assertEqual(errors, [], f"stage_decision raised under concurrency: {errors}")
+
+        text = self._reread()
+        for i in range(CONCURRENCY_FIELD_COUNT):
+            self.assertIn(
+                f"decision: CONFIRM: target-{i}/   # CONFIRM: target-{i}/ | SKIP",
+                text,
+                f"field {i}'s concurrently-staged decision was lost - "
+                "read-merge-write race reproduced",
+            )
+        # No field regressed back to (or stayed) PENDING either - a strict
+        # count of survivors that a set-membership check alone could miss
+        # if two writes happened to collide onto the same target line.
+        self.assertEqual(text.count("decision: PENDING"), 0)
+
+    def test_critical_section_is_mutually_exclusive_under_real_concurrency(self):
+        """Proves the actual fix mechanism, not just its outcome: instruments
+        the per-target lock's critical section with a probe that would
+        observe more than one call active at once if the lock ever failed
+        to serialize. The probe sleeps while "active" so that even under
+        adverse GIL scheduling, a real synchronization failure has an ample
+        window to be observed rather than getting lucky."""
+        state = {"active": 0, "max_active": 0}
+        state_lock = threading.Lock()
+
+        def probe():
+            with state_lock:
+                state["active"] += 1
+                state["max_active"] = max(state["max_active"], state["active"])
+            time.sleep(0.05)
+            with state_lock:
+                state["active"] -= 1
+
+        original_probe = wds._race_window_probe
+        wds._race_window_probe = probe
+        try:
+            errors = self._stage_all_concurrently()
+        finally:
+            wds._race_window_probe = original_probe
+
+        self.assertEqual(errors, [], f"stage_decision raised under concurrency: {errors}")
+        self.assertEqual(
+            state["max_active"], 1,
+            "two stage_decision calls executed the read-merge-write critical "
+            "section at the same time - the per-target lock failed to serialize",
+        )
 
 
 if __name__ == "__main__":

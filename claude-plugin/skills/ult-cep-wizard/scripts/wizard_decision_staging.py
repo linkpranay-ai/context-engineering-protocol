@@ -36,12 +36,21 @@ the same way it truncates `confirm_layers.set_scalar`'s inline YAML comment),
 and the resolved path must sit inside `repo_root` -
 `wizard_containment.check_containment` is reused directly rather than
 reimplementing containment a second time.
+
+Thread-safety (2026-09-18): `stage_decision`'s read-merge-write is
+serialized per resolved `artifact_path` (see `_lock_for_target`) so two
+genuinely concurrent calls against the same artifact - the shape
+`wizard_server.py`'s `ThreadingHTTPServer` produces when two browser tabs
+POST `/api/stage` at once - can never both read the same pre-write text
+and clobber each other's change. Concurrent calls against *different*
+resolved paths never contend.
 """
 from __future__ import annotations
 
 import importlib
 import re
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -55,6 +64,42 @@ class DecisionStagingError(Exception):
 
 
 _DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
+
+# Per-target-path serialization for stage_decision()'s read-merge-write
+# (2026-09-18 fix for the v3/v4-carried-forward live `/api/stage`
+# concurrency race - `wizard_server.py` serves each request on its own
+# thread via `ThreadingHTTPServer`, so two genuinely concurrent stages
+# against the same artifact could both read the same pre-write text and
+# then each write a whole-file replacement, silently dropping whichever
+# call's change lost the write race). One `threading.Lock` per resolved
+# target path, created lazily under a short-lived guard lock so unrelated
+# artifacts (different repos/wizard instances sharing a process, e.g.
+# under test) never contend with each other. `stage_decision` is the only
+# writer of this artifact (see module docstring), so serializing here is
+# sufficient - no other code path rewrites `context-layout-discovery.md`.
+_TARGET_LOCKS_GUARD = threading.Lock()
+_TARGET_LOCKS: "dict[str, threading.Lock]" = {}
+
+
+def _lock_for_target(artifact_path) -> threading.Lock:
+    key = str(Path(artifact_path).resolve())
+    with _TARGET_LOCKS_GUARD:
+        lock = _TARGET_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _TARGET_LOCKS[key] = lock
+        return lock
+
+
+def _race_window_probe() -> None:
+    """No-op in production, called once per `stage_decision` call right
+    after the per-target lock is acquired (i.e. from inside the critical
+    section it protects). Tests that need to prove two concurrent
+    `stage_decision` calls never execute the read-merge-write section at
+    the same time monkeypatch this to detect (and fail on) re-entrancy -
+    see `TestStageDecisionConcurrency` in test_wizard_decision_staging.py.
+    Deliberately not a `no-op if not testing` flag check - a bare no-op
+    call costs nothing worth branching around."""
 
 
 def _find_repo_layout_scripts_dir(repo_root) -> Path:
@@ -186,96 +231,106 @@ def stage_decision(repo_root, artifact_path, section_title, field_key, verb,
     Writes via `wizard_atomic_write.write_text_atomic` - this module's first
     production caller. Returns nothing; raises `DecisionStagingError` on any
     refusal.
+
+    The read-merge-write below runs under a per-target lock (see
+    `_lock_for_target`) so two genuinely concurrent calls against the same
+    `artifact_path` (e.g. two browser tabs staging different fields at once
+    through `wizard_server.py`'s threaded `/api/stage` handler) serialize
+    instead of racing: the second call's read always observes the first
+    call's write, so neither staged decision is silently dropped.
     """
     cl = _import_confirm_layers(repo_root)
     artifact_path = Path(artifact_path)
     if not artifact_path.exists():
         raise DecisionStagingError(f"{artifact_path} does not exist")
-    text = artifact_path.read_text(encoding="utf-8")
-    lines, fields = cl.parse_artifact(text)
 
-    candidates = [f for f in fields if f.section_title == section_title and f.key == field_key]
-    if not candidates:
-        raise DecisionStagingError(
-            f"no {field_key!r} field found in section {section_title!r}"
-        )
-    if len(candidates) > 1:
-        if line_no is None:
-            lines_desc = ", ".join(str(f.line_no + 1) for f in candidates)
+    with _lock_for_target(artifact_path):
+        _race_window_probe()
+        text = artifact_path.read_text(encoding="utf-8")
+        lines, fields = cl.parse_artifact(text)
+
+        candidates = [f for f in fields if f.section_title == section_title and f.key == field_key]
+        if not candidates:
             raise DecisionStagingError(
-                f"{len(candidates)} {field_key!r} fields exist in section "
-                f"{section_title!r} (lines {lines_desc}) - pass line_no to pick one"
+                f"no {field_key!r} field found in section {section_title!r}"
             )
-        matched = [f for f in candidates if f.line_no == line_no]
-        if not matched:
-            raise DecisionStagingError(
-                f"no {field_key!r} field at line {line_no + 1} in section {section_title!r}"
-            )
-        field = matched[0]
-    else:
-        field = candidates[0]
-        if line_no is not None and field.line_no != line_no:
-            raise DecisionStagingError(
-                f"line_no {line_no + 1} does not match the only {field_key!r} field "
-                f"in section {section_title!r} (found at line {field.line_no + 1})"
-            )
-
-    if field.comment and cl.CONFIRMED_STAMP_RE.match(field.comment):
-        raise DecisionStagingError(
-            f"line {field.line_no + 1} is already CONFIRMED - cannot re-stage a "
-            f"committed field"
-        )
-    if field.raw_value.strip() != "PENDING":
-        raise DecisionStagingError(
-            f"line {field.line_no + 1} is already staged as "
-            f"{field.raw_value.strip()!r} - re-stage explicitly if you want to change it"
-        )
-    if not field.comment:
-        raise DecisionStagingError(
-            f"line {field.line_no + 1} has no grammar comment to stage against"
-        )
-
-    allowed = cl.parse_comment_clauses(field.comment)
-    if verb not in allowed:
-        raise DecisionStagingError(
-            f"{verb!r} is not offered on line {field.line_no + 1} "
-            f"(offered: {', '.join(sorted(allowed))})"
-        )
-
-    default_arg = allowed[verb]
-    if verb == "CUSTOM" and field_key == "collision_decision":
-        arg = _resolve_collision_custom_arg(repo_root, arg)
-    elif verb == "CUSTOM":
-        if arg is None or not arg.strip():
-            raise DecisionStagingError("CUSTOM requires an explicit path argument")
-        arg = validate_custom_arg(repo_root, arg)
-    elif arg is None and default_arg is not None:
-        if cl.PLACEHOLDER_RE.search(default_arg):
-            raise DecisionStagingError(
-                f"{verb!r} requires an explicit argument, e.g. `{verb}: <value>`"
-            )
-        arg = default_arg
-
-    if arg is not None and cl.PLACEHOLDER_RE.search(arg):
-        raise DecisionStagingError(f"{arg!r} still looks like a placeholder - fill in a real value")
-
-    if field_key == "decision" and verb in ("CONFIRM", "CUSTOM"):
-        for other in fields:
-            if other is field or other.section_title != section_title or other.key != "decision":
-                continue
-            if other.comment and cl.CONFIRMED_STAMP_RE.match(other.comment):
-                continue  # already-committed choice, not a staging-time conflict
-            other_verb, _, _ = other.raw_value.strip().partition(":")
-            if other_verb.strip() in ("CONFIRM", "CUSTOM"):
+        if len(candidates) > 1:
+            if line_no is None:
+                lines_desc = ", ".join(str(f.line_no + 1) for f in candidates)
                 raise DecisionStagingError(
-                    f"section {section_title!r} already has a primary choice staged "
-                    f"at line {other.line_no + 1} ({other.raw_value.strip()}) - SKIP "
-                    f"the other candidates before staging a new primary choice"
+                    f"{len(candidates)} {field_key!r} fields exist in section "
+                    f"{section_title!r} (lines {lines_desc}) - pass line_no to pick one"
+                )
+            matched = [f for f in candidates if f.line_no == line_no]
+            if not matched:
+                raise DecisionStagingError(
+                    f"no {field_key!r} field at line {line_no + 1} in section {section_title!r}"
+                )
+            field = matched[0]
+        else:
+            field = candidates[0]
+            if line_no is not None and field.line_no != line_no:
+                raise DecisionStagingError(
+                    f"line_no {line_no + 1} does not match the only {field_key!r} field "
+                    f"in section {section_title!r} (found at line {field.line_no + 1})"
                 )
 
-    target_line = lines[field.line_no]
-    prefix_len = len(target_line) - len(target_line.lstrip(" "))
-    prefix = target_line[:prefix_len]
-    lines[field.line_no] = format_decision_line(prefix, field.key, verb, arg, field.comment)
+        if field.comment and cl.CONFIRMED_STAMP_RE.match(field.comment):
+            raise DecisionStagingError(
+                f"line {field.line_no + 1} is already CONFIRMED - cannot re-stage a "
+                f"committed field"
+            )
+        if field.raw_value.strip() != "PENDING":
+            raise DecisionStagingError(
+                f"line {field.line_no + 1} is already staged as "
+                f"{field.raw_value.strip()!r} - re-stage explicitly if you want to change it"
+            )
+        if not field.comment:
+            raise DecisionStagingError(
+                f"line {field.line_no + 1} has no grammar comment to stage against"
+            )
 
-    waw.write_text_atomic(artifact_path, "\n".join(lines) + "\n")
+        allowed = cl.parse_comment_clauses(field.comment)
+        if verb not in allowed:
+            raise DecisionStagingError(
+                f"{verb!r} is not offered on line {field.line_no + 1} "
+                f"(offered: {', '.join(sorted(allowed))})"
+            )
+
+        default_arg = allowed[verb]
+        if verb == "CUSTOM" and field_key == "collision_decision":
+            arg = _resolve_collision_custom_arg(repo_root, arg)
+        elif verb == "CUSTOM":
+            if arg is None or not arg.strip():
+                raise DecisionStagingError("CUSTOM requires an explicit path argument")
+            arg = validate_custom_arg(repo_root, arg)
+        elif arg is None and default_arg is not None:
+            if cl.PLACEHOLDER_RE.search(default_arg):
+                raise DecisionStagingError(
+                    f"{verb!r} requires an explicit argument, e.g. `{verb}: <value>`"
+                )
+            arg = default_arg
+
+        if arg is not None and cl.PLACEHOLDER_RE.search(arg):
+            raise DecisionStagingError(f"{arg!r} still looks like a placeholder - fill in a real value")
+
+        if field_key == "decision" and verb in ("CONFIRM", "CUSTOM"):
+            for other in fields:
+                if other is field or other.section_title != section_title or other.key != "decision":
+                    continue
+                if other.comment and cl.CONFIRMED_STAMP_RE.match(other.comment):
+                    continue  # already-committed choice, not a staging-time conflict
+                other_verb, _, _ = other.raw_value.strip().partition(":")
+                if other_verb.strip() in ("CONFIRM", "CUSTOM"):
+                    raise DecisionStagingError(
+                        f"section {section_title!r} already has a primary choice staged "
+                        f"at line {other.line_no + 1} ({other.raw_value.strip()}) - SKIP "
+                        f"the other candidates before staging a new primary choice"
+                    )
+
+        target_line = lines[field.line_no]
+        prefix_len = len(target_line) - len(target_line.lstrip(" "))
+        prefix = target_line[:prefix_len]
+        lines[field.line_no] = format_decision_line(prefix, field.key, verb, arg, field.comment)
+
+        waw.write_text_atomic(artifact_path, "\n".join(lines) + "\n")
