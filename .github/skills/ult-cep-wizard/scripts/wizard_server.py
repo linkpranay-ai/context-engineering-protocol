@@ -927,11 +927,24 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
+            # Hash read before fields, not after: these are two independent,
+            # unsynchronized reads of the artifact (no lock spans both), so a
+            # concurrent /api/stage write between them is possible. Hashing
+            # first means a race makes the hash describe an *older* state
+            # than the fields it's paired with - a later /api/apply comparing
+            # this hash against the (now newer) on-disk hash then correctly
+            # sees a mismatch and fails closed (forces a re-fetch). Reading
+            # fields first (the prior order) would let the hash describe a
+            # *newer* state than the fields the caller actually saw, so a
+            # same-tick write could pass /api/apply's freshness check without
+            # ever having been shown to the caller - a fail-open race, not
+            # just a display artifact.
+            artifact_hash = wizard_content_hash.hash_artifact(artifact_path)
             fields = source.read_decisions()
             self._send_json(
                 HTTPStatus.OK,
                 {
-                    "artifact_hash": wizard_content_hash.hash_artifact(artifact_path),
+                    "artifact_hash": artifact_hash,
                     "fields": [
                         {
                             "section_title": f.section_title,

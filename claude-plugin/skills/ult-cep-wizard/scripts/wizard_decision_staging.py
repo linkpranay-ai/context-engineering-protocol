@@ -103,7 +103,7 @@ _DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
 # vs-`stage_decision` contention only; `confirm_layers.run_confirm()` and
 # `discover_layers.run_discovery()` also rewrite this artifact and do not
 # share this lock. Closing that gap only needs `wizard_server.py`'s three
-# handlers to take this lock too (plus switching this dict to
+# handlers to take this lock too (plus switching this dict's values to
 # `threading.RLock` so the nested acquisition inside `stage_decision`
 # doesn't deadlock) - see module docstring's Thread-safety note.
 _TARGET_LOCKS_GUARD = threading.Lock()
