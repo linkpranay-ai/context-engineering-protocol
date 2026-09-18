@@ -163,6 +163,22 @@ def _make_handler(ctx: _ServerContext):
             pass
 
         def _reject(self, status: HTTPStatus, message: str) -> None:
+            # Drain any request body still in flight before responding. This
+            # handler closes the connection after every response (the
+            # stdlib default, since protocol_version is left at HTTP/1.0),
+            # and a gate rejection (Origin/session/CSRF/route-not-found) can
+            # fire before a POST body has ever been read via
+            # _read_json_body. If that body is still larger than the OS
+            # socket buffer and the client is mid-write when this close
+            # happens, the client can see a spurious connection reset
+            # (observed as ConnectionAbortedError on Windows) instead of
+            # this response, even though the rejection has nothing to do
+            # with the body. Reading it out first (same Content-Length
+            # handling as _read_json_body) avoids racing the client's write
+            # against our close.
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if length:
+                self.rfile.read(length)
             body = message.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "text/plain; charset=utf-8")

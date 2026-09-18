@@ -67,12 +67,12 @@ class TestWriteTextAtomic(unittest.TestCase):
     def test_transient_windows_permission_error_on_replace_is_retried(self):
         # Real-world failure this reproduces: a fresh Windows-only
         # atomic-write failure observed during a product-focused rerun -
-        # repeatedly replacing the same context-layout-discovery.md target in quick
-        # succession (wizard_decision_staging.stage_decision, called once
-        # per staged decision) occasionally hit PermissionError (WinError 5)
-        # on os.replace, almost certainly AV/indexer holding a momentary
-        # handle on the file just written. A single transient PermissionError
-        # must not fail the whole write.
+        # repeatedly replacing the same context-layout-discovery.md target
+        # in quick succession (wizard_decision_staging.stage_decision,
+        # called once per staged decision) occasionally hit
+        # PermissionError (WinError 5) on os.replace, almost certainly
+        # AV/indexer holding a momentary handle on the file just written.
+        # A single transient PermissionError must not fail the whole write.
         target = self.root / "flaky.md"
         real_replace = os.replace
         calls = {"n": 0}

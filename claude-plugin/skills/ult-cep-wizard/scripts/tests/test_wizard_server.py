@@ -321,6 +321,31 @@ class TestUnknownRoute(WizardServerTestCase):
         self.assertEqual(resp.status, 404)
 
 
+class TestRejectDrainsRequestBody(WizardServerTestCase):
+    """`_reject()` backs every Origin/session/CSRF/route-not-found gate and must
+    drain any request body still in flight before responding - see its own
+    docstring in wizard_server.py. This server never overrides
+    protocol_version, so it stays at the stdlib HTTP/1.0 default and closes
+    the connection after every response; a gate rejection fires before
+    _read_json_body ever reads the declared Content-Length, so an undrained
+    body left in the kernel receive buffer at close time can make the OS
+    send a raw connection reset instead of a graceful close (observed in the
+    wild as ConnectionAbortedError on Windows, intermittently, even for
+    small bodies - the race is timing-dependent, not size-dependent). A body
+    comfortably larger than any platform's default socket receive buffer
+    makes that race reproducible on demand rather than relying on the same
+    timing window that made the original failure intermittent: reverting
+    the drain in _reject and running this test repeatedly reliably fails it
+    with a connection error, not just occasionally."""
+
+    def test_large_body_rejected_at_csrf_gate_gets_the_403_not_a_reset(self):
+        cookie = self._authenticated_cookie()
+        large_payload = {"padding": "x" * 8_000_000}
+        for _ in range(10):
+            resp = self._post_json("/api/discover", large_payload, cookie=cookie)
+            self.assertEqual(resp.status, 403)
+
+
 class TestApiStatusRequiresSession(WizardServerTestCase):
     def test_no_cookie_is_401(self):
         resp = self._get("/api/status")
@@ -677,10 +702,14 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     caller that later submits that hash to `/api/apply` as
     `loaded_artifact_hash` must then see the freshness check correctly
     refuse it (409), rather than committing a field value the caller was
-    never shown. Before this fix, hashing *after* the fields read let a
-    same-tick concurrent write raise the on-disk hash to match what the
-    caller was about to submit, so a stale set of fields could sail through
-    /api/apply's freshness check unnoticed.
+    never shown. Before this fix, hashing *after* the fields read meant a
+    same-tick concurrent write landing between the two reads left the
+    returned hash describing the file's already-advanced *post-write*
+    state - the same hash `/api/apply`'s own freshness check would
+    independently recompute - even though the fields paired with it were
+    read *before* that write. The freshness check only compares hashes, so
+    it saw no drift and let that now-stale set of fields sail through
+    unnoticed.
 
     The simulated concurrent write below resolves BOTH decision fields, not
     just one, because `wizard_apply.apply_confirmed` checks hash freshness
@@ -696,17 +725,17 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     write the caller never saw coming), which is the actual failure mode
     this fix closes and the stronger thing worth proving here.
 
-    Proven non-vacuous the same way TestStageDecisionConcurrency proves its
-    own lock is not a no-op: this test drives the real handler through a
-    real HTTP request rather than calling an internal function directly,
-    and its discriminating assertion compares the handler's own JSON
-    response against a hash re-derived from the real on-disk file at
-    assertion time, not a hardcoded or self-predicted expectation. Manually
-    verified while authoring this test (then reverted): swapping
-    `_handle_api_decisions`'s two read lines back to the pre-fix order
-    (fields, then hash) makes this test fail - but at the "returned hash
-    must not match the post-race on-disk state" assertion below, not at
-    the final `/api/apply` one,
+    Proven non-vacuous the same way TestStageDecisionConcurrency (in
+    test_wizard_decision_staging.py) proves its own lock is not a no-op:
+    this test drives the real handler through a real HTTP request rather
+    than calling an internal function directly, and its discriminating
+    assertion compares the handler's own JSON response against a hash
+    re-derived from the real on-disk file at assertion time, not a
+    hardcoded or self-predicted expectation. Manually verified while
+    authoring this test (then reverted): swapping `_handle_api_decisions`'s
+    two read lines back to the pre-fix order (fields, then hash) makes this
+    test fail - but at the "returned hash must not match the post-race
+    on-disk state" assertion below, not at the final `/api/apply` one,
     because under that order the hash is computed only after the simulated
     write has already landed, so it is identical to the current on-disk
     hash by the time this test checks it, and the test refuses to proceed
@@ -717,10 +746,15 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     removed, `/api/apply` does go on to return 200 and commit a real config
     write - `{"config_changed": true, "idempotent": false, "messages":
     ["Confirmed 2 field(s), wrote 2 config key(s)."], ...}`, with
-    `context-config.yaml` created on disk - not the 409 refusal a stale
-    hash should draw, proving the reordering fix is what stands between a
-    caller and that fail-open commit, not merely between a caller and an
-    assertion in this test.
+    `context-config.yaml` created on disk - a full, silent success rather
+    than any refusal, even though the fields it just committed are the same
+    stale ones read before the concurrent write landed. That is precisely
+    the danger the reordering fix closes: not a stale hash (the submitted
+    hash matches the on-disk file throughout, under the reverted order),
+    but a stale field/hash *pairing* that a hash comparison alone can no
+    longer catch once the hash itself has already caught up - proving the
+    reordering fix is what stands between a caller and that fail-open
+    commit, not merely between a caller and an assertion in this test.
     """
 
     def test_concurrent_write_between_hash_and_fields_read_is_caught_by_apply(self):
@@ -908,6 +942,19 @@ class TestApplyRoute(WizardServerTestCase):
         resp = self._post_json(
             "/api/apply", {"loaded_artifact_hash": "not-the-real-hash"}, cookie=cookie, csrf=csrf,
         )
+        self.assertEqual(resp.status, 409)
+        self.assertFalse((self.repo_root / "context-config.yaml").exists())
+
+    def test_omitted_artifact_hash_is_409_not_a_bespoke_400(self):
+        # Covers the claim in _handle_api_apply's own comment: an omitted
+        # loaded_artifact_hash key (not merely an explicit null/wrong
+        # string, which the two tests above already cover) is deliberately
+        # not given its own missing-field check and instead falls through
+        # to apply_confirmed as None, which naturally fails the freshness
+        # check the same way any other mismatch does.
+        _write_discovery_artifact(self.repo_root)
+        cookie, csrf = self._authenticated_session()
+        resp = self._post_json("/api/apply", {}, cookie=cookie, csrf=csrf)
         self.assertEqual(resp.status, 409)
         self.assertFalse((self.repo_root / "context-config.yaml").exists())
 
