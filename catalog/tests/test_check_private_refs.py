@@ -119,7 +119,9 @@ class TestCheckPrivateRefs(unittest.TestCase):
         # just needs the same plain single-line-citation check, so iterate
         # the real list rather than a hand-copied subset that silently
         # stops growing when the list does.
-        for name in [n for n in cpr.DENYLIST_FILENAMES if n != "ISSUES.md"]:
+        names = [n for n in cpr.DENYLIST_FILENAMES if n != "ISSUES.md"]
+        self.assertGreater(len(names), 0)
+        for name in names:
             with self.subTest(name=name):
                 root = Path(tempfile.mkdtemp())
                 try:

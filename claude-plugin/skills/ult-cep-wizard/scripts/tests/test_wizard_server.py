@@ -688,24 +688,25 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     resolved (`ValidationError`, 400) - see `apply_confirmed`'s own
     ordering. A fixture that left a field PENDING would still discriminate
     fixed-vs-reverted read order at this test's final `/api/apply` call
-    (409 either way under the fix; 409-vs-400 under the revert, since a
-    fresh-looking hash would then reach the resolved-fields check and find
-    one still PENDING) - but only as a *different refusal*. Resolving both
-    fields instead makes the reverted order's outcome a full, silent
-    *success* (a real `context-config.yaml` write the caller never saw
-    coming), which is the actual failure mode this fix closes and the
-    stronger thing worth proving here.
+    (409 under the fix, 400 under the revert - since a reverted order's
+    fresh-looking hash would clear the freshness check and then reach the
+    resolved-fields check and find one still PENDING) - but only as a
+    *different refusal*. Resolving both fields instead makes the reverted
+    order's outcome a full, silent *success* (a real `context-config.yaml`
+    write the caller never saw coming), which is the actual failure mode
+    this fix closes and the stronger thing worth proving here.
 
     Proven non-vacuous the same way TestStageDecisionConcurrency proves its
     own lock is not a no-op: this test drives the real handler through a
     real HTTP request rather than calling an internal function directly,
     and its discriminating assertion compares the handler's own JSON
-    response against the real on-disk state, not a value it computed
-    itself. Manually verified while
-    authoring this test (then reverted): swapping `_handle_api_decisions`'s
-    two read lines back to the pre-fix order (fields, then hash) makes this
-    test fail - but at the "returned hash must not match the post-race
-    on-disk state" assertion below, not at the final `/api/apply` one,
+    response against a hash re-derived from the real on-disk file at
+    assertion time, not a hardcoded or self-predicted expectation. Manually
+    verified while authoring this test (then reverted): swapping
+    `_handle_api_decisions`'s two read lines back to the pre-fix order
+    (fields, then hash) makes this test fail - but at the "returned hash
+    must not match the post-race on-disk state" assertion below, not at
+    the final `/api/apply` one,
     because under that order the hash is computed only after the simulated
     write has already landed, so it is identical to the current on-disk
     hash by the time this test checks it, and the test refuses to proceed
