@@ -22,6 +22,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -456,16 +457,55 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
 
     def test_non_numeric_content_length_with_large_body_still_gets_403_not_a_reset(self):
+        # A 2026-09 follow-up review flagged the original 10-iteration version
+        # of this test as an outsized, flaky-under-CI-load runtime cost for
+        # what it proves - 3 iterations still exercises the same Windows-
+        # specific reset-vs-403 race repeatedly enough to catch a regression,
+        # at roughly a third of the wall time.
         large_body = b"x" * 8_000_000
-        for _ in range(10):
+        for _ in range(3):
             response = self._raw_reject_request("abc", body=large_body)
             self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
 
     def test_negative_content_length_with_large_body_still_gets_403_not_a_reset(self):
+        # See the iteration-count note on the non-numeric case above - same
+        # rationale applies here.
         large_body = b"x" * 8_000_000
-        for _ in range(10):
+        for _ in range(3):
             response = self._raw_reject_request("-1", body=large_body)
             self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
+
+    def test_declared_length_above_the_drain_cap_gets_403_without_waiting_out_the_full_timeout(self):
+        # Exercises the min(read_size, _MAX_DRAINED_REJECT_BODY) cap itself -
+        # a 2026-09 follow-up review noted no existing test declares a
+        # Content-Length above that cap, so the clamp's own effect went
+        # unverified (it's a no-op for the *unknown*-length cases the other
+        # tests here use, since read_size is already set to the cap value
+        # in that branch - only a well-formed, known length bigger than the
+        # cap actually exercises min() picking the cap over the declared
+        # length). _MAX_DRAINED_REJECT_BODY is patched down so the test
+        # doesn't need an actual 16 MiB transfer to hit it: the declared
+        # length (200_000) and the sent body (150_000 bytes) both exceed
+        # the patched cap (100_000), so the drain loop's `remaining` hits
+        # zero once it reads exactly the capped amount - well before the
+        # sent body or the declared length are exhausted - and the response
+        # should go out promptly rather than idling out the full drain
+        # timeout waiting for a read() target beyond the cap it will never
+        # be asked to reach.
+        with mock.patch.object(ws, "_MAX_DRAINED_REJECT_BODY", 100_000), mock.patch.object(
+            ws, "_REJECT_DRAIN_TIMEOUT_SECONDS", 3.0
+        ):
+            body = b"x" * 150_000
+            start = time.monotonic()
+            response = self._raw_reject_request("200000", body=body)
+            elapsed = time.monotonic() - start
+        self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
+        self.assertLess(
+            elapsed,
+            2.0,
+            f"drain took {elapsed:.2f}s - expected it to finish once the "
+            "(patched) cap was read, not wait out the 3s drain timeout",
+        )
 
 
 class TestApiStatusRequiresSession(WizardServerTestCase):

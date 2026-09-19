@@ -136,13 +136,25 @@ _EXTERNAL_ROOT_INVALID = object()
 # reached before any authentication has succeeded (Origin/session/CSRF
 # checks all call _reject on failure), so the Content-Length it reads
 # is attacker-controlled input, not a value _read_json_body has already
-# validated. _MAX_DRAINED_REJECT_BODY caps how much a single malicious or
-# misbehaving client can make this handler thread buffer in memory before
-# giving up and closing without draining; _REJECT_DRAIN_TIMEOUT_SECONDS
-# bounds how long the read may block waiting for bytes that a slow-trickle
-# or silent client may never actually send, for a *declared* (well-formed,
-# non-negative) Content-Length - there, the target byte count is real and
-# worth waiting out the full timeout for.
+# validated. The drain reads in _REJECT_DRAIN_CHUNK_SIZE chunks rather
+# than one call sized to the full declared (or capped-unknown) length,
+# so a handler thread's actual memory use tracks bytes really received,
+# not the length a client merely claims; _MAX_DRAINED_REJECT_BODY still
+# caps the total a single malicious or misbehaving client can make this
+# thread read before giving up and closing without fully draining.
+#
+# _REJECT_DRAIN_TIMEOUT_SECONDS bounds how long any single recv() inside
+# the drain may block waiting for bytes that a silent client never sends,
+# for a *declared* (well-formed, non-negative) Content-Length - there,
+# the target byte count is real and worth waiting on. This is a per-
+# recv() timeout, not a cumulative deadline: a client that keeps
+# trickling a little data every few seconds keeps resetting it, so the
+# drain's total wall time is bounded only by _MAX_DRAINED_REJECT_BODY
+# divided by however little arrives per timeout window, not by this
+# constant itself. That's an accepted, not a closed, risk - the same
+# trickling client can only ever tie up one handler thread this way, and
+# this is a local single-operator dev server with no concurrency limit
+# worth protecting further.
 #
 # A malformed Content-Length (non-numeric or negative) gets a much shorter
 # _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS instead: since the header
@@ -160,6 +172,7 @@ _EXTERNAL_ROOT_INVALID = object()
 # was ever sent, since there is no way to distinguish "still arriving" from
 # "already finished" other than waiting out a quiet period.
 _MAX_DRAINED_REJECT_BODY = 16 * 1024 * 1024  # 16 MiB
+_REJECT_DRAIN_CHUNK_SIZE = 64 * 1024  # 64 KiB
 _REJECT_DRAIN_TIMEOUT_SECONDS = 5.0
 _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS = 0.5
 
@@ -241,7 +254,10 @@ def _make_handler(ctx: _ServerContext):
             #     partially drained - the client may still observe a reset
             #     instead of this response for the un-drained remainder,
             #     but that's the pre-existing race this fix narrows, not a
-            #     new failure mode);
+            #     new failure mode); the read itself is chunked at
+            #     _REJECT_DRAIN_CHUNK_SIZE so this thread's actual memory
+            #     use tracks bytes really received, not the full declared
+            #     or capped length up front;
             #   - the read is bounded by a temporary socket timeout so a
             #     client that declares a length (known or not) and then
             #     sends less than that (or nothing) cannot hang this
@@ -299,14 +315,30 @@ def _make_handler(ctx: _ServerContext):
                     if length_unknown
                     else _REJECT_DRAIN_TIMEOUT_SECONDS
                 )
-                previous_timeout = self.connection.gettimeout()
-                self.connection.settimeout(drain_timeout)
+                # gettimeout()/settimeout() themselves can raise OSError on a
+                # socket that's already gone bad (e.g. the client reset the
+                # connection before this drain even starts) - that failure
+                # must not escape _reject() uncaught, or the client gets no
+                # response at all instead of the rejection this method
+                # exists to send. Wrapping the whole drain (setup, the
+                # chunked read loop, and restoring the previous timeout) in
+                # one try/except means any of those three failing just skips
+                # or truncates the drain and falls through to send the
+                # response anyway.
                 try:
-                    self.rfile.read(min(read_size, _MAX_DRAINED_REJECT_BODY))
+                    previous_timeout = self.connection.gettimeout()
+                    self.connection.settimeout(drain_timeout)
+                    try:
+                        remaining = min(read_size, _MAX_DRAINED_REJECT_BODY)
+                        while remaining > 0:
+                            chunk = self.rfile.read(min(remaining, _REJECT_DRAIN_CHUNK_SIZE))
+                            if not chunk:
+                                break
+                            remaining -= len(chunk)
+                    finally:
+                        self.connection.settimeout(previous_timeout)
                 except OSError:
                     pass
-                finally:
-                    self.connection.settimeout(previous_timeout)
             body = message.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -475,7 +507,19 @@ def _make_handler(ctx: _ServerContext):
             400 (mirrors _require_session's own non-distinguishing-failure
             contract - callers don't need a second branch). No body at all is
             treated as `{}`, not an error - callers validate whatever keys
-            they actually need themselves, same as a missing query param."""
+            they actually need themselves, same as a missing query param.
+
+            Unlike _reject()'s copy of this same Content-Length parsing
+            pattern, this one is not defensive against a malformed header
+            (non-numeric raises ValueError uncaught; negative passes the
+            truthiness check and reaches self.rfile.read() with a negative
+            size, i.e. "read to EOF"). That's only safe because every one
+            of this method's call sites is reached exclusively post-auth,
+            from do_POST after the Origin/session/CSRF gates have already
+            passed - the header is never attacker-controlled input here the
+            way it is at _reject()'s own pre-auth call sites. A future
+            caller reached before those gates (or from do_GET) would need
+            _reject()'s defensive parsing instead, not this one."""
             length = int(self.headers.get("Content-Length", 0) or 0)
             raw = self.rfile.read(length) if length else b""
             if not raw:
