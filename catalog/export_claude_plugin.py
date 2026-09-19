@@ -157,10 +157,16 @@ def plan():
 
 
 def existing_plugin_files():
-    """Git-tracked file paths under claude-plugin/ -- same git ls-files
-    technique as tracked_skill_files(), so local-only build artifacts
-    (__pycache__, .pytest_cache, etc.) picked up by an rglob("*") walk
-    never show up as false "extra" files under --check.
+    """Git-tracked file paths under claude-plugin/ that still exist on disk
+    -- same git ls-files technique as tracked_skill_files(), so local-only
+    build artifacts (__pycache__, .pytest_cache, etc.) picked up by an
+    rglob("*") walk never show up as false "extra" files under --check.
+    Trade-off: an untracked file that also isn't gitignored (e.g. added by
+    hand and never `git add`ed) is no longer flagged as extra either --
+    fine for CI's fresh checkout, where every real file is tracked. The
+    is_file() filter below also covers a file that's tracked in the index
+    but was deleted from disk without `git rm`, so --write's cleanup pass
+    never tries to unlink a path that isn't there.
     """
     if not PLUGIN_DIR.exists():
         return set()
@@ -168,7 +174,8 @@ def existing_plugin_files():
         ["git", "-C", str(LIBRARY_ROOT), "ls-files", "--", str(PLUGIN_DIR)],
         capture_output=True, text=True, check=True,
     ).stdout
-    return {LIBRARY_ROOT / line for line in out.splitlines() if line}
+    candidates = (LIBRARY_ROOT / line for line in out.splitlines() if line)
+    return {path for path in candidates if path.is_file()}
 
 
 def main():

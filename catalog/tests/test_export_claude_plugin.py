@@ -92,6 +92,24 @@ class TestExistingPluginFiles(unittest.TestCase):
         ):
             self.assertEqual(ecp.existing_plugin_files(), set())
 
+    def test_file_tracked_in_the_index_but_deleted_from_disk_is_not_reported(self):
+        # git ls-files lists index entries regardless of whether the
+        # worktree file is actually there -- a file that's tracked, then
+        # deleted from disk without `git rm` (e.g. a manual cleanup that
+        # forgot to stage the deletion), must not come back from this
+        # function, or --write's `path.unlink()` cleanup pass crashes with
+        # FileNotFoundError trying to remove a path that doesn't exist.
+        tracked = self.root / "claude-plugin" / "skills" / "demo" / "server.py"
+        _write_and_track(self.root, "claude-plugin/skills/demo/server.py", "print('tracked')\n")
+        tracked.unlink()
+
+        with mock.patch.object(ecp, "LIBRARY_ROOT", self.root), mock.patch.object(
+            ecp, "PLUGIN_DIR", self.root / "claude-plugin"
+        ):
+            result = ecp.existing_plugin_files()
+
+        self.assertEqual(result, set())
+
 
 if __name__ == "__main__":
     unittest.main()
