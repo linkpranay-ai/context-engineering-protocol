@@ -356,7 +356,7 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
     authentication, at every Origin/session/CSRF/route-not-found gate - so
     unlike _read_json_body's own copy of this same parsing pattern (only
     reached after all three gates pass), the header here is attacker-
-    controlled input, not a value any earlier check has vetted. Three
+    controlled input, not a value any earlier check has vetted. Four
     distinct failure modes, all needing a raw socket to construct (urllib
     always computes a correct Content-Length itself, so _post_json's
     helper cannot put a malformed one on the wire):
@@ -375,7 +375,27 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
       indefinitely either - the drain read needs its own bounded timeout,
       separate from whatever timeout the rest of the handler uses, so a
       client that never finishes writing still gets the rejection instead
-      of tying up a thread forever.
+      of tying up a thread forever;
+    - a non-numeric or negative value paired with a genuinely large body
+      still in flight must not skip the drain outright just because the
+      declared length can't be trusted - a 2026-09 round-11 follow-up on
+      this same test class found that treating any unparseable header as
+      "0, nothing to drain" reopened the exact undrained-body reset race
+      TestRejectDrainsRequestBody exists to close, only reached through a
+      malformed header instead of a well-formed large one. _reject now
+      treats an unparseable or negative Content-Length as an unknown (but
+      possibly large) body and best-effort drains up to
+      _MAX_DRAINED_REJECT_BODY, under its own shorter
+      _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS rather than the longer
+      _REJECT_DRAIN_TIMEOUT_SECONDS used for a well-formed declared
+      length. An unknown length has no real byte count to read towards, so
+      that read only completes once some individual recv() either yields
+      data or times out; once the client goes quiet - its whole body
+      already arrived, or it never sent one - that next recv() blocks for
+      the *full* per-call timeout with nothing left to wait for. Reusing
+      the longer, declared-length timeout there would make every
+      malformed-header rejection pay that multi-second cost even when
+      little or no body was ever sent.
 
     Each request below is a POST with no Origin/Referer header, so it
     fails wizard_originhost's very first do_POST gate - no cookie or CSRF
@@ -385,7 +405,21 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
     negative- and partial-body cases here hang until this test's own
     client-side socket timeout fires - a clear, reliable failure, not a
     flaky one - and makes the non-numeric case get back an empty response
-    instead of a 403."""
+    instead of a 403. Reverting only the narrower round-11 change (unknown
+    lengths skip the drain instead of best-effort draining it) makes the
+    two large-body cases below intermittently see a connection error
+    instead of the 403, on the same Windows-specific timing as
+    TestRejectDrainsRequestBody's own large-body case. Reverting only the
+    dedicated unknown-length timeout (so the unknown-length drain reuses
+    the longer _REJECT_DRAIN_TIMEOUT_SECONDS instead of
+    _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS) makes all four
+    malformed-header cases below fail outright with a client-side
+    TimeoutError or ConnectionAbortedError rather than merely running
+    slow: at this class's default 5-second client-side socket timeout, the
+    server's own drain deadline expires at essentially that same instant,
+    so the client gives up before the delayed 403 ever arrives - a clear,
+    reliable failure this class caught the first time this exact
+    regression was introduced, not a flaky one."""
 
     def _raw_reject_request(self, content_length_header, body=b"", client_timeout=5.0):
         sock = socket.create_connection(("127.0.0.1", self.port), timeout=client_timeout)
@@ -420,6 +454,18 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
         with mock.patch.object(ws, "_REJECT_DRAIN_TIMEOUT_SECONDS", 0.3):
             response = self._raw_reject_request("1000", body=b"only ten b")
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
+
+    def test_non_numeric_content_length_with_large_body_still_gets_403_not_a_reset(self):
+        large_body = b"x" * 8_000_000
+        for _ in range(10):
+            response = self._raw_reject_request("abc", body=large_body)
+            self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
+
+    def test_negative_content_length_with_large_body_still_gets_403_not_a_reset(self):
+        large_body = b"x" * 8_000_000
+        for _ in range(10):
+            response = self._raw_reject_request("-1", body=large_body)
+            self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
 
 
 class TestApiStatusRequiresSession(WizardServerTestCase):
@@ -835,11 +881,12 @@ class TestApiDecisionsHashOrderingFailsClosed(WizardServerTestCase):
     hash that, because of the bug, had already caught up to a write the
     caller never reviewed. A hash comparison alone cannot catch that,
     since the hash and the current file agree with each other; only
-    reading the hash before the fields, as the fix does, keeps the hash
-    tied to the same moment as what the caller was actually shown -
-    proving the reordering fix is what stands between a caller and that
-    fail-open commit, not merely between a caller and an assertion in
-    this test.
+    reading the hash before the fields, as the fix does, guarantees the
+    hash can never describe a state *newer* than what the fields show -
+    at worst the hash is stale in the caller's favor, never stale in a
+    way that hides a write the caller hasn't seen - proving the
+    reordering fix is what stands between a caller and that fail-open
+    commit, not merely between a caller and an assertion in this test.
     """
 
     def test_concurrent_write_between_hash_and_fields_read_is_caught_by_apply(self):

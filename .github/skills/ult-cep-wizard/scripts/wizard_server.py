@@ -140,9 +140,28 @@ _EXTERNAL_ROOT_INVALID = object()
 # misbehaving client can make this handler thread buffer in memory before
 # giving up and closing without draining; _REJECT_DRAIN_TIMEOUT_SECONDS
 # bounds how long the read may block waiting for bytes that a slow-trickle
-# or silent client may never actually send.
+# or silent client may never actually send, for a *declared* (well-formed,
+# non-negative) Content-Length - there, the target byte count is real and
+# worth waiting out the full timeout for.
+#
+# A malformed Content-Length (non-numeric or negative) gets a much shorter
+# _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS instead: since the header
+# can't be trusted, the drain has no real target length to read towards -
+# it reads up to _MAX_DRAINED_REJECT_BODY on faith that a body may still be
+# in flight, and the underlying socket read only returns once each
+# individual recv() either yields data or times out. As long as the client
+# keeps sending, each recv() succeeds well within this window and the drain
+# keeps going; once the client goes quiet (its whole body has already
+# arrived, or it never sends one), the *next* recv() has nothing to wait
+# for but genuinely blocks for the full per-call timeout before giving up -
+# which is why this second timeout must be short. Reusing the 5-second
+# _REJECT_DRAIN_TIMEOUT_SECONDS here would make every malformed-header
+# rejection pay that same multi-second cost even when little or no body
+# was ever sent, since there is no way to distinguish "still arriving" from
+# "already finished" other than waiting out a quiet period.
 _MAX_DRAINED_REJECT_BODY = 16 * 1024 * 1024  # 16 MiB
 _REJECT_DRAIN_TIMEOUT_SECONDS = 5.0
+_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS = 0.5
 
 
 class _ServerContext:
@@ -187,10 +206,12 @@ def _make_handler(ctx: _ServerContext):
             # on Windows) instead of this response, even though the
             # rejection has nothing to do with the body. Reading it out
             # first (same Content-Length handling as _read_json_body)
-            # avoids racing the client's write against our close. Every
-            # other _reject call site (e.g. the exchange/static/docs 401s
-            # and 404s) is reached from do_GET, which never has a body to
-            # drain in the first place.
+            # avoids racing the client's write against our close. This
+            # applies equally to _reject calls reached from do_GET (the
+            # exchange/static/docs 401s and 404s): a GET request is free to
+            # carry a Content-Length and body too, and this method doesn't
+            # distinguish by HTTP method, only by whether the header is
+            # present.
             #
             # do_POST's own gate failures land here before _read_json_body
             # ever gets called, so on those paths the header is
@@ -201,45 +222,87 @@ def _make_handler(ctx: _ServerContext):
             #     method via an uncaught ValueError, which would otherwise
             #     leave the client with no response at all;
             #   - a negative value (e.g. "-1") must not reach
-            #     self.rfile.read(), whose contract for a negative size is
-            #     "read to EOF" - on a connection the client intends to
-            #     keep open, that blocks forever;
-            #   - draining is capped at _MAX_DRAINED_REJECT_BODY so a
-            #     declared-huge Content-Length can't make this thread
-            #     buffer unbounded memory (a body larger than the cap is
-            #     only partially drained - the client may still observe a
-            #     reset instead of this response for the un-drained
-            #     remainder, but that's the pre-existing race this fix
-            #     narrows, not a new failure mode);
+            #     self.rfile.read() with that value as the size, whose
+            #     contract for a negative size is "read to EOF" - on a
+            #     connection the client intends to keep open, that blocks
+            #     forever;
+            #   - a header that is present but unusable this way (both
+            #     cases above) still means a body may genuinely be in
+            #     flight, so it's treated as an unknown-but-possibly-large
+            #     length rather than skipped outright - skipping the drain
+            #     entirely whenever the declared length can't be trusted
+            #     would leave exactly the undrained-body race this method
+            #     exists to close, just reached through a malformed header
+            #     instead of a well-formed large one;
+            #   - draining (known-length or unknown-length alike) is capped
+            #     at _MAX_DRAINED_REJECT_BODY so a declared-huge or
+            #     unparseable Content-Length can't make this thread buffer
+            #     unbounded memory (a body larger than the cap is only
+            #     partially drained - the client may still observe a reset
+            #     instead of this response for the un-drained remainder,
+            #     but that's the pre-existing race this fix narrows, not a
+            #     new failure mode);
             #   - the read is bounded by a temporary socket timeout so a
-            #     client that declares a length and then sends less than
-            #     that (or nothing) cannot hang this handler thread
-            #     indefinitely; the previous timeout is always restored
-            #     afterward, and a timeout/OSError here just means we skip
-            #     the drain and send the response anyway.
+            #     client that declares a length (known or not) and then
+            #     sends less than that (or nothing) cannot hang this
+            #     handler thread indefinitely; the previous timeout is
+            #     always restored afterward, and a timeout/OSError here
+            #     just means we stop draining and send the response anyway.
+            #     A known length uses _REJECT_DRAIN_TIMEOUT_SECONDS, since
+            #     the target byte count is real and worth waiting out. An
+            #     unknown (unparseable or negative) length has no real
+            #     target - the drain reads towards _MAX_DRAINED_REJECT_BODY
+            #     on faith that a body may still be arriving, and that read
+            #     only returns once some individual recv() either gets data
+            #     or times out; once the client goes quiet, that next
+            #     recv() blocks for the full timeout with nothing to wait
+            #     for. Reusing _REJECT_DRAIN_TIMEOUT_SECONDS there would
+            #     make every malformed-header rejection pay that multi-
+            #     second cost even when little or no body was ever sent, so
+            #     this path uses the much shorter
+            #     _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS instead.
+            #     A timeout here also leaves the socket's rfile buffer
+            #     permanently marked as timed-out (stdlib behavior), so any
+            #     further read on this connection would raise - harmless
+            #     today only because protocol_version stays at HTTP/1.0 and
+            #     this connection is always closed right after; revisit
+            #     this drain if that ever changes.
             #
             # This drain assumes the body is still unread: if a call site
-            # reached _reject() after _read_json_body() had already consumed
-            # it from the socket for the same request, this second read
-            # would find nothing left to drain and just idle out the full
-            # _REJECT_DRAIN_TIMEOUT_SECONDS before sending the response - a
-            # needless delay, not a correctness bug (the timeout above still
-            # bounds it), but worth avoiding. No current call site does
-            # this: do_POST's own gates all run before routing to a
-            # handler, so they precede any _read_json_body() call; every
-            # handler that does call _read_json_body() does so as its first
-            # statement and never calls _reject() afterward in the same
-            # request. A future POST handler that reads its body and only
+            # reached _reject() after _read_json_body() had already
+            # consumed it from the socket for the same request, this second
+            # read would find nothing left to drain and just idle out the
+            # full _REJECT_DRAIN_TIMEOUT_SECONDS before sending the
+            # response - a needless delay, not a correctness bug (the
+            # timeout above still bounds it), but worth avoiding. No
+            # current call site does this: no handler reached only via
+            # do_POST (i.e. one that calls _read_json_body()) ever calls
+            # _reject() itself, at any point in its body, before or after
+            # reading. A future POST handler that reads its body and only
             # then calls _reject() would reintroduce this idle delay.
-            try:
-                length = int(self.headers.get("Content-Length", 0) or 0)
-            except ValueError:
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None:
                 length = 0
-            if length > 0:
-                previous_timeout = self.connection.gettimeout()
-                self.connection.settimeout(_REJECT_DRAIN_TIMEOUT_SECONDS)
+                length_unknown = False
+            else:
                 try:
-                    self.rfile.read(min(length, _MAX_DRAINED_REJECT_BODY))
+                    length = int(raw_length)
+                except ValueError:
+                    length = 0
+                    length_unknown = True
+                else:
+                    length_unknown = length < 0
+            if length > 0 or length_unknown:
+                read_size = _MAX_DRAINED_REJECT_BODY if length_unknown else length
+                drain_timeout = (
+                    _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS
+                    if length_unknown
+                    else _REJECT_DRAIN_TIMEOUT_SECONDS
+                )
+                previous_timeout = self.connection.gettimeout()
+                self.connection.settimeout(drain_timeout)
+                try:
+                    self.rfile.read(min(read_size, _MAX_DRAINED_REJECT_BODY))
                 except OSError:
                     pass
                 finally:
