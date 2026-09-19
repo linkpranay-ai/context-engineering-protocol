@@ -157,9 +157,18 @@ def plan():
 
 
 def existing_plugin_files():
+    """Git-tracked file paths under claude-plugin/ -- same git ls-files
+    technique as tracked_skill_files(), so local-only build artifacts
+    (__pycache__, .pytest_cache, etc.) picked up by an rglob("*") walk
+    never show up as false "extra" files under --check.
+    """
     if not PLUGIN_DIR.exists():
         return set()
-    return {p for p in PLUGIN_DIR.rglob("*") if p.is_file()}
+    out = subprocess.run(
+        ["git", "-C", str(LIBRARY_ROOT), "ls-files", "--", str(PLUGIN_DIR)],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return {LIBRARY_ROOT / line for line in out.splitlines() if line}
 
 
 def main():
