@@ -149,12 +149,15 @@ _EXTERNAL_ROOT_INVALID = object()
 # the target byte count is real and worth waiting on. This is a per-
 # recv() timeout, not a cumulative deadline: a client that keeps
 # trickling a little data every few seconds keeps resetting it, so the
-# drain's total wall time is bounded only by _MAX_DRAINED_REJECT_BODY
-# divided by however little arrives per timeout window, not by this
-# constant itself. That's an accepted, not a closed, risk - the same
-# trickling client can only ever tie up one handler thread this way, and
-# this is a local single-operator dev server with no concurrency limit
-# worth protecting further.
+# drain's total wall time is bounded only by how many such timeout
+# windows it takes to trickle in _MAX_DRAINED_REJECT_BODY bytes, each
+# costing up to _REJECT_DRAIN_TIMEOUT_SECONDS itself - in practice, not
+# meaningfully bounded at all for a determined slow client. That's an
+# accepted, not a closed, risk - each connection a trickling client opens
+# ties up one handler thread this way (ThreadingHTTPServer places no
+# limit on how many connections one client can open), and this is a
+# local single-operator dev server where protecting further isn't worth
+# the complexity.
 #
 # A malformed Content-Length (non-numeric or negative) gets a much shorter
 # _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS instead: since the header
@@ -513,13 +516,20 @@ def _make_handler(ctx: _ServerContext):
             pattern, this one is not defensive against a malformed header
             (non-numeric raises ValueError uncaught; negative passes the
             truthiness check and reaches self.rfile.read() with a negative
-            size, i.e. "read to EOF"). That's only safe because every one
-            of this method's call sites is reached exclusively post-auth,
-            from do_POST after the Origin/session/CSRF gates have already
-            passed - the header is never attacker-controlled input here the
-            way it is at _reject()'s own pre-auth call sites. A future
-            caller reached before those gates (or from do_GET) would need
-            _reject()'s defensive parsing instead, not this one."""
+            size, i.e. "read to EOF"). That's tolerable only because every
+            one of this method's call sites is reached exclusively post-
+            auth, from do_POST after the Origin/session/CSRF gates have
+            already passed - the header comes from an already-authenticated
+            caller here, not a pre-auth remote attacker the way it does at
+            _reject()'s own call sites. A malformed value from that caller
+            can still hang the handler thread on read(-1) until the
+            connection closes, or raise an uncaught ValueError that drops
+            the connection with no response; that's a self-inflicted
+            failure for a single-operator local dev server, not a remote-
+            attacker DoS surface, which is why it doesn't warrant
+            _reject()'s defensive parsing. A future caller reached before
+            those gates (or from do_GET) would need that defensive parsing
+            instead, not this one."""
             length = int(self.headers.get("Content-Length", 0) or 0)
             raw = self.rfile.read(length) if length else b""
             if not raw:

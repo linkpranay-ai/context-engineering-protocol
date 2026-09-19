@@ -344,6 +344,11 @@ class TestRejectDrainsRequestBody(WizardServerTestCase):
     def test_large_body_rejected_at_csrf_gate_gets_the_403_not_a_reset(self):
         cookie = self._authenticated_cookie()
         large_payload = {"padding": "x" * 8_000_000}
+        # Unlike the malformed-Content-Length tests below, this one sends a
+        # correct, well-formed Content-Length (via _post_json), so the
+        # drain reads the whole body straight through instead of waiting
+        # out a per-recv timeout on each iteration - it stays fast even at
+        # 10 iterations, so there's no runtime/flakiness reason to trim it.
         for _ in range(10):
             resp = self._post_json(
                 "/api/discover", large_payload, cookie=cookie
@@ -457,11 +462,13 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
 
     def test_non_numeric_content_length_with_large_body_still_gets_403_not_a_reset(self):
-        # A 2026-09 follow-up review flagged the original 10-iteration version
-        # of this test as an outsized, flaky-under-CI-load runtime cost for
-        # what it proves - 3 iterations still exercises the same Windows-
-        # specific reset-vs-403 race repeatedly enough to catch a regression,
-        # at roughly a third of the wall time.
+        # A 2026-09 follow-up review flagged the original 10-iteration
+        # version of this test as an outsized runtime cost - each iteration
+        # sends and drains an 8 MB body, and the cumulative wall time risked
+        # CI flakiness from timeouts under load, not the underlying race
+        # becoming any less likely to be caught. 3 iterations still repeats
+        # the same Windows-specific reset-vs-403 race enough to catch a
+        # regression, at roughly a third of the wall time.
         large_body = b"x" * 8_000_000
         for _ in range(3):
             response = self._raw_reject_request("abc", body=large_body)
