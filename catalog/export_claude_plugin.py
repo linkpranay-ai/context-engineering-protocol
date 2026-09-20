@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Build the Claude Code plugin package for this repo's skill library, so the
 real skills can be installed via Claude Code's plugin/marketplace flow
@@ -257,13 +257,13 @@ def existing_plugin_files():
     Trade-off: an untracked file that also isn't gitignored (e.g. added by
     hand and never `git add`ed) is no longer flagged as extra either --
     fine for CI's fresh checkout, where every real file is tracked. The
-    is_file()-or-is_symlink() filter below also covers a path that's
+    is_file()-or-_is_reparse_point() filter below also covers a path that's
     tracked in the index but was deleted from disk without `git rm`, so
     --write's cleanup pass never tries to unlink a path that isn't there
-    at all; is_symlink() is included alongside is_file() so a tracked
-    symlink whose target is missing (is_file() alone would call that
-    "not there" too, since it follows the link) still comes back and gets
-    cleaned up, rather than silently surviving --write forever.
+    at all; _is_reparse_point() is included alongside is_file() so a tracked
+    symlink or junction whose target is missing (is_file() alone would call
+    that "not there" too, since it follows the link) still comes back and
+    gets cleaned up, rather than silently surviving --write forever.
     """
     if not PLUGIN_DIR.exists():
         return set()
@@ -272,33 +272,59 @@ def existing_plugin_files():
         capture_output=True, check=True,
     ).stdout)
     candidates = (LIBRARY_ROOT / entry for entry in out.split("\0") if entry)
-    return {path for path in candidates if path.is_file() or path.is_symlink()}
+    return {path for path in candidates if path.is_file() or _is_reparse_point(path)}
+
+
+def _is_reparse_point(path):
+    """True if `path` itself -- not whatever it points at -- is a symlink
+    (POSIX or Windows) or a Windows junction.
+
+    Path.is_symlink() alone misses a junction: on Windows a junction is
+    implemented as a reparse point exactly like a symlink is, but
+    Path.is_symlink() (verified empirically on Python 3.12/Windows) returns
+    False for one. Every "is this path a redirection rather than an
+    ordinary file/directory this generator owns" check in this module needs
+    both tests, not is_symlink() alone -- a junction left under
+    claude-plugin/ would otherwise walk straight past all of them. On POSIX
+    there's no separate junction concept, so is_symlink() alone is already
+    complete and the attribute check is skipped.
+    """
+    if path.is_symlink():
+        return True
+    if os.name != "nt":
+        return False
+    try:
+        attrs = os.lstat(path).st_file_attributes
+    except OSError:
+        return False
+    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _first_symlink_under_plugin_dir(path):
-    """Returns the first symlink from PLUGIN_DIR down to `path` inclusive
-    (PLUGIN_DIR itself, then each ancestor component, then `path`), or None
-    if none of them is a symlink.
+    """Returns the first symlink or junction from PLUGIN_DIR down to `path`
+    inclusive (PLUGIN_DIR itself, then each ancestor component, then
+    `path`), or None if none of them is one.
 
     Every path under claude-plugin/ is generator-owned (see module
-    docstring), so a symlink anywhere in that tree -- not just at the leaf
-    -- is already anomalous: `path.parent.mkdir(parents=True, exist_ok=True)`
-    would silently walk through a symlinked ancestor directory and write
-    outside claude-plugin/ entirely, before a leaf-only `path.is_symlink()`
-    check ever ran. That includes PLUGIN_DIR itself being a symlink, which
-    is checked first for the same reason. Checking every component closes
-    that gap, and reusing the same check for --check's staleness test closes
-    the matching gap there: a symlink whose target's content happens to
-    match `expected` would otherwise pass `path.read_bytes() != expected`
-    and never get flagged, even though the path itself still isn't the
-    generator-owned regular file it's supposed to be.
+    docstring), so a symlink or junction anywhere in that tree -- not just
+    at the leaf -- is already anomalous: `path.parent.mkdir(parents=True,
+    exist_ok=True)` would silently walk through a redirected ancestor
+    directory and write outside claude-plugin/ entirely, before a
+    leaf-only check ever ran. That includes PLUGIN_DIR itself being one,
+    which is checked first for the same reason. Checking every component
+    closes that gap, and reusing the same check for --check's staleness
+    test closes the matching gap there: a redirection whose target's
+    content happens to match `expected` would otherwise pass
+    `path.read_bytes() != expected` and never get flagged, even though the
+    path itself still isn't the generator-owned regular file it's supposed
+    to be.
     """
-    if PLUGIN_DIR.is_symlink():
+    if _is_reparse_point(PLUGIN_DIR):
         return PLUGIN_DIR
     cursor = PLUGIN_DIR
     for part in path.relative_to(PLUGIN_DIR).parts:
         cursor = cursor / part
-        if cursor.is_symlink():
+        if _is_reparse_point(cursor):
             return cursor
         if not cursor.exists():
             break
@@ -306,20 +332,58 @@ def _first_symlink_under_plugin_dir(path):
 
 
 def _is_windows_directory_symlink(path):
-    """True if `path` is a symlink or junction whose own reparse point is a
-    *directory* type, on Windows; always False on POSIX.
+    """True if the entry at `path` itself has Windows' FILE_ATTRIBUTE_DIRECTORY
+    bit set, on Windows; always False on POSIX.
+
+    Callers must already know `path` is a symlink or junction (e.g. via
+    _is_reparse_point()) before calling this -- it only distinguishes a
+    directory-type reparse point from a file-type one, and returns True for
+    an ordinary directory that isn't a reparse point at all too (see
+    TestIsWindowsDirectorySymlink.test_windows_directory_entry_is_true),
+    since it never itself checks FILE_ATTRIBUTE_REPARSE_POINT.
 
     Reads the attribute off the link itself via `os.lstat` (which does not
     follow the link), rather than following it with `Path.is_dir()` -- a
-    *broken* directory symlink (target deleted or looping) still needs
-    rmdir(), but `is_dir()` can't tell, since it has nothing left to follow
-    and inspect and simply returns False. On POSIX a symlink is never
-    itself a directory entry regardless of what it points at, so this is
-    unconditionally False there and the caller always uses unlink().
+    *broken* directory symlink or junction (target deleted or looping)
+    still needs rmdir(), but `is_dir()` can't tell, since it has nothing
+    left to follow and inspect and simply returns False. On POSIX a symlink
+    is never itself a directory entry regardless of what it points at, so
+    this is unconditionally False there and the caller always uses
+    unlink().
     """
     if os.name != "nt":
         return False
     return bool(os.lstat(path).st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+
+
+def _remove_plugin_owned_path(path):
+    """Remove a generator-owned path that must go before mkdir()/
+    write_bytes() can safely run again -- either a stray symlink/junction
+    found in a generated path's ancestry, or an extra tracked file left
+    over (itself possibly a symlink/junction) from a previous --write.
+
+    Dispatches rmdir() vs unlink() by _is_windows_directory_symlink()
+    (platform plus the entry's own directory-attribute bit) rather than
+    Path.is_dir(), which follows the link and would misjudge a *broken*
+    directory symlink/junction as not-a-directory, since it has no target
+    left to inspect -- unlink() unconditionally raises PermissionError on
+    a plain directory, so a broken one misjudged that way would crash
+    here. (On a *live* Windows junction, unlink() alone was empirically
+    found to also succeed here -- CPython's os.unlink() falls back to
+    RemoveDirectoryW internally -- but this module doesn't depend on that
+    undocumented fallback existing, covering every Python version, or
+    extending to an actual directory *symlink*, which this dev machine has
+    no privilege to construct and check directly.) On POSIX, rmdir() alone
+    raises NotADirectoryError on a symlink to a directory, since POSIX
+    rmdir() does not follow a trailing symlink -- _is_windows_directory_symlink()
+    is False unconditionally on POSIX, so unlink() is always chosen there,
+    which is always correct since a POSIX symlink is never itself a
+    directory entry regardless of what it points at.
+    """
+    if _is_windows_directory_symlink(path):
+        path.rmdir()
+    else:
+        path.unlink()
 
 
 def main():
@@ -330,10 +394,11 @@ def main():
     stale = [
         (path, expected)
         for path, expected in entries
-        # Symlink check first: a leaf path that's a symlink to a directory
-        # still has path.exists() == True, so path.read_bytes() would run
-        # next and raise IsADirectoryError uncaught instead of this loop
-        # cleanly reporting the path as stale.
+        # Symlink/junction check first: a leaf path that's one pointing at a
+        # directory still has path.exists() == True, so path.read_bytes()
+        # would run next and raise IsADirectoryError (POSIX) or
+        # PermissionError (Windows) uncaught, instead of this loop cleanly
+        # reporting the path as stale.
         if _first_symlink_under_plugin_dir(path) is not None
         or not path.exists()
         or path.read_bytes() != expected
@@ -356,38 +421,24 @@ def main():
         for path, expected in entries:
             # Checked (and removed) BEFORE mkdir, not after: every path
             # under claude-plugin/ is generator-owned (see module
-            # docstring), so a symlink anywhere in this path's ancestry --
-            # not just at the leaf -- is already anomalous. mkdir(parents=
-            # True) would otherwise silently walk through a symlinked
-            # ancestor directory (writing outside claude-plugin/ entirely)
-            # before a leaf-only check ever ran; write_bytes() on a
-            # symlinked leaf would do the same for the file itself.
-            # Removing the first symlink found in the chain, PLUGIN_DIR down
-            # to the leaf, before mkdir runs keeps --write's output confined
-            # to the tree it's supposed to own either way.
+            # docstring), so a symlink or junction anywhere in this path's
+            # ancestry -- not just at the leaf -- is already anomalous.
+            # mkdir(parents=True) would otherwise silently walk through a
+            # redirected ancestor directory (writing outside claude-plugin/
+            # entirely) before a leaf-only check ever ran; write_bytes() on
+            # a redirected leaf would do the same for the file itself.
+            # Removing the first one found in the chain, PLUGIN_DIR down to
+            # the leaf, before mkdir runs keeps --write's output confined to
+            # the tree it's supposed to own either way. See
+            # _remove_plugin_owned_path()'s docstring for why this can't
+            # just be unlink().
             stray_symlink = _first_symlink_under_plugin_dir(path)
             if stray_symlink is not None:
-                # On Windows, os.unlink()/Path.unlink() only removes a
-                # *file* symlink -- a directory symlink (or junction) needs
-                # rmdir() instead, or it raises PermissionError. On POSIX, a
-                # symlink is never itself a directory entry regardless of
-                # what it points at, so unlink() is always correct there --
-                # rmdir() would instead raise NotADirectoryError on a
-                # symlink to a directory, since POSIX rmdir() does not
-                # follow a trailing symlink. Gated on
-                # _is_windows_directory_symlink() (platform plus the link's
-                # own reparse-point type) rather than Path.is_dir() (which
-                # follows the link and would misjudge a *broken* directory
-                # symlink as not-a-directory, since it has no target left
-                # to inspect).
-                if _is_windows_directory_symlink(stray_symlink):
-                    stray_symlink.rmdir()
-                else:
-                    stray_symlink.unlink()
+                _remove_plugin_owned_path(stray_symlink)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(expected)
         for path in extras:
-            path.unlink()
+            _remove_plugin_owned_path(path)
         print(f"Wrote {len(entries)} file(s) to claude-plugin/, removed {len(extras)} extra file(s).")
         return 0
 

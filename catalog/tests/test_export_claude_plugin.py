@@ -542,6 +542,48 @@ class TestWriteRemovesStraySymlinks(unittest.TestCase):
         self.assertFalse(ancestor.is_symlink())
         self.assertEqual(leaf.read_text(encoding="utf-8"), "print('hi')\n")
 
+    def test_write_removes_a_stray_directory_junction_at_a_generated_ancestor(self):
+        # A 2026-09 follow-up review found that this loop's stray-detection
+        # used Path.is_symlink() alone, which (verified empirically on this
+        # machine's Python 3.12/Windows) returns False for a Windows
+        # junction -- a junction left at a generated ancestor would
+        # therefore have been walked straight through by mkdir(parents=True)
+        # rather than removed first. Unlike a real symlink (which raises
+        # WinError 1314 -- "a required privilege is not held by the
+        # client" -- unprivileged on this dev machine, see the skipTest
+        # above), a junction is created via `mklink /J` and needs no special
+        # privilege, so this sibling test actually runs here rather than
+        # skipping.
+        ancestor = self.root / "claude-plugin" / "skills" / "demo-skill"
+        ancestor.parent.mkdir(parents=True)
+        real_dir = self.root / "elsewhere-junction-target"
+        real_dir.mkdir()
+        (real_dir / "decoy.txt").write_text("should not survive\n", encoding="utf-8")
+        subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(ancestor), str(real_dir)],
+            check=True,
+            capture_output=True,
+        )
+
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
+                ecp.main()
+
+        leaf = ancestor / "scripts" / "run.py"
+        # Deliberately not asserting via ecp._is_reparse_point(ancestor) --
+        # that would be circular, since is_symlink()-only detection (the
+        # very bug this test targets) also makes that function itself
+        # report False for a junction regardless of whether it was ever
+        # removed. Checking for the junction's decoy file instead is an
+        # independent, non-circular signal: if the junction was never
+        # removed, ancestor still transparently resolves into real_dir and
+        # decoy.txt is reachable through it; only a genuine rmdir()-then-
+        # mkdir() makes ancestor a fresh, empty, generator-owned directory
+        # with no decoy.txt in it.
+        self.assertFalse((ancestor / "decoy.txt").exists())
+        self.assertEqual(leaf.read_text(encoding="utf-8"), "print('hi')\n")
+
 
 class TestWriteSymlinkRemovalChoosesRmdirOrUnlink(unittest.TestCase):
     """Same removal branch as TestWriteRemovesStraySymlinks, exercised
@@ -615,17 +657,103 @@ class TestWriteSymlinkRemovalChoosesRmdirOrUnlink(unittest.TestCase):
         fake_symlink.unlink.assert_called()
 
 
+class TestWriteExtraRemovalChoosesRmdirOrUnlink(unittest.TestCase):
+    """The *other* --write removal branch: `for path in extras:
+    _remove_plugin_owned_path(path)`, run over existing_plugin_files() -
+    expected_paths. A 2026-09 follow-up review found this loop called a
+    bare path.unlink() before _remove_plugin_owned_path() existed, even
+    though existing_plugin_files() deliberately admits a directory-type
+    symlink/junction into its result (see its own docstring and
+    _is_reparse_point()) - a bare unlink() on such an extra was never
+    proven safe.
+
+    Same mocking technique as TestWriteSymlinkRemovalChoosesRmdirOrUnlink
+    above, for the same reason (no privilege to create a real symlink here)
+    plus one more: even a real, unprivileged Windows junction can't stand
+    in for a git-tracked extra either, because `git add` on a junction path
+    does not track the junction itself as an entry at all - it walks
+    straight through and tracks the files inside instead (confirmed
+    empirically against this machine's git) - so existing_plugin_files(),
+    which is built entirely from `git ls-files`, can never actually return
+    a junction path from a real git-tracked fixture. existing_plugin_files()
+    is mocked directly instead, to return exactly the shape its own
+    docstring says it must be able to.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _init_git_repo(self.root)
+        _write_and_track(self.root, "CHANGELOG.md", "# Changelog\n\n## [1.0.0] - 2026-01-01\n\nInitial.\n")
+        _write_and_track(
+            self.root,
+            ".github/skills/demo-skill/SKILL.md",
+            '---\ndescription: "Demo skill"\n---\n\nBody.\n',
+        )
+        _write_and_track(self.root, ".github/skills/demo-skill/scripts/run.py", "print('hi')\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _patched(self):
+        return (
+            mock.patch.object(ecp, "LIBRARY_ROOT", self.root),
+            mock.patch.object(ecp, "SKILLS_DIR", self.root / ".github" / "skills"),
+            mock.patch.object(ecp, "CHANGELOG_PATH", self.root / "CHANGELOG.md"),
+            mock.patch.object(ecp, "PLUGIN_DIR", self.root / "claude-plugin"),
+            mock.patch.object(ecp, "PLUGIN_SKILLS_DIR", self.root / "claude-plugin" / "skills"),
+            mock.patch.object(
+                ecp, "PLUGIN_MANIFEST_PATH", self.root / "claude-plugin" / ".claude-plugin" / "plugin.json"
+            ),
+            mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
+        )
+
+    def _run_write_with_fake_extra(self, is_windows_directory_symlink_value):
+        fake_extra = mock.NonCallableMock(spec=Path)
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with mock.patch.object(ecp, "existing_plugin_files", return_value={fake_extra}):
+                with mock.patch.object(
+                    ecp,
+                    "_is_windows_directory_symlink",
+                    return_value=is_windows_directory_symlink_value,
+                ):
+                    with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
+                        ecp.main()
+        return fake_extra
+
+    def test_directory_extra_is_removed_with_rmdir_not_unlink(self):
+        fake_extra = self._run_write_with_fake_extra(is_windows_directory_symlink_value=True)
+        fake_extra.rmdir.assert_called()
+        fake_extra.unlink.assert_not_called()
+
+    def test_file_extra_is_removed_with_unlink_not_rmdir(self):
+        fake_extra = self._run_write_with_fake_extra(is_windows_directory_symlink_value=False)
+        fake_extra.unlink.assert_called()
+        fake_extra.rmdir.assert_not_called()
+
+
 class TestIsWindowsDirectorySymlink(unittest.TestCase):
     """_is_windows_directory_symlink() itself, against real filesystem
     entries rather than a mock -- the test above patches this function out
     entirely, so its own os.lstat()-based bit check needs separate,
-    non-mocked coverage. Symlink creation is unprivileged on this dev
-    machine (see TestWriteSymlinkRemovalChoosesRmdirOrUnlink), so this
-    exercises the same FILE_ATTRIBUTE_DIRECTORY check the function applies
-    to a stray symlink against a real directory and a real file instead --
-    lstat() reports the same attribute bit for either, since a symlink and
+    non-mocked coverage. This dev machine lacks the privilege to create a
+    real symlink (see TestWriteSymlinkRemovalChoosesRmdirOrUnlink), so the
+    first two tests below exercise the same FILE_ATTRIBUTE_DIRECTORY check
+    against a real (non-reparse-point) directory and a real file instead --
+    lstat() reports the same attribute bit either way, since a symlink and
     the directory/file it targets are just two different entries lstat()
     can be pointed at.
+
+    Neither of those two proves the actual bug this function exists to fix,
+    though: they're both live, followable entries, so Path(path).is_dir()
+    -- the buggy predicate this function replaced -- would answer both of
+    them correctly too. The bug is specifically about a *broken* directory
+    reparse point, which Path.is_dir() can't classify at all (it has nothing
+    left to follow) and silently reports as not-a-directory. Windows
+    junctions, unlike symlinks, need no elevated privilege to create, so
+    test_broken_windows_junction_is_true_even_though_is_dir_says_false
+    below constructs exactly that discriminating case for real.
     """
 
     def setUp(self):
@@ -650,6 +778,27 @@ class TestIsWindowsDirectorySymlink(unittest.TestCase):
         file_path = self.root / "a-file.txt"
         file_path.write_text("hi\n", encoding="utf-8")
         self.assertFalse(ecp._is_windows_directory_symlink(file_path))
+
+    @unittest.skipUnless(os.name == "nt", "mklink /J and st_file_attributes are Windows-only")
+    def test_broken_windows_junction_is_true_even_though_is_dir_says_false(self):
+        # A 2026-09 follow-up review found the three tests above all pass
+        # against the exact pre-fix predicate (Path(path).is_dir()) too --
+        # none of them is a symlink/junction at all, so is_dir() and the
+        # lstat() bit check agree on every one of them. This is the input
+        # class where they diverge, and the only one this function exists
+        # for: a directory-type reparse point whose target is gone, so
+        # is_dir() has nothing left to follow and wrongly reports False.
+        target = self.root / "junction-target"
+        target.mkdir()
+        junction = self.root / "junction-link"
+        subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(junction), str(target)],
+            check=True,
+            capture_output=True,
+        )
+        target.rmdir()
+        self.assertFalse(junction.is_dir())
+        self.assertTrue(ecp._is_windows_directory_symlink(junction))
 
 
 class TestPlanSymlinkToNonFileMocked(unittest.TestCase):
