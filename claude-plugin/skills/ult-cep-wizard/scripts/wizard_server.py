@@ -137,11 +137,13 @@ _EXTERNAL_ROOT_INVALID = object()
 # checks all call _reject on failure), so the Content-Length it reads
 # is attacker-controlled input, not a value any earlier check has
 # already validated. The drain reads in _REJECT_DRAIN_CHUNK_SIZE chunks rather
-# than one call sized to the full declared (or capped-unknown) length,
-# so a handler thread's actual memory use tracks bytes really received,
-# not the length a client merely claims; _MAX_DRAINED_REJECT_BODY still
-# caps the total a single malicious or misbehaving client can make this
-# thread read before giving up and closing without fully draining.
+# than one call sized to the full declared (or capped-unknown) length, so a
+# handler thread's peak memory use tracks a small, fixed multiple of
+# _REJECT_DRAIN_CHUNK_SIZE rather than the length a client merely claims, and
+# rather than the full body either (see the drain loop itself for exactly how
+# many chunks are live in memory at once); _MAX_DRAINED_REJECT_BODY still caps
+# the total a single malicious or misbehaving client can make this thread read
+# before giving up and closing without fully draining.
 #
 # _REJECT_DRAIN_TIMEOUT_SECONDS bounds how long any single recv() inside
 # the drain may block waiting for bytes that a silent client never sends,
@@ -160,8 +162,11 @@ _EXTERNAL_ROOT_INVALID = object()
 # the complexity.
 #
 # A malformed Content-Length (non-numeric or negative) gets a much shorter
-# _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS instead: since the header
-# can't be trusted, the drain has no real target length to read towards -
+# _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS instead. Like
+# _REJECT_DRAIN_TIMEOUT_SECONDS above, this is a per-recv() timeout, not a
+# cumulative deadline (see the trickling-client paragraph above for what that
+# implies here too). Since the header can't be trusted, the drain has no real
+# target length to read towards -
 # it reads up to _MAX_DRAINED_REJECT_BODY on faith that a body may still be
 # in flight, and the underlying socket read only returns once each
 # individual recv() either yields data or times out. As long as the client

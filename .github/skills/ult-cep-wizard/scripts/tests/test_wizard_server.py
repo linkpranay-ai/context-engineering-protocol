@@ -455,6 +455,28 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
             sock.close()
 
     def test_non_numeric_content_length_still_gets_the_403_not_a_dropped_connection(self):
+        # A later 2026-09 follow-up review found that the elapsed-time check
+        # below, on its own, only ever measures the *patched* 0.3s value -
+        # nothing here checks the real, unpatched
+        # _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS against its sibling
+        # _REJECT_DRAIN_TIMEOUT_SECONDS, so this test kept passing even when
+        # the reviewer reverted the real unknown-length timeout to 5.0 (i.e.
+        # equal to _REJECT_DRAIN_TIMEOUT_SECONDS) - exactly the "dedicated
+        # unknown-length timeout reverted to reuse the longer timeout" race
+        # the class docstring above describes, and exactly what this test is
+        # supposed to catch. This assertion runs before the patch below takes
+        # effect (and would still hold after, since mock.patch restores the
+        # original on exit) and checks the real production relationship
+        # directly, independent of whatever value gets patched in for timing
+        # determinism.
+        self.assertLess(
+            ws._REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS,
+            ws._REJECT_DRAIN_TIMEOUT_SECONDS,
+            "the unknown-length drain timeout must stay shorter than the "
+            "declared-length one, or a malformed Content-Length pays the same "
+            "multi-second cost as a well-formed one - see the class docstring's "
+            '"race" paragraph',
+        )
         # A 2026-09 follow-up review noted that without an elapsed-time
         # check, this test's pass/fail hinged on an incidental tie between
         # this class's 5s client-side socket timeout and a fully-reverted
@@ -486,6 +508,17 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
         )
 
     def test_negative_content_length_still_gets_the_403_not_a_hang(self):
+        # Same rationale as the non-numeric case above for both the static
+        # assertion (real, unpatched constants) and the patched timing check
+        # below it.
+        self.assertLess(
+            ws._REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS,
+            ws._REJECT_DRAIN_TIMEOUT_SECONDS,
+            "the unknown-length drain timeout must stay shorter than the "
+            "declared-length one, or a malformed Content-Length pays the same "
+            "multi-second cost as a well-formed one - see the class docstring's "
+            '"race" paragraph',
+        )
         # Same rationale as the non-numeric case above: patched so the
         # bound tracks a fixed test value, not the real production default.
         with mock.patch.object(ws, "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS", 0.3):
@@ -637,11 +670,14 @@ class TestRejectDrainChunkSize(WizardServerTestCase):
         )
         # The read_sizes assertions above only prove the drain's own read()
         # calls were chunk-bounded - they'd pass identically if _reject()
-        # hung or raised partway through the drain and never reached
-        # send_response()/wfile at all. Confirming the 403 actually landed
-        # in wfile is what proves this handler instance, wired up by hand
-        # via object.__new__ rather than real socketserver dispatch, still
-        # ran _reject() to completion end to end.
+        # raised partway through the drain and never reached
+        # send_response()/wfile at all (this call is synchronous on the test
+        # thread, so a hang would hang the test itself rather than let it
+        # pass - it is a raise, not a hang, that read_sizes alone cannot
+        # distinguish from a completed drain). Confirming the 403 actually
+        # landed in wfile is what proves this handler instance, wired up by
+        # hand via object.__new__ rather than real socketserver dispatch,
+        # still ran _reject() to completion end to end.
         self.assertIn(b"403", handler.wfile.getvalue())
 
 
