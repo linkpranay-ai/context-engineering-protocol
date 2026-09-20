@@ -10,6 +10,7 @@ with:
 python -m unittest discover -s catalog/tests -v
 """
 
+import locale
 import subprocess
 import sys
 import tempfile
@@ -278,9 +279,15 @@ class TestTrackedSkillFiles(unittest.TestCase):
             # kwargs get passed: text=True decodes AND applies
             # universal-newline translation (\r -> \n), same as the real
             # implementation this replaces -- capture_output-only returns
-            # raw, untranslated bytes.
+            # raw, untranslated bytes. When encoding isn't given explicitly,
+            # real subprocess.run(text=True) falls back to
+            # locale.getpreferredencoding(False), not a hardcoded "utf-8" --
+            # matched here rather than assumed, so this fake can't silently
+            # hide the locale-decoding hazard on a box whose preferred
+            # encoding isn't UTF-8.
             if kwargs.get("text"):
-                decoded = raw_stdout.decode(kwargs.get("encoding") or "utf-8")
+                encoding = kwargs.get("encoding") or locale.getpreferredencoding(False)
+                decoded = raw_stdout.decode(encoding)
                 return mock.Mock(stdout=decoded.replace("\r\n", "\n").replace("\r", "\n"))
             return mock.Mock(stdout=raw_stdout)
 
@@ -290,6 +297,26 @@ class TestTrackedSkillFiles(unittest.TestCase):
             result = ecp.tracked_skill_files("demo-skill")
 
         self.assertEqual(result, [Path("odd\rname.md")])
+
+    def test_a_real_non_ascii_path_is_correctly_reported_not_silently_dropped(self):
+        # Exercises the actual `git ls-files -z --` call end to end, no
+        # subprocess mock -- mirrors TestExistingPluginFiles's equivalent
+        # test. The \r test above mocks subprocess.run and only varies the
+        # `text` kwarg, so it can't detect a regression that dropped the -z
+        # flag itself (plain `git ls-files` quotes/octal-escapes non-ASCII
+        # paths by default, which would make this file come back under a
+        # quoted name and fail the exact-match assert below).
+        _init_git_repo(self.root)
+        _write_and_track(
+            self.root, ".github/skills/demo-skill/café.md", "non-ascii filename\n"
+        )
+
+        with mock.patch.object(ecp, "LIBRARY_ROOT", self.root), mock.patch.object(
+            ecp, "SKILLS_DIR", self.root / ".github" / "skills"
+        ):
+            result = ecp.tracked_skill_files("demo-skill")
+
+        self.assertEqual(result, [Path("café.md")])
 
 
 class TestIncludedSkillDirs(unittest.TestCase):

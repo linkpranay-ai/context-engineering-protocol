@@ -113,6 +113,22 @@ class TestCheckPrivateRefs(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("test_something_else.py:1:", out.getvalue())
 
+    def test_a_non_ascii_path_is_scanned_not_silently_dropped(self):
+        # A plain `git ls-files` (no -z) quotes and octal-escapes any path
+        # containing a non-ASCII byte by default (core.quotePath), which
+        # would make _tracked_files() yield a quoted string that doesn't
+        # exist on disk -- the path.is_file() filter then drops it, and the
+        # file is never scanned for a private-doc reference at all.
+        _write_and_track(
+            self.root,
+            "café-notes.md",
+            "see ISSUES.md Round 2 finding 9 for details\n",
+        )
+        with self._captured_stdout() as out:
+            code = cpr.run_check(self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("café-notes.md:1:", out.getvalue())
+
     def test_other_denylisted_filenames_are_each_caught(self):
         # ISSUES.md gets its own dedicated coverage above (allow-marker,
         # untracked-file, sibling-file cases); every other denylisted name

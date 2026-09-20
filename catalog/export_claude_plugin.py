@@ -73,21 +73,50 @@ def current_version():
     return m.group(1)
 
 
-def included_skill_dirs():
+def _decode_git_ls_files_z(raw_stdout):
+    """Decodes the raw -z/NUL-delimited stdout of a `git ls-files -z` call as
+    UTF-8, rather than via subprocess.run(text=True): text=True decodes via
+    the platform's locale encoding (a Windows codepage like cp1252, not
+    necessarily UTF-8) AND applies universal-newline translation, which would
+    turn a literal \\r byte inside a path into \\n -- corrupting the one case
+    -z's NUL-delimiting exists to keep intact. Decoding bytes directly
+    sidesteps both. In the rare case a tracked path genuinely isn't valid
+    UTF-8, fails with a clear message instead of a raw traceback.
+    """
+    try:
+        return raw_stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SystemExit(
+            f"export_claude_plugin: git reported a tracked path that isn't "
+            f"valid UTF-8 ({exc}) -- rename the file or investigate with "
+            "`git ls-files -z` directly."
+        ) from exc
+
+
+def included_skill_dirs(tracked_by_dir=None):
     """Skill directories to advertise in plugin.json/README.md -- requires
     SKILL.md to be git-tracked, not just present on disk. An untracked
     SKILL.md (e.g. a skill being drafted, never `git add`ed) would
     otherwise get a README entry and a loadable description while
     tracked_skill_files() -- which is git-driven -- exports zero files
     for it, advertising a command that ships nothing.
+    Sorted by name (not by Path, whose ordering is locale/platform-dependent
+    -- case-insensitive on Windows, case-sensitive on POSIX) so README/plugin
+    output is identical across the platforms this repo's CI runs on.
+    Accepts an optional dict to record each included dir's tracked_skill_files()
+    result into, keyed by dir name -- plan() passes one through so it doesn't
+    have to re-run the same `git ls-files` call a second time per skill dir.
     """
     names = []
-    for p in sorted(SKILLS_DIR.iterdir()):
+    for p in sorted(SKILLS_DIR.iterdir(), key=lambda path: path.name):
         if not p.is_dir() or p.name in EXCLUDED_SKILLS:
             continue
         if not (p / "SKILL.md").exists():
             continue
-        if Path("SKILL.md") not in tracked_skill_files(p.name):
+        tracked = tracked_skill_files(p.name)
+        if tracked_by_dir is not None:
+            tracked_by_dir[p.name] = tracked
+        if Path("SKILL.md") not in tracked:
             continue
         names.append(p.name)
     return names
@@ -100,19 +129,14 @@ def tracked_skill_files(skill_dir_name):
     plain `git ls-files` quotes (and octal-escapes) any path containing a
     non-ASCII byte by default -- -z always prints paths raw, so a real
     file never gets missed here because its path merely looked unusual.
-    Decoded manually as UTF-8 from raw bytes rather than via
-    subprocess.run(text=True): git always writes path bytes as UTF-8, but
-    text=True decodes via the platform's locale encoding (a Windows
-    codepage like cp1252, not UTF-8) AND applies universal-newline
-    translation, which would turn a literal \\r byte inside a path into
-    \\n -- corrupting the one case -z's NUL-delimiting exists to keep
-    intact. Decoding bytes directly sidesteps both.
+    See _decode_git_ls_files_z() for why the output is decoded manually
+    rather than via subprocess.run(text=True).
     """
     skill_path = SKILLS_DIR / skill_dir_name
-    out = subprocess.run(
+    out = _decode_git_ls_files_z(subprocess.run(
         ["git", "-C", str(LIBRARY_ROOT), "ls-files", "-z", "--", str(skill_path)],
         capture_output=True, check=True,
-    ).stdout.decode("utf-8")
+    ).stdout)
     rel_root_len = len(skill_path.relative_to(LIBRARY_ROOT).as_posix()) + 1
     return sorted(Path(entry[rel_root_len:]) for entry in out.split("\0") if entry)
 
@@ -163,7 +187,8 @@ def plan():
     that should exist under PLUGIN_DIR once written (used to prune extras).
     """
     version = current_version()
-    skill_dirs = included_skill_dirs()
+    tracked_by_dir = {}
+    skill_dirs = included_skill_dirs(tracked_by_dir)
 
     entries = [
         (PLUGIN_MANIFEST_PATH, render_manifest(version)),
@@ -172,21 +197,35 @@ def plan():
     for skill_dir in skill_dirs:
         src_root = SKILLS_DIR / skill_dir
         dst_root = PLUGIN_SKILLS_DIR / skill_dir
-        for rel_path in tracked_skill_files(skill_dir):
+        for rel_path in tracked_by_dir[skill_dir]:
             src = src_root / rel_path
-            if src.is_symlink() and not src.exists():
-                # A tracked symlink whose target no longer exists looks
-                # exactly like a missing file to is_file() (it follows the
-                # link), but "run `git status`" is bad advice there -- the
-                # symlink itself IS on disk and git sees nothing wrong;
-                # it's the target that's gone. Flagged separately so the
-                # message points at the actual problem.
-                raise SystemExit(
-                    f"export_claude_plugin: {src.relative_to(LIBRARY_ROOT).as_posix()} "
-                    "is a tracked symlink whose target is missing -- fix or remove "
-                    "the symlink before regenerating claude-plugin/."
-                )
-            if not src.is_file():
+            if src.is_symlink():
+                if not src.exists():
+                    # A tracked symlink whose target no longer exists looks
+                    # exactly like a missing file to is_file() (it follows the
+                    # link), but "run `git status`" is bad advice there -- the
+                    # symlink itself IS on disk and git sees nothing wrong;
+                    # it's the target that's gone. Flagged separately so the
+                    # message points at the actual problem.
+                    raise SystemExit(
+                        f"export_claude_plugin: {src.relative_to(LIBRARY_ROOT).as_posix()} "
+                        "is a tracked symlink whose target is missing -- fix or remove "
+                        "the symlink before regenerating claude-plugin/."
+                    )
+                if not src.is_file():
+                    # A symlink whose target exists but isn't a regular file
+                    # (a directory, a gitlink/submodule) -- is_file() alone
+                    # would fall through to the generic "missing on disk"
+                    # branch below, which is equally wrong: git sees nothing
+                    # missing, the symlink resolves fine, it just doesn't
+                    # point at something this tool can read as a file.
+                    raise SystemExit(
+                        f"export_claude_plugin: {src.relative_to(LIBRARY_ROOT).as_posix()} "
+                        "is a tracked symlink that resolves to something other than "
+                        "a regular file -- fix or remove the symlink before "
+                        "regenerating claude-plugin/."
+                    )
+            elif not src.is_file():
                 # tracked_skill_files() reflects git's index, not the
                 # worktree -- a file tracked in git but removed from disk
                 # without `git rm` would otherwise crash this read_bytes()
@@ -223,10 +262,10 @@ def existing_plugin_files():
     """
     if not PLUGIN_DIR.exists():
         return set()
-    out = subprocess.run(
+    out = _decode_git_ls_files_z(subprocess.run(
         ["git", "-C", str(LIBRARY_ROOT), "ls-files", "-z", "--", str(PLUGIN_DIR)],
         capture_output=True, check=True,
-    ).stdout.decode("utf-8")
+    ).stdout)
     candidates = (LIBRARY_ROOT / entry for entry in out.split("\0") if entry)
     return {path for path in candidates if path.is_file() or path.is_symlink()}
 
@@ -254,6 +293,14 @@ def main():
     if mode == "--write":
         for path, expected in entries:
             path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_symlink():
+                # Every path under claude-plugin/ is generator-owned (see
+                # module docstring) -- a symlink ever ending up at a
+                # generated path is already anomalous. write_bytes() would
+                # otherwise follow it and write outside claude-plugin/
+                # entirely; removing it first keeps --write's output
+                # confined to the tree it's supposed to own.
+                path.unlink()
             path.write_bytes(expected)
         for path in extras:
             path.unlink()

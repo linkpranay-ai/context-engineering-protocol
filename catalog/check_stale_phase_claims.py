@@ -86,15 +86,23 @@ ALLOW_MARKER_RE = re.compile(r"<!--\s*stale-phase-claim-allow\s*:.*-->")
 
 def _tracked_files(library_root: Path):
     """Every `.py`/`.js`/`.md`/`.html` file `git` tracks in `library_root` -
-    not a filesystem walk, so untracked scratch files are never in scope."""
+    not a filesystem walk, so untracked scratch files are never in scope.
+    -z/NUL-splits rather than reading newline-delimited output, since a plain
+    `git ls-files` quotes (and octal-escapes) any path containing a non-ASCII
+    byte by default - a file whose path merely looked unusual would otherwise
+    come back quoted, fail the `path.is_file()` check below, and get silently
+    dropped from this scan rather than checked for a stale phase claim.
+    Decoded manually as UTF-8 from raw bytes rather than via
+    subprocess.run(text=True), which decodes via the platform's locale
+    encoding (a Windows codepage like cp1252, not UTF-8) - same reasoning as
+    `export_claude_plugin.py`'s `tracked_skill_files()`."""
     out = subprocess.run(
-        ["git", "ls-files"],
+        ["git", "ls-files", "-z"],
         cwd=library_root,
         capture_output=True,
-        text=True,
         check=True,
-    )
-    for rel in out.stdout.splitlines():
+    ).stdout.decode("utf-8")
+    for rel in out.split("\0"):
         rel = rel.strip()
         if not rel:
             continue

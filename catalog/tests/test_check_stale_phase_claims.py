@@ -165,6 +165,22 @@ class TestCheckStalePhaseClaims(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("static/index.html:1:", out.getvalue())
 
+    def test_a_non_ascii_path_is_scanned_not_silently_dropped(self):
+        # A plain `git ls-files` (no -z) quotes and octal-escapes any path
+        # containing a non-ASCII byte by default (core.quotePath), which
+        # would make _tracked_files() yield a quoted string that doesn't
+        # exist on disk -- the path.is_file() filter then drops it, and the
+        # file is never scanned for a stale phase claim at all.
+        _write_and_track(
+            self.root,
+            "café-notes.md",
+            "that endpoint does not exist until Phase 1\n",
+        )
+        with _captured_stdout() as out:
+            code = cspc.run_check(self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("café-notes.md:1:", out.getvalue())
+
     def test_until_phase_catches_the_disabled_until_phase_shape(self):
         # The broader "until Phase" pattern (not just "exist until Phase")
         # exists specifically to catch 6c61e2c's shape: a feature described
