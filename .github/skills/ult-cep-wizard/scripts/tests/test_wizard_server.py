@@ -420,14 +420,18 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
     TestRejectDrainsRequestBody's own large-body case. Reverting only the
     dedicated unknown-length timeout (so the unknown-length drain reuses
     the longer _REJECT_DRAIN_TIMEOUT_SECONDS instead of
-    _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS) makes all four
-    malformed-header cases below fail outright with a client-side
-    TimeoutError or ConnectionAbortedError rather than merely running
-    slow: at this class's default 5-second client-side socket timeout, the
-    server's own drain deadline expires at essentially that same instant,
-    so the client gives up before the delayed 403 ever arrives - a clear,
-    reliable failure this class caught the first time this exact
-    regression was introduced, not a flaky one."""
+    _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS) puts this class's
+    default 5-second client-side socket timeout in a race against a
+    server-side drain deadline that is now also 5 seconds - which side
+    loses is not deterministic. Sometimes the client's recv() times out
+    first, surfacing as a client-side TimeoutError or
+    ConnectionAbortedError: a clear failure. Other times the server's
+    delayed 403 narrowly wins the race and reaches the client just under
+    5s instead of the ~0.5s a correctly-scoped unknown-length timeout
+    produces - with no check on elapsed time, that outcome looks like an
+    ordinary pass. The two elapsed-time-bounded tests directly below exist
+    to close that second path, so this revert is caught either way rather
+    than only on whichever run happens to lose the race."""
 
     def _raw_reject_request(self, content_length_header, body=b"", client_timeout=5.0):
         sock = socket.create_connection(("127.0.0.1", self.port), timeout=client_timeout)
@@ -455,33 +459,44 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
         # check, this test's pass/fail hinged on an incidental tie between
         # this class's 5s client-side socket timeout and a fully-reverted
         # _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS reusing the same 5s
-        # _REJECT_DRAIN_TIMEOUT_SECONDS - a regression there would pass
-        # silently either way. The real drain is a consistent ~0.5s
-        # (measured), so 1.0s leaves ~2x headroom for timing noise while
-        # still catching a meaningfully-sized regression (e.g. the timeout
-        # tripling to 1.5s); a smaller regression than that could still
-        # slip through this bound.
-        start = time.monotonic()
-        response = self._raw_reject_request("abc", body=b"irrelevant")
-        elapsed = time.monotonic() - start
+        # _REJECT_DRAIN_TIMEOUT_SECONDS (see the class docstring's "race"
+        # paragraph) - a regression there could pass silently. A later pass
+        # replaced the original bound (1.0s, chosen as ~2x the real ~0.5s
+        # default) with a patched, test-owned value: asserting against the
+        # real default directly means the bound's headroom - and whether
+        # it still catches a meaningful regression at all - silently
+        # drifts every time that default is retuned, and a small real
+        # value leaves little room against timing noise on a loaded CI
+        # box. Patching _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS down
+        # to a fixed 0.3s and asserting well above it (1.5s, still
+        # comfortably under the 5s long-timeout/client-timeout ceiling)
+        # keeps the same "did the short timeout apply, not the long one"
+        # check deterministic regardless of the real production value.
+        with mock.patch.object(ws, "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS", 0.3):
+            start = time.monotonic()
+            response = self._raw_reject_request("abc", body=b"irrelevant")
+            elapsed = time.monotonic() - start
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
         self.assertLess(
             elapsed,
-            1.0,
-            f"drain took {elapsed:.2f}s - expected the short "
+            1.5,
+            f"drain took {elapsed:.2f}s - expected the (patched) short "
             "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS to apply here, "
             "not something closer to the longer declared-length timeout",
         )
 
     def test_negative_content_length_still_gets_the_403_not_a_hang(self):
-        start = time.monotonic()
-        response = self._raw_reject_request("-1", body=b"irrelevant")
-        elapsed = time.monotonic() - start
+        # Same rationale as the non-numeric case above: patched so the
+        # bound tracks a fixed test value, not the real production default.
+        with mock.patch.object(ws, "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS", 0.3):
+            start = time.monotonic()
+            response = self._raw_reject_request("-1", body=b"irrelevant")
+            elapsed = time.monotonic() - start
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
         self.assertLess(
             elapsed,
-            1.0,
-            f"drain took {elapsed:.2f}s - expected the short "
+            1.5,
+            f"drain took {elapsed:.2f}s - expected the (patched) short "
             "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS to apply here, "
             "not something closer to the longer declared-length timeout",
         )
@@ -620,6 +635,14 @@ class TestRejectDrainChunkSize(WizardServerTestCase):
             "read() call - expected every call bounded by the 256-byte "
             "(patched) _REJECT_DRAIN_CHUNK_SIZE",
         )
+        # The read_sizes assertions above only prove the drain's own read()
+        # calls were chunk-bounded - they'd pass identically if _reject()
+        # hung or raised partway through the drain and never reached
+        # send_response()/wfile at all. Confirming the 403 actually landed
+        # in wfile is what proves this handler instance, wired up by hand
+        # via object.__new__ rather than real socketserver dispatch, still
+        # ran _reject() to completion end to end.
+        self.assertIn(b"403", handler.wfile.getvalue())
 
 
 class TestApiStatusRequiresSession(WizardServerTestCase):

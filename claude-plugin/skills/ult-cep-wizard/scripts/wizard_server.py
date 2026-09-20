@@ -259,11 +259,13 @@ def _make_handler(ctx: _ServerContext):
             #     response for the un-drained remainder, but that's the
             #     pre-existing race this fix narrows, not a new failure
             #     mode); the read itself is chunked at
-            #     _REJECT_DRAIN_CHUNK_SIZE, and each chunk is discarded
-            #     before the next is read, so this thread's actual memory
-            #     use tracks one chunk at a time, not the full declared or
-            #     capped length up front - the cap bounds total bytes
-            #     drained, the chunk size is what bounds peak memory;
+            #     _REJECT_DRAIN_CHUNK_SIZE rather than in one read() up to
+            #     the full declared or capped length - `chunk` is only
+            #     rebound once the next read() call returns, so the
+            #     previous chunk is still live in memory while that next
+            #     read blocks, making actual peak usage two chunks, not
+            #     one; the cap bounds total bytes drained over the whole
+            #     loop, the chunk size is what bounds that per-read peak;
             #   - the read is bounded by a temporary socket timeout so a
             #     client that declares a length (known or not) and then
             #     sends less than that (or nothing) cannot hang this
