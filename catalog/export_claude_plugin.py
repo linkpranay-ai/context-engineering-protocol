@@ -83,14 +83,23 @@ def included_skill_dirs():
 def tracked_skill_files(skill_dir_name):
     """Git-tracked file paths (relative to the skill dir) for one skill --
     excludes local-only build artifacts (e.g. __pycache__) that git ignores.
+    -z/NUL-splits rather than reading newline-delimited output, since a
+    plain `git ls-files` quotes (and octal-escapes) any path containing a
+    non-ASCII byte by default -- -z always prints paths raw, so a real
+    file never gets missed here because its path merely looked unusual.
+    encoding="utf-8" is explicit too: git always writes path bytes as
+    UTF-8, but text=True alone decodes via the platform's locale encoding,
+    which on Windows is a codepage (e.g. cp1252) that mangles anything
+    outside it -- without this, -z fixes the quoting but the decode step
+    would still corrupt the same non-ASCII paths it was meant to preserve.
     """
     skill_path = SKILLS_DIR / skill_dir_name
     out = subprocess.run(
-        ["git", "-C", str(LIBRARY_ROOT), "ls-files", "--", str(skill_path)],
-        capture_output=True, text=True, check=True,
+        ["git", "-C", str(LIBRARY_ROOT), "ls-files", "-z", "--", str(skill_path)],
+        capture_output=True, text=True, check=True, encoding="utf-8",
     ).stdout
     rel_root_len = len(skill_path.relative_to(LIBRARY_ROOT).as_posix()) + 1
-    return sorted(Path(line[rel_root_len:]) for line in out.splitlines() if line)
+    return sorted(Path(entry[rel_root_len:]) for entry in out.split("\0") if entry)
 
 
 def render_manifest(version):
@@ -150,6 +159,18 @@ def plan():
         dst_root = PLUGIN_SKILLS_DIR / skill_dir
         for rel_path in tracked_skill_files(skill_dir):
             src = src_root / rel_path
+            if not src.is_file():
+                # tracked_skill_files() reflects git's index, not the
+                # worktree -- a file tracked in git but removed from disk
+                # without `git rm` (or staged for deletion but not yet
+                # committed) would otherwise crash this read_bytes() call
+                # with a raw FileNotFoundError traceback instead of a
+                # message that says what's actually wrong.
+                raise SystemExit(
+                    f"export_claude_plugin: {src.relative_to(LIBRARY_ROOT).as_posix()} "
+                    "is tracked by git but missing on disk -- run `git status` to "
+                    "investigate before regenerating claude-plugin/."
+                )
             entries.append((dst_root / rel_path, src.read_bytes()))
 
     expected_paths = {path for path, _ in entries}
@@ -161,21 +182,27 @@ def existing_plugin_files():
     -- same git ls-files technique as tracked_skill_files(), so local-only
     build artifacts (__pycache__, .pytest_cache, etc.) picked up by an
     rglob("*") walk never show up as false "extra" files under --check.
+    -z/NUL-splits and the explicit encoding="utf-8" are for the same
+    non-ASCII-path reason as tracked_skill_files() -- see its docstring.
     Trade-off: an untracked file that also isn't gitignored (e.g. added by
     hand and never `git add`ed) is no longer flagged as extra either --
     fine for CI's fresh checkout, where every real file is tracked. The
-    is_file() filter below also covers a file that's tracked in the index
-    but was deleted from disk without `git rm`, so --write's cleanup pass
-    never tries to unlink a path that isn't there.
+    is_file()-or-is_symlink() filter below also covers a path that's
+    tracked in the index but was deleted from disk without `git rm`, so
+    --write's cleanup pass never tries to unlink a path that isn't there
+    at all; is_symlink() is included alongside is_file() so a tracked
+    symlink whose target is missing (is_file() alone would call that
+    "not there" too, since it follows the link) still comes back and gets
+    cleaned up, rather than silently surviving --write forever.
     """
     if not PLUGIN_DIR.exists():
         return set()
     out = subprocess.run(
-        ["git", "-C", str(LIBRARY_ROOT), "ls-files", "--", str(PLUGIN_DIR)],
-        capture_output=True, text=True, check=True,
+        ["git", "-C", str(LIBRARY_ROOT), "ls-files", "-z", "--", str(PLUGIN_DIR)],
+        capture_output=True, text=True, check=True, encoding="utf-8",
     ).stdout
-    candidates = (LIBRARY_ROOT / line for line in out.splitlines() if line)
-    return {path for path in candidates if path.is_file()}
+    candidates = (LIBRARY_ROOT / entry for entry in out.split("\0") if entry)
+    return {path for path in candidates if path.is_file() or path.is_symlink()}
 
 
 def main():
