@@ -121,10 +121,13 @@ class TestExistingPluginFiles(unittest.TestCase):
             result = ecp.existing_plugin_files()
 
         self.assertEqual(result, set())
-        # Mirrors main()'s --write cleanup loop exactly (`for path in
-        # extras: path.unlink()`) -- makes the link between "this function
-        # excludes the deleted-but-tracked path" and "so --write's cleanup
-        # loop can't crash on it" mechanically explicit, not just implied.
+        # main()'s --write cleanup loop only ever unlink()s a path that
+        # came back from this function (directly, or via
+        # _remove_plugin_owned_path() for a reparse point) -- this makes
+        # the link between "this function excludes the deleted-but-tracked
+        # path" and "so that cleanup loop can't crash trying to remove a
+        # path that isn't there" mechanically explicit, not just implied,
+        # without hardcoding the loop's exact current shape here.
         for path in result:
             path.unlink()
 
@@ -542,6 +545,7 @@ class TestWriteRemovesStraySymlinks(unittest.TestCase):
         self.assertFalse(ancestor.is_symlink())
         self.assertEqual(leaf.read_text(encoding="utf-8"), "print('hi')\n")
 
+    @unittest.skipUnless(os.name == "nt", "mklink /J is Windows-only")
     def test_write_removes_a_stray_directory_junction_at_a_generated_ancestor(self):
         # A 2026-09 follow-up review found that this loop's stray-detection
         # used Path.is_symlink() alone, which (verified empirically on this
@@ -554,16 +558,28 @@ class TestWriteRemovesStraySymlinks(unittest.TestCase):
         # above), a junction is created via `mklink /J` and needs no special
         # privilege, so this sibling test actually runs here rather than
         # skipping.
+        #
+        # A later 2026-09 follow-up review found this test had no
+        # skipUnless guard at all: `cmd` doesn't exist on this repo's
+        # ubuntu-latest CI leg, so the bare subprocess.run() below raised
+        # FileNotFoundError there and hard-failed the whole suite -- the
+        # skipUnless above and the try/except fallback below (mirroring
+        # the real-symlink sibling test's own skipTest pattern, for a
+        # privilege-restricted Windows host rather than a missing `cmd`)
+        # both guard against that.
         ancestor = self.root / "claude-plugin" / "skills" / "demo-skill"
         ancestor.parent.mkdir(parents=True)
         real_dir = self.root / "elsewhere-junction-target"
         real_dir.mkdir()
         (real_dir / "decoy.txt").write_text("should not survive\n", encoding="utf-8")
-        subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(ancestor), str(real_dir)],
-            check=True,
-            capture_output=True,
-        )
+        try:
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(ancestor), str(real_dir)],
+                check=True,
+                capture_output=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            self.skipTest(f"junction creation unsupported/unprivileged here: {exc}")
 
         patches = self._patched()
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
@@ -658,26 +674,35 @@ class TestWriteSymlinkRemovalChoosesRmdirOrUnlink(unittest.TestCase):
 
 
 class TestWriteExtraRemovalChoosesRmdirOrUnlink(unittest.TestCase):
-    """The *other* --write removal branch: `for path in extras:
-    _remove_plugin_owned_path(path)`, run over existing_plugin_files() -
-    expected_paths. A 2026-09 follow-up review found this loop called a
-    bare path.unlink() before _remove_plugin_owned_path() existed, even
-    though existing_plugin_files() deliberately admits a directory-type
+    """The *other* --write removal branch, in main()'s extras loop. A
+    2026-09 follow-up review found this loop called a bare path.unlink()
+    before _remove_plugin_owned_path() existed, even though
+    existing_plugin_files() deliberately admits a directory-type
     symlink/junction into its result (see its own docstring and
-    _is_reparse_point()) - a bare unlink() on such an extra was never
-    proven safe.
+    _is_reparse_point()) -- a bare unlink() on such an extra was never
+    proven safe. A later 2026-09 follow-up review found that fix still
+    trusted extras' snapshot type by the time removal actually ran; the
+    loop now re-checks _is_reparse_point() at removal time and dispatches
+    a confirmed reparse point to _remove_plugin_owned_path() (rmdir() vs
+    unlink(), exercised below) or a plain file straight to unlink() --
+    see main()'s own inline comment for why the re-check is needed.
 
     Same mocking technique as TestWriteSymlinkRemovalChoosesRmdirOrUnlink
     above, for the same reason (no privilege to create a real symlink here)
     plus one more: even a real, unprivileged Windows junction can't stand
     in for a git-tracked extra either, because `git add` on a junction path
-    does not track the junction itself as an entry at all - it walks
+    does not track the junction itself as an entry at all -- it walks
     straight through and tracks the files inside instead (confirmed
-    empirically against this machine's git) - so existing_plugin_files(),
+    empirically against this machine's git) -- so existing_plugin_files(),
     which is built entirely from `git ls-files`, can never actually return
     a junction path from a real git-tracked fixture. existing_plugin_files()
     is mocked directly instead, to return exactly the shape its own
-    docstring says it must be able to.
+    docstring says it must be able to. _is_reparse_point() is also mocked,
+    but only for the fake extra itself, via a side_effect that delegates to
+    the real function for every other path -- patching it unconditionally
+    would make every real ancestor directory main() touches during the
+    same --write run (PLUGIN_DIR included) look like a reparse point too,
+    and misroute the unrelated entries-writing loop into removing them.
     """
 
     def setUp(self):
@@ -708,36 +733,229 @@ class TestWriteExtraRemovalChoosesRmdirOrUnlink(unittest.TestCase):
             mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
         )
 
-    def _run_write_with_fake_extra(self, is_windows_directory_symlink_value):
+    def _run_write_with_fake_extra(
+        self, is_reparse_point_value, is_windows_directory_symlink_value=None
+    ):
         fake_extra = mock.NonCallableMock(spec=Path)
+        # elif path.is_file() is the extras loop's other branch (see
+        # main()) -- set explicitly here rather than relying on
+        # NonCallableMock(spec=Path)'s auto-generated (truthy) default,
+        # which would silently make the reparse-point case's assertions
+        # pass even if the loop's dispatch order were wrong.
+        fake_extra.is_file.return_value = not is_reparse_point_value
+        real_is_reparse_point = ecp._is_reparse_point
+
+        def fake_is_reparse_point(path):
+            if path is fake_extra:
+                return is_reparse_point_value
+            return real_is_reparse_point(path)
+
         patches = self._patched()
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             with mock.patch.object(ecp, "existing_plugin_files", return_value={fake_extra}):
                 with mock.patch.object(
-                    ecp,
-                    "_is_windows_directory_symlink",
-                    return_value=is_windows_directory_symlink_value,
+                    ecp, "_is_reparse_point", side_effect=fake_is_reparse_point
                 ):
-                    with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
-                        ecp.main()
+                    with mock.patch.object(
+                        ecp,
+                        "_is_windows_directory_symlink",
+                        return_value=is_windows_directory_symlink_value,
+                    ):
+                        with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
+                            ecp.main()
         return fake_extra
 
     def test_directory_extra_is_removed_with_rmdir_not_unlink(self):
-        fake_extra = self._run_write_with_fake_extra(is_windows_directory_symlink_value=True)
+        fake_extra = self._run_write_with_fake_extra(
+            is_reparse_point_value=True, is_windows_directory_symlink_value=True
+        )
         fake_extra.rmdir.assert_called()
         fake_extra.unlink.assert_not_called()
 
     def test_file_extra_is_removed_with_unlink_not_rmdir(self):
-        fake_extra = self._run_write_with_fake_extra(is_windows_directory_symlink_value=False)
+        fake_extra = self._run_write_with_fake_extra(is_reparse_point_value=False)
         fake_extra.unlink.assert_called()
         fake_extra.rmdir.assert_not_called()
 
 
+class TestWriteExtraRemovalSurvivesAReclaimedJunctionAncestor(unittest.TestCase):
+    """A 2026-09 follow-up review found a crash the mocked tests above can't
+    reach, because it depends on what --write's two removal loops do to
+    each other across a real filesystem mutation between them, not on
+    either loop's removal logic in isolation.
+
+    extras is computed once, before the entries loop runs: `extras =
+    existing_plugin_files() - expected_paths`. If a path is both (a)
+    tracked as an extra in that snapshot and (b) the ancestor of a
+    currently-expected generated leaf, the entries loop (see
+    TestWriteRemovesStraySymlinks) removes and rebuilds it as an ordinary,
+    now-populated directory *before* the extras loop ever runs. By the
+    time the extras loop reaches that same path, it is no longer a
+    reparse point at all -- just an ordinary non-empty directory the
+    generator itself just wrote a moment earlier in the same --write call.
+    The pre-fix extras loop's unconditional _remove_plugin_owned_path()
+    call still dispatched it to rmdir() (since _is_windows_directory_symlink()
+    only checks the directory-attribute bit, not the reparse-point bit --
+    see its own docstring, and TestIsWindowsDirectorySymlink's own
+    test_windows_directory_entry_is_true) and crashed with
+    OSError: [WinError 145] ("The directory is not empty").
+
+    Reproduced here against a real `mklink /J` junction and a real
+    --write run end to end, not mocked calls to the two removal
+    functions in isolation, because the bug is specifically an ordering
+    problem between the two loops across real filesystem state -- nothing
+    about either loop's own removal logic is wrong on its own.
+    existing_plugin_files() is still mocked (same reasoning as
+    TestWriteExtraRemovalChoosesRmdirOrUnlink above: `git add` never
+    tracks a junction path as its own entry, so a real git-tracked
+    fixture can never produce this shape), but plan()/the entries loop and
+    both --write removal loops all run for real against a real .github/skills
+    fixture and a real junction on disk.
+
+    One fixture covers this (rather than a second, near-identical one for
+    the sibling crash where a *file* nested under the junction ancestor
+    vanishes outright once the ancestor is replaced): both crashes reach
+    the exact same post-fix branch (`elif path.is_file(): ... else: skip`),
+    and Path.is_file() answers False the same safe way for both "reclaimed
+    ordinary directory" and "path no longer exists at all" -- so a second
+    fixture would exercise the same code path this one already does.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _init_git_repo(self.root)
+        _write_and_track(self.root, "CHANGELOG.md", "# Changelog\n\n## [1.0.0] - 2026-01-01\n\nInitial.\n")
+        _write_and_track(
+            self.root,
+            ".github/skills/demo-skill/SKILL.md",
+            '---\ndescription: "Demo skill"\n---\n\nBody.\n',
+        )
+        _write_and_track(self.root, ".github/skills/demo-skill/scripts/run.py", "print('hi')\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _patched(self):
+        return (
+            mock.patch.object(ecp, "LIBRARY_ROOT", self.root),
+            mock.patch.object(ecp, "SKILLS_DIR", self.root / ".github" / "skills"),
+            mock.patch.object(ecp, "CHANGELOG_PATH", self.root / "CHANGELOG.md"),
+            mock.patch.object(ecp, "PLUGIN_DIR", self.root / "claude-plugin"),
+            mock.patch.object(ecp, "PLUGIN_SKILLS_DIR", self.root / "claude-plugin" / "skills"),
+            mock.patch.object(
+                ecp, "PLUGIN_MANIFEST_PATH", self.root / "claude-plugin" / ".claude-plugin" / "plugin.json"
+            ),
+            mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
+        )
+
+    @unittest.skipUnless(os.name == "nt", "mklink /J is Windows-only")
+    def test_write_does_not_crash_when_an_extra_is_reclaimed_as_an_ordinary_directory_first(self):
+        ancestor = self.root / "claude-plugin" / "skills" / "demo-skill"
+        ancestor.parent.mkdir(parents=True)
+        real_dir = self.root / "elsewhere-junction-target"
+        real_dir.mkdir()
+        try:
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(ancestor), str(real_dir)],
+                check=True,
+                capture_output=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            self.skipTest(f"junction creation unsupported/unprivileged here: {exc}")
+
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with mock.patch.object(ecp, "existing_plugin_files", return_value={ancestor}):
+                with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
+                    ecp.main()  # must not raise OSError: [WinError 145]
+
+        self.assertFalse(ancestor.is_symlink())
+        self.assertEqual(
+            (ancestor / "SKILL.md").read_text(encoding="utf-8"),
+            '---\ndescription: "Demo skill"\n---\n\nBody.\n',
+        )
+        self.assertEqual((ancestor / "scripts" / "run.py").read_text(encoding="utf-8"), "print('hi')\n")
+
+
+class TestIsReparsePointTagAwareness(unittest.TestCase):
+    """_is_reparse_point()'s Windows tag comparison (SHOULD-FIX #4 from a
+    2026-09 follow-up review): a OneDrive Files-On-Demand cloud placeholder
+    is implemented as a reparse point too, but it is a real, generator-
+    written file that just is not hydrated locally yet -- not a stray
+    symlink/junction this script should remove. A real synced OneDrive
+    placeholder cannot be constructed on demand in CI or reliably on a dev
+    machine (wizard_containment.py's own module docstring notes the same
+    limitation for its analogous check), so os.lstat() is mocked directly
+    instead. Forcing os.name to "nt" alongside the mocked lstat result also
+    lets this exercise the Windows-only tag logic on CI's ubuntu-latest
+    leg, not only on a windows-latest host.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.path = self.root / "somewhere"
+        self.path.touch()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _check(self, attrs, reparse_tag):
+        class _FakeStat:
+            pass
+
+        fake_stat = _FakeStat()
+        fake_stat.st_file_attributes = attrs
+        if reparse_tag is not None:
+            fake_stat.st_reparse_tag = reparse_tag
+        with mock.patch.object(os, "name", "nt"), mock.patch.object(
+            os, "lstat", return_value=fake_stat
+        ):
+            return ecp._is_reparse_point(self.path)
+
+    def test_symlink_tag_is_a_reparse_point(self):
+        self.assertTrue(
+            self._check(ecp.stat.FILE_ATTRIBUTE_REPARSE_POINT, ecp.IO_REPARSE_TAG_SYMLINK)
+        )
+
+    def test_mount_point_tag_is_a_reparse_point(self):
+        self.assertTrue(
+            self._check(ecp.stat.FILE_ATTRIBUTE_REPARSE_POINT, ecp.IO_REPARSE_TAG_MOUNT_POINT)
+        )
+
+    def test_cloud_placeholder_base_tag_is_not_a_reparse_point(self):
+        self.assertFalse(
+            self._check(ecp.stat.FILE_ATTRIBUTE_REPARSE_POINT, ecp._CLOUD_TAG_BASE)
+        )
+
+    def test_cloud_placeholder_provider_variant_tag_is_not_a_reparse_point(self):
+        # Same tag family as _CLOUD_TAG_BASE with the per-provider nibble
+        # set (e.g. IO_REPARSE_TAG_CLOUD_1 in winnt.h) -- must still be
+        # excluded, not just the exact base tag.
+        self.assertFalse(
+            self._check(ecp.stat.FILE_ATTRIBUTE_REPARSE_POINT, ecp._CLOUD_TAG_BASE | 0x1000)
+        )
+
+    def test_missing_reparse_tag_falls_back_to_the_pre_tag_aware_true(self):
+        # st_reparse_tag absent entirely (e.g. an older Python/OS combination
+        # that does not report it) -- falls back to the old tag-blind
+        # behavior rather than defaulting to "not a reparse point", since
+        # treating the bit alone as authoritative was already correct for
+        # every plugin-owned file before this tag comparison existed.
+        self.assertTrue(self._check(ecp.stat.FILE_ATTRIBUTE_REPARSE_POINT, None))
+
+    def test_no_reparse_point_attribute_bit_is_not_a_reparse_point(self):
+        self.assertFalse(self._check(0, None))
+
+
 class TestIsWindowsDirectorySymlink(unittest.TestCase):
     """_is_windows_directory_symlink() itself, against real filesystem
-    entries rather than a mock -- the test above patches this function out
-    entirely, so its own os.lstat()-based bit check needs separate,
-    non-mocked coverage. This dev machine lacks the privilege to create a
+    entries rather than a mock -- the tests above (TestWriteSymlinkRemoval-
+    ChoosesRmdirOrUnlink and TestWriteExtraRemovalChoosesRmdirOrUnlink)
+    patch this function out entirely, so its own os.lstat()-based bit
+    check needs separate, non-mocked coverage. This dev machine lacks the
+    privilege to create a
     real symlink (see TestWriteSymlinkRemovalChoosesRmdirOrUnlink), so the
     first two tests below exercise the same FILE_ATTRIBUTE_DIRECTORY check
     against a real (non-reparse-point) directory and a real file instead --
@@ -799,6 +1017,16 @@ class TestIsWindowsDirectorySymlink(unittest.TestCase):
         target.rmdir()
         self.assertFalse(junction.is_dir())
         self.assertTrue(ecp._is_windows_directory_symlink(junction))
+
+    @unittest.skipUnless(os.name == "nt", "st_file_attributes is a Windows-only os.stat_result field")
+    def test_windows_nonexistent_path_is_false_not_a_crash(self):
+        # BLOCKING #2 (Scenario B, a 2026-09 follow-up review): a path that
+        # existed when the extras snapshot was taken can be gone entirely by
+        # the time removal runs, if an ancestor junction was replaced in
+        # between. os.lstat() previously ran unguarded here and raised
+        # FileNotFoundError; it is now caught and treated as "not a
+        # directory symlink" like every other unreachable path.
+        self.assertFalse(ecp._is_windows_directory_symlink(self.root / "was-here-then-gone"))
 
 
 class TestPlanSymlinkToNonFileMocked(unittest.TestCase):

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Build the Claude Code plugin package for this repo's skill library, so the
 real skills can be installed via Claude Code's plugin/marketplace flow
@@ -275,29 +275,64 @@ def existing_plugin_files():
     return {path for path in candidates if path.is_file() or _is_reparse_point(path)}
 
 
+# Windows reparse tag constants (winnt.h), duplicated here rather than
+# imported from wizard_containment.py so this module has no cross-skill
+# import dependency. IO_REPARSE_TAG_CLOUD family: winnt.h defines
+# IO_REPARSE_TAG_CLOUD (0x9000001A) plus twelve per-provider variants
+# differing only in the family nibble (bits 12-15), e.g.
+# IO_REPARSE_TAG_CLOUD_1 = 0x9000101A -- masking that nibble out and
+# comparing to the base tag recognizes the whole family in one check.
+IO_REPARSE_TAG_SYMLINK = 0xA000000C
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+_CLOUD_TAG_BASE = 0x9000001A
+_CLOUD_TAG_FAMILY_MASK = 0x0000F000
+
+
+def _is_cloud_placeholder_tag(tag):
+    return (tag & ~_CLOUD_TAG_FAMILY_MASK) == _CLOUD_TAG_BASE
+
+
 def _is_reparse_point(path):
     """True if `path` itself -- not whatever it points at -- is a symlink
-    (POSIX or Windows) or a Windows junction.
+    (POSIX or Windows) or Windows junction this generator should treat as
+    a stray redirection to remove.
 
     Path.is_symlink() alone misses a junction: on Windows a junction is
     implemented as a reparse point exactly like a symlink is, but
     Path.is_symlink() (verified empirically on Python 3.12/Windows) returns
-    False for one. Every "is this path a redirection rather than an
-    ordinary file/directory this generator owns" check in this module needs
-    both tests, not is_symlink() alone -- a junction left under
-    claude-plugin/ would otherwise walk straight past all of them. On POSIX
-    there's no separate junction concept, so is_symlink() alone is already
-    complete and the attribute check is skipped.
+    False for one. Every ancestor/extra check in this module that needs to
+    tell "this is a redirection the generator doesn't own" from "this is an
+    ordinary file/directory it does" needs both tests, not is_symlink()
+    alone -- a junction left under claude-plugin/ would otherwise walk
+    straight past all of them.
+
+    This workspace also lives under OneDrive (see wizard_containment.py),
+    so on Windows a reparse point isn't automatically a stray redirection
+    to remove -- a Files-On-Demand cloud placeholder is also implemented
+    as a reparse point, and is a real, generator-written file that just
+    isn't hydrated locally yet, not something to delete. st_reparse_tag
+    distinguishes the two when the OS reports it; when it doesn't
+    (missing or unreadable), this falls back to the old tag-blind True,
+    since that was already this function's behavior before tag-awareness
+    existed and no case has shown it wrong for a plugin-owned file. On
+    POSIX there's no separate junction or cloud-placeholder concept, so
+    is_symlink() alone is already complete.
     """
     if path.is_symlink():
         return True
     if os.name != "nt":
         return False
     try:
-        attrs = os.lstat(path).st_file_attributes
+        st = os.lstat(path)
+        attrs = st.st_file_attributes
     except OSError:
         return False
-    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    if not (attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+        return False
+    tag = getattr(st, "st_reparse_tag", None)
+    if tag is None:
+        return True
+    return not _is_cloud_placeholder_tag(tag)
 
 
 def _first_symlink_under_plugin_dir(path):
@@ -353,22 +388,30 @@ def _is_windows_directory_symlink(path):
     """
     if os.name != "nt":
         return False
-    return bool(os.lstat(path).st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+    try:
+        return bool(os.lstat(path).st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+    except OSError:
+        return False
 
 
 def _remove_plugin_owned_path(path):
-    """Remove a generator-owned path that must go before mkdir()/
+    """Remove a generator-owned reparse point that must go before mkdir()/
     write_bytes() can safely run again -- either a stray symlink/junction
-    found in a generated path's ancestry, or an extra tracked file left
-    over (itself possibly a symlink/junction) from a previous --write.
+    found in a generated path's ancestry, or an extra left over from a
+    previous --write that _is_reparse_point() confirms is still a
+    symlink/junction. Both call sites (the ancestor-symlink branch and
+    main()'s extras loop) only ever pass a path already confirmed a
+    reparse point that way -- an ordinary file extra is handled directly
+    at the call site instead, without going through here.
 
     Dispatches rmdir() vs unlink() by _is_windows_directory_symlink()
     (platform plus the entry's own directory-attribute bit) rather than
     Path.is_dir(), which follows the link and would misjudge a *broken*
     directory symlink/junction as not-a-directory, since it has no target
-    left to inspect -- unlink() unconditionally raises PermissionError on
-    a plain directory, so a broken one misjudged that way would crash
-    here. (On a *live* Windows junction, unlink() alone was empirically
+    left to inspect -- unlink() raises IsADirectoryError (POSIX) or
+    PermissionError (Windows) on a plain directory, so a broken one
+    misjudged that way would crash here. (On a *live* Windows junction,
+    unlink() alone was empirically
     found to also succeed here -- CPython's os.unlink() falls back to
     RemoveDirectoryW internally -- but this module doesn't depend on that
     undocumented fallback existing, covering every Python version, or
@@ -438,7 +481,26 @@ def main():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(expected)
         for path in extras:
-            _remove_plugin_owned_path(path)
+            # extras is a snapshot taken before this loop runs, so by now an
+            # entry may have already been reclaimed by the entries loop
+            # above (e.g. a junction ancestor removed and rebuilt as an
+            # ordinary directory once a generated leaf needed that path) or
+            # may no longer exist at all (a file nested, from git's
+            # perspective, under a junction ancestor that was just
+            # replaced). Re-checking _is_reparse_point() here, at removal
+            # time, rather than trusting extras' implicit type from when it
+            # was computed, is what makes this loop safe against both: a
+            # confirmed reparse point still goes through
+            # _remove_plugin_owned_path() as before; a plain file goes
+            # straight to unlink() (bypassing _is_windows_directory_symlink(),
+            # which was never the right check for it anyway); anything else
+            # -- already reclaimed, or vanished -- is skipped, since
+            # Path.is_file()/is_symlink() both answer False rather than
+            # raising for a path that isn't there.
+            if _is_reparse_point(path):
+                _remove_plugin_owned_path(path)
+            elif path.is_file():
+                path.unlink()
         print(f"Wrote {len(entries)} file(s) to claude-plugin/, removed {len(extras)} extra file(s).")
         return 0
 
