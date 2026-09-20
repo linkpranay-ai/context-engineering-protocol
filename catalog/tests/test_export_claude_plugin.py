@@ -10,6 +10,8 @@ with:
 python -m unittest discover -s catalog/tests -v
 """
 
+import contextlib
+import io
 import locale
 import os
 import subprocess
@@ -865,10 +867,12 @@ class TestWriteExtraRemovalSurvivesAReclaimedJunctionAncestor(unittest.TestCase)
             self.skipTest(f"junction creation unsupported/unprivileged here: {exc}")
 
         patches = self._patched()
+        captured = io.StringIO()
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             with mock.patch.object(ecp, "existing_plugin_files", return_value={ancestor}):
                 with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
-                    ecp.main()  # must not raise OSError: [WinError 145]
+                    with contextlib.redirect_stdout(captured):
+                        ecp.main()  # must not raise OSError: [WinError 145]
 
         self.assertFalse(ancestor.is_symlink())
         self.assertEqual(
@@ -876,20 +880,30 @@ class TestWriteExtraRemovalSurvivesAReclaimedJunctionAncestor(unittest.TestCase)
             '---\ndescription: "Demo skill"\n---\n\nBody.\n',
         )
         self.assertEqual((ancestor / "scripts" / "run.py").read_text(encoding="utf-8"), "print('hi')\n")
+        # A 2026-09 follow-up review found the printed count double-counted
+        # this exact scenario: `ancestor` was never actually removed by the
+        # extras loop (it was reclaimed by the entries loop above, so the
+        # extras loop correctly skips it), but the old code reported
+        # `len(extras)` -- the snapshot count, not the actual removal count
+        # -- so it printed "removed 1 extra file(s)" here despite removing 0.
+        self.assertIn("removed 0 extra file(s)", captured.getvalue())
 
 
 class TestIsReparsePointTagAwareness(unittest.TestCase):
-    """_is_reparse_point()'s Windows tag comparison (SHOULD-FIX #4 from a
-    2026-09 follow-up review): a OneDrive Files-On-Demand cloud placeholder
-    is implemented as a reparse point too, but it is a real, generator-
+    """_is_reparse_point()'s Windows tag comparison, added after a 2026-09
+    follow-up review: a OneDrive Files-On-Demand cloud placeholder is
+    implemented as a reparse point too, but it is a real, generator-
     written file that just is not hydrated locally yet -- not a stray
-    symlink/junction this script should remove. A real synced OneDrive
-    placeholder cannot be constructed on demand in CI or reliably on a dev
-    machine (wizard_containment.py's own module docstring notes the same
-    limitation for its analogous check), so os.lstat() is mocked directly
-    instead. Forcing os.name to "nt" alongside the mocked lstat result also
-    lets this exercise the Windows-only tag logic on CI's ubuntu-latest
-    leg, not only on a windows-latest host.
+    symlink/junction this script should remove. Only the symlink and
+    mount-point (junction) tags are treated as removable; the cloud-
+    placeholder family and any other reparse tag are left alone. A real
+    synced OneDrive placeholder cannot be constructed on demand in CI or
+    reliably on a dev machine (wizard_containment.py's own module
+    docstring notes the same limitation for its analogous check), so
+    os.lstat() is mocked directly instead. Forcing os.name to "nt"
+    alongside the mocked lstat result also lets this exercise the
+    Windows-only tag logic on CI's ubuntu-latest leg, not only on a
+    windows-latest host.
     """
 
     def setUp(self):
@@ -944,6 +958,19 @@ class TestIsReparsePointTagAwareness(unittest.TestCase):
         # treating the bit alone as authoritative was already correct for
         # every plugin-owned file before this tag comparison existed.
         self.assertTrue(self._check(ecp.stat.FILE_ATTRIBUTE_REPARSE_POINT, None))
+
+    def test_unrecognized_non_cloud_tag_is_not_a_reparse_point(self):
+        # A reparse tag that is present, readable, and not in the cloud
+        # family, but also isn't the symlink or mount-point tag (e.g.
+        # IO_REPARSE_TAG_PROJFS or IO_REPARSE_TAG_STORAGE_SYNC in winnt.h --
+        # a real, generator-owned file backed by some other reparse-point
+        # mechanism, not a stray redirection). Only the two known-removable
+        # tags count; anything else, cloud or otherwise unrecognized, is
+        # left alone rather than force-removed.
+        unrecognized_tag = 0x9000001C  # IO_REPARSE_TAG_PROJFS -- not cloud, not symlink/mount-point
+        self.assertFalse(
+            self._check(ecp.stat.FILE_ATTRIBUTE_REPARSE_POINT, unrecognized_tag)
+        )
 
     def test_no_reparse_point_attribute_bit_is_not_a_reparse_point(self):
         self.assertFalse(self._check(0, None))
@@ -1020,7 +1047,7 @@ class TestIsWindowsDirectorySymlink(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "st_file_attributes is a Windows-only os.stat_result field")
     def test_windows_nonexistent_path_is_false_not_a_crash(self):
-        # BLOCKING #2 (Scenario B, a 2026-09 follow-up review): a path that
+        # A 2026-09 follow-up review found a second crash scenario: a path that
         # existed when the extras snapshot was taken can be gone entirely by
         # the time removal runs, if an ancestor junction was replaced in
         # between. os.lstat() previously ran unguarded here and raised

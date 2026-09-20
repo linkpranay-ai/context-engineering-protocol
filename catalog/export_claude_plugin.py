@@ -278,7 +278,7 @@ def existing_plugin_files():
 # Windows reparse tag constants (winnt.h), duplicated here rather than
 # imported from wizard_containment.py so this module has no cross-skill
 # import dependency. IO_REPARSE_TAG_CLOUD family: winnt.h defines
-# IO_REPARSE_TAG_CLOUD (0x9000001A) plus twelve per-provider variants
+# IO_REPARSE_TAG_CLOUD (0x9000001A) plus fifteen per-provider variants
 # differing only in the family nibble (bits 12-15), e.g.
 # IO_REPARSE_TAG_CLOUD_1 = 0x9000101A -- masking that nibble out and
 # comparing to the base tag recognizes the whole family in one check.
@@ -311,12 +311,16 @@ def _is_reparse_point(path):
     to remove -- a Files-On-Demand cloud placeholder is also implemented
     as a reparse point, and is a real, generator-written file that just
     isn't hydrated locally yet, not something to delete. st_reparse_tag
-    distinguishes the two when the OS reports it; when it doesn't
-    (missing or unreadable), this falls back to the old tag-blind True,
-    since that was already this function's behavior before tag-awareness
-    existed and no case has shown it wrong for a plugin-owned file. On
-    POSIX there's no separate junction or cloud-placeholder concept, so
-    is_symlink() alone is already complete.
+    distinguishes the two when the OS reports it: only the symlink and
+    mount-point (junction) tags count as a stray redirection, so any other
+    tag -- the cloud-placeholder family explicitly, and any other reparse
+    tag this generator doesn't otherwise recognize -- is left alone rather
+    than removed. When the tag isn't reported at all (missing or
+    unreadable), this falls back to the old tag-blind True, since that was
+    already this function's behavior before tag-awareness existed and no
+    case has shown it wrong for a plugin-owned file. On POSIX there's no
+    separate junction or cloud-placeholder concept, so is_symlink() alone
+    is already complete.
     """
     if path.is_symlink():
         return True
@@ -332,7 +336,9 @@ def _is_reparse_point(path):
     tag = getattr(st, "st_reparse_tag", None)
     if tag is None:
         return True
-    return not _is_cloud_placeholder_tag(tag)
+    if _is_cloud_placeholder_tag(tag):
+        return False
+    return tag in (IO_REPARSE_TAG_SYMLINK, IO_REPARSE_TAG_MOUNT_POINT)
 
 
 def _first_symlink_under_plugin_dir(path):
@@ -408,8 +414,9 @@ def _remove_plugin_owned_path(path):
     (platform plus the entry's own directory-attribute bit) rather than
     Path.is_dir(), which follows the link and would misjudge a *broken*
     directory symlink/junction as not-a-directory, since it has no target
-    left to inspect -- unlink() raises IsADirectoryError (POSIX) or
-    PermissionError (Windows) on a plain directory, so a broken one
+    left to inspect -- unlink() raises IsADirectoryError (Linux) or
+    PermissionError (Windows, and also macOS/BSD, whose unlink() returns
+    EPERM rather than EISDIR for a plain directory), so a broken one
     misjudged that way would crash here. (On a *live* Windows junction,
     unlink() alone was empirically
     found to also succeed here -- CPython's os.unlink() falls back to
@@ -480,6 +487,7 @@ def main():
                 _remove_plugin_owned_path(stray_symlink)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(expected)
+        removed = 0
         for path in extras:
             # extras is a snapshot taken before this loop runs, so by now an
             # entry may have already been reclaimed by the entries loop
@@ -496,12 +504,18 @@ def main():
             # which was never the right check for it anyway); anything else
             # -- already reclaimed, or vanished -- is skipped, since
             # Path.is_file()/is_symlink() both answer False rather than
-            # raising for a path that isn't there.
+            # raising for a path that isn't there. removed only counts paths
+            # actually removed here, not len(extras), since a skipped extra
+            # was never removed by this loop (it was already gone, or was
+            # reclaimed by the entries loop above and removing it now would
+            # delete a just-written generated file).
             if _is_reparse_point(path):
                 _remove_plugin_owned_path(path)
+                removed += 1
             elif path.is_file():
                 path.unlink()
-        print(f"Wrote {len(entries)} file(s) to claude-plugin/, removed {len(extras)} extra file(s).")
+                removed += 1
+        print(f"Wrote {len(entries)} file(s) to claude-plugin/, removed {removed} extra file(s).")
         return 0
 
     stale_paths = {path for path, _ in stale}
