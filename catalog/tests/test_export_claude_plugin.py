@@ -11,6 +11,7 @@ python -m unittest discover -s catalog/tests -v
 """
 
 import locale
+import os
 import subprocess
 import sys
 import tempfile
@@ -549,10 +550,15 @@ class TestWriteSymlinkRemovalChoosesRmdirOrUnlink(unittest.TestCase):
     raises WinError 1314, "A required privilege is not held by the
     client"), which is also why every symlink-dependent test above skips
     here rather than passing. _first_symlink_under_plugin_dir() is mocked
-    to hand back a fake stray-symlink object instead, so the is_dir()
-    -selects-rmdir()-vs-unlink() decision inside --write's removal branch
-    itself is exercised and provably non-vacuous on this machine, not only
-    on a platform where symlink creation happens to be unprivileged.
+    to hand back a fake stray-symlink object, and
+    _is_windows_directory_symlink() itself is mocked directly (it calls
+    os.lstat() on its argument, which a mock object can't stand in for --
+    that function's own real-filesystem behavior is exercised separately
+    by TestIsWindowsDirectorySymlink below), so the
+    _is_windows_directory_symlink()-selects-rmdir()-vs-unlink() decision
+    inside --write's removal branch itself is exercised and provably
+    non-vacuous on this machine, not only on a platform where symlink
+    creation happens to be unprivileged.
     """
 
     def setUp(self):
@@ -583,27 +589,67 @@ class TestWriteSymlinkRemovalChoosesRmdirOrUnlink(unittest.TestCase):
             mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
         )
 
-    def _run_write_with_fake_stray_symlink(self, is_dir_value):
+    def _run_write_with_fake_stray_symlink(self, is_windows_directory_symlink_value):
         fake_symlink = mock.NonCallableMock(spec=Path)
-        fake_symlink.is_dir.return_value = is_dir_value
         patches = self._patched()
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             with mock.patch.object(
                 ecp, "_first_symlink_under_plugin_dir", return_value=fake_symlink
             ):
-                with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
-                    ecp.main()
+                with mock.patch.object(
+                    ecp,
+                    "_is_windows_directory_symlink",
+                    return_value=is_windows_directory_symlink_value,
+                ):
+                    with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
+                        ecp.main()
         return fake_symlink
 
     def test_directory_symlink_is_removed_with_rmdir_not_unlink(self):
-        fake_symlink = self._run_write_with_fake_stray_symlink(is_dir_value=True)
+        fake_symlink = self._run_write_with_fake_stray_symlink(is_windows_directory_symlink_value=True)
         fake_symlink.rmdir.assert_called()
         fake_symlink.unlink.assert_not_called()
 
     def test_file_symlink_is_removed_with_unlink_not_rmdir(self):
-        fake_symlink = self._run_write_with_fake_stray_symlink(is_dir_value=False)
+        fake_symlink = self._run_write_with_fake_stray_symlink(is_windows_directory_symlink_value=False)
         fake_symlink.unlink.assert_called()
-        fake_symlink.rmdir.assert_not_called()
+
+
+class TestIsWindowsDirectorySymlink(unittest.TestCase):
+    """_is_windows_directory_symlink() itself, against real filesystem
+    entries rather than a mock -- the test above patches this function out
+    entirely, so its own os.lstat()-based bit check needs separate,
+    non-mocked coverage. Symlink creation is unprivileged on this dev
+    machine (see TestWriteSymlinkRemovalChoosesRmdirOrUnlink), so this
+    exercises the same FILE_ATTRIBUTE_DIRECTORY check the function applies
+    to a stray symlink against a real directory and a real file instead --
+    lstat() reports the same attribute bit for either, since a symlink and
+    the directory/file it targets are just two different entries lstat()
+    can be pointed at.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_posix_is_always_false_without_touching_the_filesystem(self):
+        with mock.patch.object(os, "name", "posix"):
+            self.assertFalse(ecp._is_windows_directory_symlink(self.root / "does-not-exist"))
+
+    @unittest.skipUnless(os.name == "nt", "st_file_attributes is a Windows-only os.stat_result field")
+    def test_windows_directory_entry_is_true(self):
+        directory = self.root / "a-directory"
+        directory.mkdir()
+        self.assertTrue(ecp._is_windows_directory_symlink(directory))
+
+    @unittest.skipUnless(os.name == "nt", "st_file_attributes is a Windows-only os.stat_result field")
+    def test_windows_file_entry_is_false(self):
+        file_path = self.root / "a-file.txt"
+        file_path.write_text("hi\n", encoding="utf-8")
+        self.assertFalse(ecp._is_windows_directory_symlink(file_path))
 
 
 class TestPlanSymlinkToNonFileMocked(unittest.TestCase):

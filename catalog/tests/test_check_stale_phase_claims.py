@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import check_stale_phase_claims as cspc  # noqa: E402
@@ -196,6 +197,25 @@ class TestCheckStalePhaseClaims(unittest.TestCase):
             code = cspc.run_check(self.root)
         self.assertEqual(code, 1)
         self.assertIn("module.py:1: [until Phase]", out.getvalue())
+
+    def test_a_tracked_path_that_is_not_valid_utf8_fails_with_a_clear_system_exit(self):
+        # _tracked_files() decodes git's raw -z stdout manually as UTF-8
+        # (see its own docstring) specifically so a tracked path that
+        # genuinely isn't valid UTF-8 fails with a clear SystemExit instead
+        # of a raw UnicodeDecodeError traceback. Mocking subprocess.run's
+        # stdout directly rather than trying to create such a path on disk:
+        # this dev machine's filesystem and git tooling can't produce a
+        # tracked path with genuinely invalid UTF-8 bytes to begin with
+        # (Windows paths are UTF-16 under the hood; Python's own os layer
+        # transcodes anything it's given). \xe9 is a lone Latin-1 'e-acute'
+        # byte with no valid UTF-8 lead byte before it -- the same shape a
+        # legacy Windows-1252-encoded filename would actually produce.
+        invalid_stdout = b"module.py\x00caf\xe9-notes.md\x00"
+        fake_result = mock.Mock(stdout=invalid_stdout)
+        with mock.patch.object(cspc.subprocess, "run", return_value=fake_result):
+            with self.assertRaises(SystemExit) as ctx:
+                cspc.run_check(self.root)
+        self.assertIn("isn't valid UTF-8", str(ctx.exception))
 
     def test_own_test_file_path_is_exempt_from_the_scan(self):
         _write_and_track(

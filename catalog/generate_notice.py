@@ -45,8 +45,9 @@ def collect_adapted_skills():
     # Sorted by string path (not raw Path, whose ordering is locale/
     # platform-dependent -- case-insensitive on Windows, case-sensitive on
     # POSIX) so NOTICE.md's generated order is identical across the
-    # platforms this repo's CI runs on. Same fix as
-    # export_claude_plugin.py's included_skill_dirs().
+    # platforms this repo's CI runs on. Same goal as
+    # export_claude_plugin.py's included_skill_dirs() (which sorts by bare
+    # name there, since it has no path segments to disambiguate with).
     for path in sorted(SKILLS_DIR.rglob("SKILL.md"), key=lambda p: p.as_posix()):
         text = path.read_text(encoding="utf-8-sig", errors="replace")
         m = FRONTMATTER_RE.match(text)

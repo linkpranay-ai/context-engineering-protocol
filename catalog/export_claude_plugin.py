@@ -22,7 +22,9 @@ set", Option C). Every other skill under .github/skills/ is included, using
 (__pycache__, etc.) never leak into the package.
 """
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -274,21 +276,25 @@ def existing_plugin_files():
 
 
 def _first_symlink_under_plugin_dir(path):
-    """Returns the first symlink among `path`'s ancestors under PLUGIN_DIR,
-    inclusive of `path` itself, or None if none of them is a symlink.
+    """Returns the first symlink from PLUGIN_DIR down to `path` inclusive
+    (PLUGIN_DIR itself, then each ancestor component, then `path`), or None
+    if none of them is a symlink.
 
     Every path under claude-plugin/ is generator-owned (see module
     docstring), so a symlink anywhere in that tree -- not just at the leaf
     -- is already anomalous: `path.parent.mkdir(parents=True, exist_ok=True)`
     would silently walk through a symlinked ancestor directory and write
     outside claude-plugin/ entirely, before a leaf-only `path.is_symlink()`
-    check ever ran. Checking every component closes that gap, and reusing
-    the same check for --check's staleness test closes the matching gap
-    there: a symlink whose target's content happens to match `expected`
-    would otherwise pass `path.read_bytes() != expected` and never get
-    flagged, even though the path itself still isn't the generator-owned
-    regular file it's supposed to be.
+    check ever ran. That includes PLUGIN_DIR itself being a symlink, which
+    is checked first for the same reason. Checking every component closes
+    that gap, and reusing the same check for --check's staleness test closes
+    the matching gap there: a symlink whose target's content happens to
+    match `expected` would otherwise pass `path.read_bytes() != expected`
+    and never get flagged, even though the path itself still isn't the
+    generator-owned regular file it's supposed to be.
     """
+    if PLUGIN_DIR.is_symlink():
+        return PLUGIN_DIR
     cursor = PLUGIN_DIR
     for part in path.relative_to(PLUGIN_DIR).parts:
         cursor = cursor / part
@@ -299,6 +305,23 @@ def _first_symlink_under_plugin_dir(path):
     return None
 
 
+def _is_windows_directory_symlink(path):
+    """True if `path` is a symlink or junction whose own reparse point is a
+    *directory* type, on Windows; always False on POSIX.
+
+    Reads the attribute off the link itself via `os.lstat` (which does not
+    follow the link), rather than following it with `Path.is_dir()` -- a
+    *broken* directory symlink (target deleted or looping) still needs
+    rmdir(), but `is_dir()` can't tell, since it has nothing left to follow
+    and inspect and simply returns False. On POSIX a symlink is never
+    itself a directory entry regardless of what it points at, so this is
+    unconditionally False there and the caller always uses unlink().
+    """
+    if os.name != "nt":
+        return False
+    return bool(os.lstat(path).st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "--print"
     entries, expected_paths = plan()
@@ -307,9 +330,13 @@ def main():
     stale = [
         (path, expected)
         for path, expected in entries
-        if not path.exists()
+        # Symlink check first: a leaf path that's a symlink to a directory
+        # still has path.exists() == True, so path.read_bytes() would run
+        # next and raise IsADirectoryError uncaught instead of this loop
+        # cleanly reporting the path as stale.
+        if _first_symlink_under_plugin_dir(path) is not None
+        or not path.exists()
         or path.read_bytes() != expected
-        or _first_symlink_under_plugin_dir(path) is not None
     ]
 
     rel = lambda p: p.relative_to(LIBRARY_ROOT).as_posix()
@@ -335,18 +362,25 @@ def main():
             # ancestor directory (writing outside claude-plugin/ entirely)
             # before a leaf-only check ever ran; write_bytes() on a
             # symlinked leaf would do the same for the file itself.
-            # Removing the first symlink found in the chain, deepest
-            # ancestor to leaf, before mkdir runs keeps --write's output
-            # confined to the tree it's supposed to own either way.
+            # Removing the first symlink found in the chain, PLUGIN_DIR down
+            # to the leaf, before mkdir runs keeps --write's output confined
+            # to the tree it's supposed to own either way.
             stray_symlink = _first_symlink_under_plugin_dir(path)
             if stray_symlink is not None:
                 # On Windows, os.unlink()/Path.unlink() only removes a
                 # *file* symlink -- a directory symlink (or junction) needs
-                # rmdir() instead, or it raises PermissionError. is_dir()
-                # follows the link to check what it points at, which is
-                # exactly the distinction that matters here (POSIX doesn't
-                # care either way, so this branch is a no-op cost there).
-                if stray_symlink.is_dir():
+                # rmdir() instead, or it raises PermissionError. On POSIX, a
+                # symlink is never itself a directory entry regardless of
+                # what it points at, so unlink() is always correct there --
+                # rmdir() would instead raise NotADirectoryError on a
+                # symlink to a directory, since POSIX rmdir() does not
+                # follow a trailing symlink. Gated on
+                # _is_windows_directory_symlink() (platform plus the link's
+                # own reparse-point type) rather than Path.is_dir() (which
+                # follows the link and would misjudge a *broken* directory
+                # symlink as not-a-directory, since it has no target left
+                # to inspect).
+                if _is_windows_directory_symlink(stray_symlink):
                     stray_symlink.rmdir()
                 else:
                     stray_symlink.unlink()
