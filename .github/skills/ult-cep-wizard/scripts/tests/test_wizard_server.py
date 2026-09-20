@@ -449,12 +449,37 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
             sock.close()
 
     def test_non_numeric_content_length_still_gets_the_403_not_a_dropped_connection(self):
+        # A 2026-09 follow-up review noted that without an elapsed-time
+        # check, this test's pass/fail hinged on an incidental tie between
+        # this class's 5s client-side socket timeout and a fully-reverted
+        # _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS reusing the same 5s
+        # _REJECT_DRAIN_TIMEOUT_SECONDS - a *partial* regression (e.g. 2s
+        # instead of the real 0.5s) would pass silently either way. The
+        # explicit bound below catches that whole class directly.
+        start = time.monotonic()
         response = self._raw_reject_request("abc", body=b"irrelevant")
+        elapsed = time.monotonic() - start
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
+        self.assertLess(
+            elapsed,
+            2.0,
+            f"drain took {elapsed:.2f}s - expected the short "
+            "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS to apply here, "
+            "not something closer to the longer declared-length timeout",
+        )
 
     def test_negative_content_length_still_gets_the_403_not_a_hang(self):
+        start = time.monotonic()
         response = self._raw_reject_request("-1", body=b"irrelevant")
+        elapsed = time.monotonic() - start
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
+        self.assertLess(
+            elapsed,
+            2.0,
+            f"drain took {elapsed:.2f}s - expected the short "
+            "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS to apply here, "
+            "not something closer to the longer declared-length timeout",
+        )
 
     def test_declared_but_unsent_body_gets_the_403_after_the_drain_timeout_not_a_hang(self):
         with mock.patch.object(ws, "_REJECT_DRAIN_TIMEOUT_SECONDS", 0.3):

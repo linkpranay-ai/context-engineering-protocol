@@ -135,8 +135,8 @@ _EXTERNAL_ROOT_INVALID = object()
 # Bounds for _reject()'s pre-response body drain. A gate rejection can be
 # reached before any authentication has succeeded (Origin/session/CSRF
 # checks all call _reject on failure), so the Content-Length it reads
-# is attacker-controlled input, not a value _read_json_body has already
-# validated. The drain reads in _REJECT_DRAIN_CHUNK_SIZE chunks rather
+# is attacker-controlled input, not a value any earlier check has
+# already validated. The drain reads in _REJECT_DRAIN_CHUNK_SIZE chunks rather
 # than one call sized to the full declared (or capped-unknown) length,
 # so a handler thread's actual memory use tracks bytes really received,
 # not the length a client merely claims; _MAX_DRAINED_REJECT_BODY still
@@ -252,15 +252,18 @@ def _make_handler(ctx: _ServerContext):
             #     instead of a well-formed large one;
             #   - draining (known-length or unknown-length alike) is capped
             #     at _MAX_DRAINED_REJECT_BODY so a declared-huge or
-            #     unparseable Content-Length can't make this thread buffer
-            #     unbounded memory (a body larger than the cap is only
-            #     partially drained - the client may still observe a reset
-            #     instead of this response for the un-drained remainder,
-            #     but that's the pre-existing race this fix narrows, not a
-            #     new failure mode); the read itself is chunked at
-            #     _REJECT_DRAIN_CHUNK_SIZE so this thread's actual memory
-            #     use tracks bytes really received, not the full declared
-            #     or capped length up front;
+            #     unparseable Content-Length can't make this thread spend
+            #     unbounded time (and bandwidth) on one connection's drain
+            #     (a body larger than the cap is only partially drained -
+            #     the client may still observe a reset instead of this
+            #     response for the un-drained remainder, but that's the
+            #     pre-existing race this fix narrows, not a new failure
+            #     mode); the read itself is chunked at
+            #     _REJECT_DRAIN_CHUNK_SIZE, and each chunk is discarded
+            #     before the next is read, so this thread's actual memory
+            #     use tracks one chunk at a time, not the full declared or
+            #     capped length up front - the cap bounds total bytes
+            #     drained, the chunk size is what bounds peak memory;
             #   - the read is bounded by a temporary socket timeout so a
             #     client that declares a length (known or not) and then
             #     sends less than that (or nothing) cannot hang this
@@ -301,6 +304,16 @@ def _make_handler(ctx: _ServerContext):
             # then calls _reject() would reintroduce this idle delay.
             raw_length = self.headers.get("Content-Length")
             if raw_length is None:
+                # No Content-Length at all (e.g. a raw client using
+                # Transfer-Encoding: chunked, which this server never
+                # parses) skips the drain entirely, same as an empty body -
+                # this reopens the undrained-body reset race for that one
+                # shape. Accepted, not closed: no browser fetch()/XHR/form
+                # POST produces this without Content-Length on a same-
+                # origin request, and a raw client determined to hit it is
+                # already past the Origin/session/CSRF gates worth of
+                # effort this local single-operator dev server isn't
+                # trying to defend beyond.
                 length = 0
                 length_unknown = False
             else:
