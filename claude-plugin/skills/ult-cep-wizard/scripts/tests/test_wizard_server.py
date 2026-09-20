@@ -15,6 +15,7 @@ file, and keeping each test file able to run standalone (`python
 test_wizard_server.py`) matters more here than the few lines saved.
 """
 
+import io
 import json
 import re
 import shutil
@@ -27,6 +28,7 @@ import unittest
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from http import HTTPStatus
 from pathlib import Path
 from unittest import mock
 
@@ -453,16 +455,19 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
         # check, this test's pass/fail hinged on an incidental tie between
         # this class's 5s client-side socket timeout and a fully-reverted
         # _REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS reusing the same 5s
-        # _REJECT_DRAIN_TIMEOUT_SECONDS - a *partial* regression (e.g. 2s
-        # instead of the real 0.5s) would pass silently either way. The
-        # explicit bound below catches that whole class directly.
+        # _REJECT_DRAIN_TIMEOUT_SECONDS - a regression there would pass
+        # silently either way. The real drain is a consistent ~0.5s
+        # (measured), so 1.0s leaves ~2x headroom for timing noise while
+        # still catching a meaningfully-sized regression (e.g. the timeout
+        # tripling to 1.5s); a smaller regression than that could still
+        # slip through this bound.
         start = time.monotonic()
         response = self._raw_reject_request("abc", body=b"irrelevant")
         elapsed = time.monotonic() - start
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
         self.assertLess(
             elapsed,
-            2.0,
+            1.0,
             f"drain took {elapsed:.2f}s - expected the short "
             "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS to apply here, "
             "not something closer to the longer declared-length timeout",
@@ -475,7 +480,7 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
         self.assertTrue(response.startswith(b"HTTP/1.0 403"), response[:200])
         self.assertLess(
             elapsed,
-            2.0,
+            1.0,
             f"drain took {elapsed:.2f}s - expected the short "
             "_REJECT_DRAIN_UNKNOWN_LENGTH_TIMEOUT_SECONDS to apply here, "
             "not something closer to the longer declared-length timeout",
@@ -537,6 +542,83 @@ class TestRejectHandlesMalformedContentLength(WizardServerTestCase):
             2.0,
             f"drain took {elapsed:.2f}s - expected it to finish once the "
             "(patched) cap was read, not wait out the 3s drain timeout",
+        )
+
+
+class _RecordingRFile:
+    """Stands in for self.rfile inside a directly-constructed handler --
+    records the size argument of every read() call so the test below can
+    check what _reject actually asked for, not just what it got back."""
+
+    def __init__(self, data: bytes):
+        self._data = data
+        self.read_sizes: "list[int]" = []
+
+    def read(self, n: int) -> bytes:
+        self.read_sizes.append(n)
+        chunk = self._data[:n]
+        self._data = self._data[len(chunk):]
+        return chunk
+
+
+class _FakeConnection:
+    """Stands in for self.connection -- only gettimeout()/settimeout() are
+    exercised by _reject's drain, so that's all this needs to provide."""
+
+    def __init__(self):
+        self._timeout = None
+
+    def gettimeout(self):
+        return self._timeout
+
+    def settimeout(self, value):
+        self._timeout = value
+
+
+class TestRejectDrainChunkSize(WizardServerTestCase):
+    """The constants-block comment above _REJECT_DRAIN_CHUNK_SIZE in
+    wizard_server.py claims it bounds peak memory per read, distinct from
+    _MAX_DRAINED_REJECT_BODY (which bounds total bytes drained) -- but no
+    existing test observes individual self.rfile.read() call sizes, so a
+    regression collapsing the chunked loop back into one unbounded
+    self.rfile.read(remaining) would pass every other test in this file
+    unnoticed. Real sockets (used everywhere else in this file) can't
+    observe what size was requested from the reader, only what came back,
+    so this constructs a handler instance directly -- bypassing
+    socketserver's __init__/setup/handle dispatch via object.__new__ -- and
+    swaps in a recording fake for rfile, which is the only vantage point
+    that can see the argument _reject actually passed to read().
+    """
+
+    def test_reject_drain_reads_the_body_in_chunk_size_bounded_calls(self):
+        handler_cls = self.server.RequestHandlerClass
+        handler = object.__new__(handler_cls)
+        body = b"x" * 5000
+        handler.requestline = "POST /api/discover HTTP/1.1"
+        handler.request_version = "HTTP/1.1"
+        handler.headers = mock.Mock()
+        handler.headers.get.return_value = str(len(body))
+        handler.connection = _FakeConnection()
+        handler.rfile = _RecordingRFile(body)
+        handler.wfile = io.BytesIO()
+
+        with mock.patch.object(ws, "_REJECT_DRAIN_CHUNK_SIZE", 256):
+            handler._reject(HTTPStatus.FORBIDDEN, "nope")
+
+        read_sizes = handler.rfile.read_sizes
+        self.assertGreater(
+            len(read_sizes),
+            1,
+            f"drain made only {len(read_sizes)} read() call(s) for a 5000-byte "
+            "body against a 256-byte chunk size - expected it chunked across "
+            "multiple calls, not read in one shot",
+        )
+        self.assertLessEqual(
+            max(read_sizes),
+            256,
+            f"drain requested up to {max(read_sizes)} bytes in a single "
+            "read() call - expected every call bounded by the 256-byte "
+            "(patched) _REJECT_DRAIN_CHUNK_SIZE",
         )
 
 
