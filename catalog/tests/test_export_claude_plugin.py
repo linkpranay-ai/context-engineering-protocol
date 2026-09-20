@@ -963,10 +963,10 @@ class TestIsReparsePointTagAwareness(unittest.TestCase):
         # A reparse tag that is present, readable, and not in the cloud
         # family, but also isn't the symlink or mount-point tag (e.g.
         # IO_REPARSE_TAG_PROJFS or IO_REPARSE_TAG_STORAGE_SYNC in winnt.h --
-        # a real, generator-owned file backed by some other reparse-point
-        # mechanism, not a stray redirection). Only the two known-removable
-        # tags count; anything else, cloud or otherwise unrecognized, is
-        # left alone rather than force-removed.
+        # unrelated Windows reparse-point mechanisms this generator has no
+        # reason to know about, not a stray redirection it created). Only
+        # the two known-removable tags count; anything else, cloud or
+        # otherwise unrecognized, is left alone rather than force-removed.
         unrecognized_tag = 0x9000001C  # IO_REPARSE_TAG_PROJFS -- not cloud, not symlink/mount-point
         self.assertFalse(
             self._check(ecp.stat.FILE_ATTRIBUTE_REPARSE_POINT, unrecognized_tag)
