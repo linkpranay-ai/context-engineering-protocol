@@ -355,6 +355,328 @@ class TestIncludedSkillDirs(unittest.TestCase):
         self.assertEqual(result, ["tracked-skill"])
         self.assertNotIn("draft-skill", result)
 
+    def test_result_is_sorted_by_name_regardless_of_iterdir_order(self):
+        # iterdir() order is filesystem-dependent, not alphabetical -- the
+        # function's own docstring says the explicit sort-by-name exists so
+        # plugin.json/README.md output is identical across the platforms
+        # this repo's CI runs on. Fakes iterdir() to hand back entries in
+        # reverse-alphabetical order, deliberately fighting whatever order
+        # this filesystem would naturally give, so the assertion below can
+        # only pass if the sort is doing real work -- not incidentally
+        # matching already-sorted disk order.
+        names = ["zeta-skill", "alpha-skill", "mid-skill"]
+        for name in names:
+            _write_and_track(
+                self.root, f".github/skills/{name}/SKILL.md",
+                f'---\ndescription: "{name}"\n---\n\nBody.\n',
+            )
+
+        skills_dir = self.root / ".github" / "skills"
+        real_iterdir = Path.iterdir
+
+        def reversed_iterdir(path_self):
+            entries = list(real_iterdir(path_self))
+            if path_self == skills_dir:
+                return iter(sorted(entries, key=lambda p: p.name, reverse=True))
+            return iter(entries)
+
+        with mock.patch.object(ecp, "LIBRARY_ROOT", self.root), mock.patch.object(
+            ecp, "SKILLS_DIR", skills_dir
+        ), mock.patch.object(Path, "iterdir", reversed_iterdir):
+            result = ecp.included_skill_dirs()
+
+        self.assertEqual(result, ["alpha-skill", "mid-skill", "zeta-skill"])
+
+
+class TestDecodeGitLsFilesZ(unittest.TestCase):
+    """_decode_git_ls_files_z() decodes git's raw -z stdout as UTF-8
+    directly -- a tracked path that genuinely isn't valid UTF-8 must raise a
+    clear SystemExit naming the problem, not a raw UnicodeDecodeError
+    traceback.
+    """
+
+    def test_non_utf8_bytes_raise_a_clear_system_exit_not_a_raw_traceback(self):
+        invalid = b"\xff\xfe not valid utf-8\x00"
+
+        with self.assertRaises(SystemExit) as ctx:
+            ecp._decode_git_ls_files_z(invalid)
+
+        self.assertIn("isn't valid UTF-8", str(ctx.exception))
+
+
+class TestPlanSymlinkToNonFile(unittest.TestCase):
+    """plan()'s third symlink branch: a tracked symlink whose target exists
+    but isn't a regular file (here, a directory) must raise its own specific
+    error, not fall through to the generic tracked-but-missing message that
+    is_file() alone would produce.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _init_git_repo(self.root)
+        _write_and_track(self.root, "CHANGELOG.md", "# Changelog\n\n## [1.0.0] - 2026-01-01\n\nInitial.\n")
+        _write_and_track(
+            self.root,
+            ".github/skills/demo-skill/SKILL.md",
+            '---\ndescription: "Demo skill"\n---\n\nBody.\n',
+        )
+        self.tracked_script = self.root / ".github" / "skills" / "demo-skill" / "scripts" / "run.py"
+        _write_and_track(self.root, ".github/skills/demo-skill/scripts/run.py", "print('hi')\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _patched(self):
+        return (
+            mock.patch.object(ecp, "LIBRARY_ROOT", self.root),
+            mock.patch.object(ecp, "SKILLS_DIR", self.root / ".github" / "skills"),
+            mock.patch.object(ecp, "CHANGELOG_PATH", self.root / "CHANGELOG.md"),
+            mock.patch.object(ecp, "PLUGIN_DIR", self.root / "claude-plugin"),
+            mock.patch.object(ecp, "PLUGIN_SKILLS_DIR", self.root / "claude-plugin" / "skills"),
+            mock.patch.object(
+                ecp, "PLUGIN_MANIFEST_PATH", self.root / "claude-plugin" / ".claude-plugin" / "plugin.json"
+            ),
+            mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
+        )
+
+    def test_source_file_is_a_tracked_symlink_to_a_directory_raises_a_specific_error(self):
+        self.tracked_script.unlink()
+        target_dir = self.root / "some-directory"
+        target_dir.mkdir()
+        try:
+            self.tracked_script.symlink_to(target_dir)
+        except OSError as exc:
+            self.skipTest(f"symlink creation unsupported/unprivileged here: {exc}")
+        subprocess.run(
+            ["git", "add", ".github/skills/demo-skill/scripts/run.py"], cwd=self.root, check=True
+        )
+
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with self.assertRaises(SystemExit) as ctx:
+                ecp.plan()
+
+        self.assertIn("scripts/run.py", str(ctx.exception))
+        self.assertIn("tracked symlink", str(ctx.exception))
+        self.assertIn("other than", str(ctx.exception))
+        self.assertNotIn("missing on disk", str(ctx.exception))
+
+
+class TestWriteRemovesStraySymlinks(unittest.TestCase):
+    """--write's symlink-ancestor-removal branch: every path under
+    claude-plugin/ is generator-owned, so a symlink anywhere in a generated
+    path's ancestry -- not just at the leaf -- must be removed before
+    mkdir(parents=True)/write_bytes() run there. Windows additionally
+    requires rmdir() rather than unlink() for a *directory* symlink/
+    junction (unlink() raises PermissionError there), so both the leaf-file
+    and ancestor-directory shapes get their own test.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _init_git_repo(self.root)
+        _write_and_track(self.root, "CHANGELOG.md", "# Changelog\n\n## [1.0.0] - 2026-01-01\n\nInitial.\n")
+        _write_and_track(
+            self.root,
+            ".github/skills/demo-skill/SKILL.md",
+            '---\ndescription: "Demo skill"\n---\n\nBody.\n',
+        )
+        _write_and_track(self.root, ".github/skills/demo-skill/scripts/run.py", "print('hi')\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _patched(self):
+        return (
+            mock.patch.object(ecp, "LIBRARY_ROOT", self.root),
+            mock.patch.object(ecp, "SKILLS_DIR", self.root / ".github" / "skills"),
+            mock.patch.object(ecp, "CHANGELOG_PATH", self.root / "CHANGELOG.md"),
+            mock.patch.object(ecp, "PLUGIN_DIR", self.root / "claude-plugin"),
+            mock.patch.object(ecp, "PLUGIN_SKILLS_DIR", self.root / "claude-plugin" / "skills"),
+            mock.patch.object(
+                ecp, "PLUGIN_MANIFEST_PATH", self.root / "claude-plugin" / ".claude-plugin" / "plugin.json"
+            ),
+            mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
+        )
+
+    def test_write_removes_a_stray_file_symlink_at_a_generated_leaf_path(self):
+        leaf = self.root / "claude-plugin" / "skills" / "demo-skill" / "scripts" / "run.py"
+        leaf.parent.mkdir(parents=True)
+        real_file = self.root / "elsewhere.py"
+        real_file.write_text("not the generated content\n", encoding="utf-8")
+        try:
+            leaf.symlink_to(real_file)
+        except OSError as exc:
+            self.skipTest(f"symlink creation unsupported/unprivileged here: {exc}")
+
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
+                ecp.main()
+
+        self.assertFalse(leaf.is_symlink())
+        self.assertEqual(leaf.read_text(encoding="utf-8"), "print('hi')\n")
+
+    def test_write_removes_a_stray_directory_symlink_at_a_generated_ancestor(self):
+        # A symlinked *ancestor directory* -- not just the leaf file -- must
+        # also be removed before mkdir(parents=True) walks through it.
+        ancestor = self.root / "claude-plugin" / "skills" / "demo-skill"
+        ancestor.parent.mkdir(parents=True)
+        real_dir = self.root / "elsewhere-dir"
+        real_dir.mkdir()
+        (real_dir / "decoy.txt").write_text("should not survive\n", encoding="utf-8")
+        try:
+            ancestor.symlink_to(real_dir, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"symlink creation unsupported/unprivileged here: {exc}")
+
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
+                ecp.main()
+
+        leaf = ancestor / "scripts" / "run.py"
+        self.assertFalse(ancestor.is_symlink())
+        self.assertEqual(leaf.read_text(encoding="utf-8"), "print('hi')\n")
+
+
+class TestWriteSymlinkRemovalChoosesRmdirOrUnlink(unittest.TestCase):
+    """Same removal branch as TestWriteRemovesStraySymlinks, exercised
+    without creating a real OS symlink: this dev machine has no privilege
+    to create one at all (confirmed directly -- plain os.symlink() here
+    raises WinError 1314, "A required privilege is not held by the
+    client"), which is also why every symlink-dependent test above skips
+    here rather than passing. _first_symlink_under_plugin_dir() is mocked
+    to hand back a fake stray-symlink object instead, so the is_dir()
+    -selects-rmdir()-vs-unlink() decision inside --write's removal branch
+    itself is exercised and provably non-vacuous on this machine, not only
+    on a platform where symlink creation happens to be unprivileged.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _init_git_repo(self.root)
+        _write_and_track(self.root, "CHANGELOG.md", "# Changelog\n\n## [1.0.0] - 2026-01-01\n\nInitial.\n")
+        _write_and_track(
+            self.root,
+            ".github/skills/demo-skill/SKILL.md",
+            '---\ndescription: "Demo skill"\n---\n\nBody.\n',
+        )
+        _write_and_track(self.root, ".github/skills/demo-skill/scripts/run.py", "print('hi')\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _patched(self):
+        return (
+            mock.patch.object(ecp, "LIBRARY_ROOT", self.root),
+            mock.patch.object(ecp, "SKILLS_DIR", self.root / ".github" / "skills"),
+            mock.patch.object(ecp, "CHANGELOG_PATH", self.root / "CHANGELOG.md"),
+            mock.patch.object(ecp, "PLUGIN_DIR", self.root / "claude-plugin"),
+            mock.patch.object(ecp, "PLUGIN_SKILLS_DIR", self.root / "claude-plugin" / "skills"),
+            mock.patch.object(
+                ecp, "PLUGIN_MANIFEST_PATH", self.root / "claude-plugin" / ".claude-plugin" / "plugin.json"
+            ),
+            mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
+        )
+
+    def _run_write_with_fake_stray_symlink(self, is_dir_value):
+        fake_symlink = mock.NonCallableMock(spec=Path)
+        fake_symlink.is_dir.return_value = is_dir_value
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with mock.patch.object(
+                ecp, "_first_symlink_under_plugin_dir", return_value=fake_symlink
+            ):
+                with mock.patch.object(sys, "argv", ["export_claude_plugin.py", "--write"]):
+                    ecp.main()
+        return fake_symlink
+
+    def test_directory_symlink_is_removed_with_rmdir_not_unlink(self):
+        fake_symlink = self._run_write_with_fake_stray_symlink(is_dir_value=True)
+        fake_symlink.rmdir.assert_called()
+        fake_symlink.unlink.assert_not_called()
+
+    def test_file_symlink_is_removed_with_unlink_not_rmdir(self):
+        fake_symlink = self._run_write_with_fake_stray_symlink(is_dir_value=False)
+        fake_symlink.unlink.assert_called()
+        fake_symlink.rmdir.assert_not_called()
+
+
+class TestPlanSymlinkToNonFileMocked(unittest.TestCase):
+    """Same branch as TestPlanSymlinkToNonFile, exercised without a real OS
+    symlink (unprivileged on this machine -- see
+    TestWriteSymlinkRemovalChoosesRmdirOrUnlink) by faking is_symlink()/
+    exists()/is_file() for just the one path under test, so this branch's
+    non-vacuity is provable here too.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _init_git_repo(self.root)
+        _write_and_track(self.root, "CHANGELOG.md", "# Changelog\n\n## [1.0.0] - 2026-01-01\n\nInitial.\n")
+        _write_and_track(
+            self.root,
+            ".github/skills/demo-skill/SKILL.md",
+            '---\ndescription: "Demo skill"\n---\n\nBody.\n',
+        )
+        self.tracked_script = self.root / ".github" / "skills" / "demo-skill" / "scripts" / "run.py"
+        _write_and_track(self.root, ".github/skills/demo-skill/scripts/run.py", "print('hi')\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _patched(self):
+        return (
+            mock.patch.object(ecp, "LIBRARY_ROOT", self.root),
+            mock.patch.object(ecp, "SKILLS_DIR", self.root / ".github" / "skills"),
+            mock.patch.object(ecp, "CHANGELOG_PATH", self.root / "CHANGELOG.md"),
+            mock.patch.object(ecp, "PLUGIN_DIR", self.root / "claude-plugin"),
+            mock.patch.object(ecp, "PLUGIN_SKILLS_DIR", self.root / "claude-plugin" / "skills"),
+            mock.patch.object(
+                ecp, "PLUGIN_MANIFEST_PATH", self.root / "claude-plugin" / ".claude-plugin" / "plugin.json"
+            ),
+            mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
+        )
+
+    def test_source_file_is_a_tracked_symlink_to_a_directory_raises_a_specific_error(self):
+        real_is_symlink = Path.is_symlink
+        real_exists = Path.exists
+        real_is_file = Path.is_file
+        tracked_script = self.tracked_script
+
+        def fake_is_symlink(path_self):
+            if path_self == tracked_script:
+                return True
+            return real_is_symlink(path_self)
+
+        def fake_exists(path_self):
+            if path_self == tracked_script:
+                return True
+            return real_exists(path_self)
+
+        def fake_is_file(path_self):
+            if path_self == tracked_script:
+                return False
+            return real_is_file(path_self)
+
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with mock.patch.object(Path, "is_symlink", fake_is_symlink), mock.patch.object(
+                Path, "exists", fake_exists
+            ), mock.patch.object(Path, "is_file", fake_is_file):
+                with self.assertRaises(SystemExit) as ctx:
+                    ecp.plan()
+
+        self.assertIn("scripts/run.py", str(ctx.exception))
+        self.assertIn("tracked symlink", str(ctx.exception))
+        self.assertIn("other than", str(ctx.exception))
+        self.assertNotIn("missing on disk", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

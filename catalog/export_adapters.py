@@ -81,7 +81,12 @@ def load_skill(skill_md_path):
 
 def collect_skills():
     skills = []
-    for skill_md in sorted(SKILLS_DIR.glob("*/SKILL.md")):
+    # Sorted by string path (not raw Path, whose ordering is locale/
+    # platform-dependent -- case-insensitive on Windows, case-sensitive on
+    # POSIX) so the generated adapters come out in an identical order
+    # across the platforms this repo's CI runs on. Same fix as
+    # export_claude_plugin.py's included_skill_dirs().
+    for skill_md in sorted(SKILLS_DIR.glob("*/SKILL.md"), key=lambda p: p.as_posix()):
         skill = load_skill(skill_md)
         if skill is not None:
             skills.append(skill)

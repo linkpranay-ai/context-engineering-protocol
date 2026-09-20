@@ -206,11 +206,14 @@ def plan():
                     # link), but "run `git status`" is bad advice there -- the
                     # symlink itself IS on disk and git sees nothing wrong;
                     # it's the target that's gone. Flagged separately so the
-                    # message points at the actual problem.
+                    # message points at the actual problem. (exists() also
+                    # returns False on a symlink loop -- same message covers
+                    # that case too, since the fix is the same either way.)
                     raise SystemExit(
                         f"export_claude_plugin: {src.relative_to(LIBRARY_ROOT).as_posix()} "
-                        "is a tracked symlink whose target is missing -- fix or remove "
-                        "the symlink before regenerating claude-plugin/."
+                        "is a tracked symlink whose target is missing or unreadable "
+                        "(e.g. a symlink loop) -- fix or remove the symlink before "
+                        "regenerating claude-plugin/."
                     )
                 if not src.is_file():
                     # A symlink whose target exists but isn't a regular file
@@ -270,12 +273,44 @@ def existing_plugin_files():
     return {path for path in candidates if path.is_file() or path.is_symlink()}
 
 
+def _first_symlink_under_plugin_dir(path):
+    """Returns the first symlink among `path`'s ancestors under PLUGIN_DIR,
+    inclusive of `path` itself, or None if none of them is a symlink.
+
+    Every path under claude-plugin/ is generator-owned (see module
+    docstring), so a symlink anywhere in that tree -- not just at the leaf
+    -- is already anomalous: `path.parent.mkdir(parents=True, exist_ok=True)`
+    would silently walk through a symlinked ancestor directory and write
+    outside claude-plugin/ entirely, before a leaf-only `path.is_symlink()`
+    check ever ran. Checking every component closes that gap, and reusing
+    the same check for --check's staleness test closes the matching gap
+    there: a symlink whose target's content happens to match `expected`
+    would otherwise pass `path.read_bytes() != expected` and never get
+    flagged, even though the path itself still isn't the generator-owned
+    regular file it's supposed to be.
+    """
+    cursor = PLUGIN_DIR
+    for part in path.relative_to(PLUGIN_DIR).parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            return cursor
+        if not cursor.exists():
+            break
+    return None
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "--print"
     entries, expected_paths = plan()
     extras = existing_plugin_files() - expected_paths
 
-    stale = [(path, expected) for path, expected in entries if not path.exists() or path.read_bytes() != expected]
+    stale = [
+        (path, expected)
+        for path, expected in entries
+        if not path.exists()
+        or path.read_bytes() != expected
+        or _first_symlink_under_plugin_dir(path) is not None
+    ]
 
     rel = lambda p: p.relative_to(LIBRARY_ROOT).as_posix()
 
@@ -292,15 +327,30 @@ def main():
 
     if mode == "--write":
         for path, expected in entries:
+            # Checked (and removed) BEFORE mkdir, not after: every path
+            # under claude-plugin/ is generator-owned (see module
+            # docstring), so a symlink anywhere in this path's ancestry --
+            # not just at the leaf -- is already anomalous. mkdir(parents=
+            # True) would otherwise silently walk through a symlinked
+            # ancestor directory (writing outside claude-plugin/ entirely)
+            # before a leaf-only check ever ran; write_bytes() on a
+            # symlinked leaf would do the same for the file itself.
+            # Removing the first symlink found in the chain, deepest
+            # ancestor to leaf, before mkdir runs keeps --write's output
+            # confined to the tree it's supposed to own either way.
+            stray_symlink = _first_symlink_under_plugin_dir(path)
+            if stray_symlink is not None:
+                # On Windows, os.unlink()/Path.unlink() only removes a
+                # *file* symlink -- a directory symlink (or junction) needs
+                # rmdir() instead, or it raises PermissionError. is_dir()
+                # follows the link to check what it points at, which is
+                # exactly the distinction that matters here (POSIX doesn't
+                # care either way, so this branch is a no-op cost there).
+                if stray_symlink.is_dir():
+                    stray_symlink.rmdir()
+                else:
+                    stray_symlink.unlink()
             path.parent.mkdir(parents=True, exist_ok=True)
-            if path.is_symlink():
-                # Every path under claude-plugin/ is generator-owned (see
-                # module docstring) -- a symlink ever ending up at a
-                # generated path is already anomalous. write_bytes() would
-                # otherwise follow it and write outside claude-plugin/
-                # entirely; removing it first keeps --write's output
-                # confined to the tree it's supposed to own.
-                path.unlink()
             path.write_bytes(expected)
         for path in extras:
             path.unlink()

@@ -98,18 +98,33 @@ def _tracked_files(library_root: Path):
     byte by default - a file whose path merely looked unusual would otherwise
     come back quoted, fail the `path.is_file()` check below, and get silently
     dropped from this scan rather than checked for a private-doc reference.
-    Decoded manually as UTF-8 from raw bytes rather than via
-    subprocess.run(text=True), which decodes via the platform's locale
-    encoding (a Windows codepage like cp1252, not UTF-8) - same reasoning as
-    `export_claude_plugin.py`'s `tracked_skill_files()`."""
-    out = subprocess.run(
+    Each -z-delimited entry is used exactly as git printed it, with no
+    `.strip()` - unlike newline-delimited output, -z entries carry no
+    trailing separator to strip, and a real (if unusual) tracked POSIX
+    filename can legitimately contain leading/trailing whitespace or a
+    literal \\r; stripping those would corrupt the exact path -z exists to
+    keep intact, the same class of bug this function's own non-ASCII-path
+    handling exists to avoid. Decoded manually as UTF-8 from raw bytes
+    rather than via subprocess.run(text=True), which decodes via the
+    platform's locale encoding (a Windows codepage like cp1252, not UTF-8)
+    - same reasoning as `export_claude_plugin.py`'s `tracked_skill_files()`;
+    fails with a clear message rather than a raw traceback if a tracked
+    path genuinely isn't valid UTF-8."""
+    raw = subprocess.run(
         ["git", "ls-files", "-z"],
         cwd=library_root,
         capture_output=True,
         check=True,
-    ).stdout.decode("utf-8")
+    ).stdout
+    try:
+        out = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SystemExit(
+            f"check_private_refs: git reported a tracked path that isn't "
+            f"valid UTF-8 ({exc}) -- rename the file or investigate with "
+            "`git ls-files -z` directly."
+        ) from exc
     for rel in out.split("\0"):
-        rel = rel.strip()
         if not rel:
             continue
         if rel == THIS_SCRIPTS_TEST_FILE_REL:
