@@ -74,10 +74,23 @@ def current_version():
 
 
 def included_skill_dirs():
-    return sorted(
-        p.name for p in SKILLS_DIR.iterdir()
-        if p.is_dir() and p.name not in EXCLUDED_SKILLS and (p / "SKILL.md").exists()
-    )
+    """Skill directories to advertise in plugin.json/README.md -- requires
+    SKILL.md to be git-tracked, not just present on disk. An untracked
+    SKILL.md (e.g. a skill being drafted, never `git add`ed) would
+    otherwise get a README entry and a loadable description while
+    tracked_skill_files() -- which is git-driven -- exports zero files
+    for it, advertising a command that ships nothing.
+    """
+    names = []
+    for p in sorted(SKILLS_DIR.iterdir()):
+        if not p.is_dir() or p.name in EXCLUDED_SKILLS:
+            continue
+        if not (p / "SKILL.md").exists():
+            continue
+        if Path("SKILL.md") not in tracked_skill_files(p.name):
+            continue
+        names.append(p.name)
+    return names
 
 
 def tracked_skill_files(skill_dir_name):
@@ -87,17 +100,19 @@ def tracked_skill_files(skill_dir_name):
     plain `git ls-files` quotes (and octal-escapes) any path containing a
     non-ASCII byte by default -- -z always prints paths raw, so a real
     file never gets missed here because its path merely looked unusual.
-    encoding="utf-8" is explicit too: git always writes path bytes as
-    UTF-8, but text=True alone decodes via the platform's locale encoding,
-    which on Windows is a codepage (e.g. cp1252) that mangles anything
-    outside it -- without this, -z fixes the quoting but the decode step
-    would still corrupt the same non-ASCII paths it was meant to preserve.
+    Decoded manually as UTF-8 from raw bytes rather than via
+    subprocess.run(text=True): git always writes path bytes as UTF-8, but
+    text=True decodes via the platform's locale encoding (a Windows
+    codepage like cp1252, not UTF-8) AND applies universal-newline
+    translation, which would turn a literal \\r byte inside a path into
+    \\n -- corrupting the one case -z's NUL-delimiting exists to keep
+    intact. Decoding bytes directly sidesteps both.
     """
     skill_path = SKILLS_DIR / skill_dir_name
     out = subprocess.run(
         ["git", "-C", str(LIBRARY_ROOT), "ls-files", "-z", "--", str(skill_path)],
-        capture_output=True, text=True, check=True, encoding="utf-8",
-    ).stdout
+        capture_output=True, check=True,
+    ).stdout.decode("utf-8")
     rel_root_len = len(skill_path.relative_to(LIBRARY_ROOT).as_posix()) + 1
     return sorted(Path(entry[rel_root_len:]) for entry in out.split("\0") if entry)
 
@@ -159,12 +174,23 @@ def plan():
         dst_root = PLUGIN_SKILLS_DIR / skill_dir
         for rel_path in tracked_skill_files(skill_dir):
             src = src_root / rel_path
+            if src.is_symlink() and not src.exists():
+                # A tracked symlink whose target no longer exists looks
+                # exactly like a missing file to is_file() (it follows the
+                # link), but "run `git status`" is bad advice there -- the
+                # symlink itself IS on disk and git sees nothing wrong;
+                # it's the target that's gone. Flagged separately so the
+                # message points at the actual problem.
+                raise SystemExit(
+                    f"export_claude_plugin: {src.relative_to(LIBRARY_ROOT).as_posix()} "
+                    "is a tracked symlink whose target is missing -- fix or remove "
+                    "the symlink before regenerating claude-plugin/."
+                )
             if not src.is_file():
                 # tracked_skill_files() reflects git's index, not the
                 # worktree -- a file tracked in git but removed from disk
-                # without `git rm` (or staged for deletion but not yet
-                # committed) would otherwise crash this read_bytes() call
-                # with a raw FileNotFoundError traceback instead of a
+                # without `git rm` would otherwise crash this read_bytes()
+                # call with a raw FileNotFoundError traceback instead of a
                 # message that says what's actually wrong.
                 raise SystemExit(
                     f"export_claude_plugin: {src.relative_to(LIBRARY_ROOT).as_posix()} "
@@ -182,8 +208,8 @@ def existing_plugin_files():
     -- same git ls-files technique as tracked_skill_files(), so local-only
     build artifacts (__pycache__, .pytest_cache, etc.) picked up by an
     rglob("*") walk never show up as false "extra" files under --check.
-    -z/NUL-splits and the explicit encoding="utf-8" are for the same
-    non-ASCII-path reason as tracked_skill_files() -- see its docstring.
+    -z/NUL-splits and the manual UTF-8 decode are for the same non-ASCII-
+    path reason as tracked_skill_files() -- see its docstring.
     Trade-off: an untracked file that also isn't gitignored (e.g. added by
     hand and never `git add`ed) is no longer flagged as extra either --
     fine for CI's fresh checkout, where every real file is tracked. The
@@ -199,8 +225,8 @@ def existing_plugin_files():
         return set()
     out = subprocess.run(
         ["git", "-C", str(LIBRARY_ROOT), "ls-files", "-z", "--", str(PLUGIN_DIR)],
-        capture_output=True, text=True, check=True, encoding="utf-8",
-    ).stdout
+        capture_output=True, check=True,
+    ).stdout.decode("utf-8")
     candidates = (LIBRARY_ROOT / entry for entry in out.split("\0") if entry)
     return {path for path in candidates if path.is_file() or path.is_symlink()}
 

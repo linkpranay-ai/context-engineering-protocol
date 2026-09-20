@@ -189,6 +189,19 @@ class TestPlanMissingSourceFile(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def _patched(self):
+        return (
+            mock.patch.object(ecp, "LIBRARY_ROOT", self.root),
+            mock.patch.object(ecp, "SKILLS_DIR", self.root / ".github" / "skills"),
+            mock.patch.object(ecp, "CHANGELOG_PATH", self.root / "CHANGELOG.md"),
+            mock.patch.object(ecp, "PLUGIN_DIR", self.root / "claude-plugin"),
+            mock.patch.object(ecp, "PLUGIN_SKILLS_DIR", self.root / "claude-plugin" / "skills"),
+            mock.patch.object(
+                ecp, "PLUGIN_MANIFEST_PATH", self.root / "claude-plugin" / ".claude-plugin" / "plugin.json"
+            ),
+            mock.patch.object(ecp, "PLUGIN_README_PATH", self.root / "claude-plugin" / "README.md"),
+        )
+
     def test_source_file_tracked_but_deleted_from_disk_raises_a_clear_error(self):
         self.tracked_script.unlink()
 
@@ -208,6 +221,112 @@ class TestPlanMissingSourceFile(unittest.TestCase):
 
         self.assertIn("scripts/run.py", str(ctx.exception))
         self.assertIn("tracked by git but missing on disk", str(ctx.exception))
+
+    def test_source_file_is_a_tracked_symlink_with_a_missing_target_raises_a_specific_error(self):
+        # is_file() alone would call a broken symlink "missing on disk"
+        # and tell the operator to run `git status` -- which shows
+        # nothing wrong, since the symlink itself IS tracked and present.
+        # This must get its own message naming the real problem (a
+        # missing symlink target), not the generic missing-file one.
+        self.tracked_script.unlink()
+        try:
+            self.tracked_script.symlink_to(self.root / "does-not-exist.py")
+        except OSError as exc:
+            self.skipTest(f"symlink creation unsupported/unprivileged here: {exc}")
+        subprocess.run(
+            ["git", "add", ".github/skills/demo-skill/scripts/run.py"], cwd=self.root, check=True
+        )
+
+        patches = self._patched()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            with self.assertRaises(SystemExit) as ctx:
+                ecp.plan()
+
+        self.assertIn("scripts/run.py", str(ctx.exception))
+        self.assertIn("tracked symlink", str(ctx.exception))
+        self.assertIn("target is missing", str(ctx.exception))
+        self.assertNotIn("git status", str(ctx.exception))
+
+
+class TestTrackedSkillFiles(unittest.TestCase):
+    """tracked_skill_files() decodes git's raw -z output as UTF-8 bytes
+    directly, rather than via subprocess.run(text=True), specifically so
+    that a \\r byte inside a path is preserved rather than translated to
+    \\n by universal-newline handling.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_literal_cr_byte_in_a_tracked_path_is_not_translated_to_a_newline(self):
+        # A real file with \r in its name can't be created on this
+        # Windows test environment (illegal on NTFS), even though it's a
+        # legal POSIX filename -- so git's raw -z output is faked here to
+        # exercise the decode path directly, independent of what this
+        # filesystem can hold.
+        skill_dir = self.root / ".github" / "skills"
+        raw_entry = ".github/skills/demo-skill/odd\rname.md".encode("utf-8")
+        raw_stdout = raw_entry + b"\x00"
+
+        def fake_run(*args, **kwargs):
+            # Mirrors real subprocess.run behavior closely enough to prove
+            # this test actually depends on the fix, not just on which
+            # kwargs get passed: text=True decodes AND applies
+            # universal-newline translation (\r -> \n), same as the real
+            # implementation this replaces -- capture_output-only returns
+            # raw, untranslated bytes.
+            if kwargs.get("text"):
+                decoded = raw_stdout.decode(kwargs.get("encoding") or "utf-8")
+                return mock.Mock(stdout=decoded.replace("\r\n", "\n").replace("\r", "\n"))
+            return mock.Mock(stdout=raw_stdout)
+
+        with mock.patch.object(ecp, "LIBRARY_ROOT", self.root), mock.patch.object(
+            ecp, "SKILLS_DIR", skill_dir
+        ), mock.patch.object(ecp.subprocess, "run", side_effect=fake_run):
+            result = ecp.tracked_skill_files("demo-skill")
+
+        self.assertEqual(result, [Path("odd\rname.md")])
+
+
+class TestIncludedSkillDirs(unittest.TestCase):
+    """included_skill_dirs() must agree with tracked_skill_files() about
+    which skills actually have exportable content -- both are supposed to
+    be git-driven, per this module's own docstring.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _init_git_repo(self.root)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_a_skill_dir_with_an_untracked_skill_md_is_excluded(self):
+        # A SKILL.md present on disk but never `git add`ed (e.g. a skill
+        # still being drafted) must not be advertised in the generated
+        # README/manifest -- tracked_skill_files() would export zero
+        # files for it, so a README entry for it would document a
+        # command that ships nothing.
+        tracked_dir = self.root / ".github" / "skills" / "tracked-skill"
+        _write_and_track(
+            self.root, ".github/skills/tracked-skill/SKILL.md", '---\ndescription: "Tracked"\n---\n\nBody.\n'
+        )
+        untracked_dir = self.root / ".github" / "skills" / "draft-skill"
+        untracked_dir.mkdir(parents=True)
+        (untracked_dir / "SKILL.md").write_text('---\ndescription: "Draft"\n---\n\nBody.\n', encoding="utf-8")
+
+        with mock.patch.object(ecp, "LIBRARY_ROOT", self.root), mock.patch.object(
+            ecp, "SKILLS_DIR", self.root / ".github" / "skills"
+        ):
+            result = ecp.included_skill_dirs()
+
+        self.assertEqual(result, ["tracked-skill"])
+        self.assertNotIn("draft-skill", result)
 
 
 if __name__ == "__main__":
