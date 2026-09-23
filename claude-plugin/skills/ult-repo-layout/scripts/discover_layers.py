@@ -53,6 +53,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import atomic_write as aw  # noqa: E402
 import validate_layout as vl  # noqa: E402
 from layout_decision_grammar import (  # noqa: E402
     COLLISION_TITLE,
@@ -1820,7 +1821,11 @@ def run_discovery(repo_root, repo_name=None):
 
     out_dir.mkdir(parents=True, exist_ok=True)
     artifact = render_discovery_artifact(repo_name or input_root.name, sections)
-    out_path.write_text(artifact, encoding="utf-8")
+    # Atomic write (2026-09-23, torn-read fix): see confirm_layers.py's
+    # matching note and atomic_write.py's module docstring - a plain
+    # `Path.write_text()` here is visible mid-write to any concurrent,
+    # possibly-unlocked reader of this same artifact.
+    aw.write_text_atomic(out_path, artifact)
     return out_path, artifact
 
 

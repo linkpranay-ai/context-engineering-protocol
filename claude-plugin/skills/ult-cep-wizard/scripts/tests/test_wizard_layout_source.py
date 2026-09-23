@@ -46,6 +46,7 @@ REAL_VALIDATE_LAYOUT = REAL_SKILLS_DIR / "scripts" / "validate_layout.py"
 REAL_DISCOVER_LAYERS = REAL_SKILLS_DIR / "scripts" / "discover_layers.py"
 REAL_LAYOUT_DECISION_GRAMMAR = REAL_SKILLS_DIR / "scripts" / "layout_decision_grammar.py"
 REAL_CONFIRM_LAYERS = REAL_SKILLS_DIR / "scripts" / "confirm_layers.py"
+REAL_ATOMIC_WRITE = REAL_SKILLS_DIR / "scripts" / "atomic_write.py"
 
 
 def _write(path: Path, content: str = "") -> None:
@@ -58,6 +59,7 @@ def _install_ult_repo_layout(repo_root: Path) -> None:
     scripts_dir = skill_dir / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(REAL_SKILL_MD, skill_dir / "SKILL.md")
+    shutil.copy(REAL_ATOMIC_WRITE, scripts_dir / "atomic_write.py")
     shutil.copy(REAL_VALIDATE_LAYOUT, scripts_dir / "validate_layout.py")
     shutil.copy(REAL_DISCOVER_LAYERS, scripts_dir / "discover_layers.py")
     # D24 Phase 1: LayoutSource._import_repo_layout_modules now also imports

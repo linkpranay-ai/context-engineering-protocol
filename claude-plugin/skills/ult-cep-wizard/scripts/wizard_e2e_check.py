@@ -78,6 +78,14 @@ def stamp_minimal_install(repo_root: Path) -> None:
     scripts_dir = skill_dir / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     _copy_if_distinct(SELF_REPO_LAYOUT_SKILL / "SKILL.md", skill_dir / "SKILL.md")
+    # validate_layout.py imports this (2026-09-23 torn-read fix) - same failure mode
+    # as the layout_decision_grammar.py/confirm_layers.py gaps below if it's missing
+    # on the target repo: ModuleNotFoundError at import time, surfaced client-side as
+    # http.client.RemoteDisconnected.
+    _copy_if_distinct(
+        SELF_REPO_LAYOUT_SKILL / "scripts" / "atomic_write.py",
+        scripts_dir / "atomic_write.py",
+    )
     _copy_if_distinct(
         SELF_REPO_LAYOUT_SKILL / "scripts" / "validate_layout.py",
         scripts_dir / "validate_layout.py",

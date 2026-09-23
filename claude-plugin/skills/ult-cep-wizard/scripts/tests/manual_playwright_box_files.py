@@ -93,7 +93,13 @@ def build_fixture_repo(root: Path) -> dict:
     install_skill(
         root,
         "ult-repo-layout",
-        ["validate_layout.py", "discover_layers.py", "layout_decision_grammar.py", "confirm_layers.py"],
+        [
+            "atomic_write.py",
+            "validate_layout.py",
+            "discover_layers.py",
+            "layout_decision_grammar.py",
+            "confirm_layers.py",
+        ],
     )
     (root / ".github" / "skills" / "ult-context-generate").mkdir(parents=True)
     write(

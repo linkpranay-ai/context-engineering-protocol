@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import wizard_decision_staging  # noqa: E402
 import wizard_layout_source  # noqa: E402
 
 LAYOUT_BROKEN = "layout_broken"
@@ -146,9 +147,15 @@ def compute_state(repo_root) -> OnboardingState:
             workspace_root_offer_eligible=not d20_initialized,
         )
 
+    # 2026-09-23: wrapped in the same per-target RLock wizard_server.py's
+    # mutating handlers and /api/decisions, /api/status take (see
+    # wizard_decision_staging.py's Thread-safety note) - this read used to
+    # be unsynchronized against a same-tick /api/stage, /api/apply, or
+    # /api/discover on this artifact.
     counts = {"pending": 0, "staged": 0, "confirmed": 0}
-    for f in layout_source.read_decisions():
-        counts[f.state] = counts.get(f.state, 0) + 1
+    with wizard_decision_staging._lock_for_target(artifact_path):
+        for f in layout_source.read_decisions():
+            counts[f.state] = counts.get(f.state, 0) + 1
 
     name = DECISIONS_PENDING if (counts["pending"] or counts["staged"]) else STEADY_STATE
     return OnboardingState(

@@ -672,14 +672,21 @@ def _make_handler(ctx: _ServerContext):
             # section (starts with "Re-discovery", not "What"/"How"), and
             # COLLISION_TITLE ("Cross-layer path collisions (S30)", which
             # starts with neither and can affect either layer).
+            #
+            # 2026-09-23: wrapped in the same per-target RLock the three
+            # mutating handlers and /api/decisions take (see
+            # wizard_decision_staging.py's Thread-safety note) - this read
+            # used to be unsynchronized against a same-tick /api/stage,
+            # /api/apply, or /api/discover on this artifact.
             what_pending = how_pending = False
-            for f in source.read_decisions():
-                if f.state == "confirmed":
-                    continue
-                if "what" in f.layer:
-                    what_pending = True
-                if "how" in f.layer:
-                    how_pending = True
+            with wizard_decision_staging._lock_for_target(source.discovery_artifact_path):
+                for f in source.read_decisions():
+                    if f.state == "confirmed":
+                        continue
+                    if "what" in f.layer:
+                        what_pending = True
+                    if "how" in f.layer:
+                        how_pending = True
             what_card = wizard_stub_content.what_how_card(
                 "What",
                 ctx.repo_root,
@@ -1145,34 +1152,28 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
-            # Hash read before fields, not after: these are two independent,
-            # unsynchronized reads of the artifact (no lock spans both), so a
-            # concurrent /api/stage write between them is possible. Hashing
-            # first means a race makes the hash describe an *older* state
-            # than the fields it's paired with - a later /api/apply comparing
-            # this hash against the (now newer) on-disk hash then correctly
-            # sees a mismatch and fails closed (forces a re-fetch). Reading
-            # fields first (the prior order) would let the hash describe a
-            # *newer* state than the fields the caller actually saw, so a
-            # same-tick write could pass /api/apply's freshness check without
-            # ever having been shown to the caller - a fail-open race, not
-            # just a display artifact. This closes every single-intervening-
-            # write case; a caller could still be fooled by a byte-identical
-            # revert: a write landing after this hash read but before the
-            # fields read below (so the fields returned reflect that
-            # intervening state), followed at any later point - and no
-            # later than /api/apply's own freshness check re-reading the
-            # file - by a revert back to the exact bytes this hash was
-            # taken over. A content-hash token can't distinguish "unchanged"
-            # from "changed and changed back", and that ambiguity is
-            # inherent to hashing bytes rather than tracking a monotonic
-            # version, not something this ordering fix can close. (A write
-            # and revert that both land after the fields read below, with
-            # nothing shown to the caller in between, is not this case -
-            # the caller never saw the intervening state, so nothing was
-            # misrepresented.)
-            artifact_hash = wizard_content_hash.hash_artifact(artifact_path)
-            fields = source.read_decisions()
+            # Hash read before fields, not after, same per-target RLock the
+            # three mutating handlers take (see wizard_decision_staging.py's
+            # Thread-safety note) - 2026-09-23: this pair used to be two
+            # independent, unsynchronized reads of the artifact; now that
+            # both sit under the lock, a same-tick /api/stage, /api/apply,
+            # or /api/discover against this artifact can never land between
+            # them, so the hash and fields below always describe the exact
+            # same on-disk state. The hash-before-fields order is kept
+            # anyway as defense in depth and because it still matters for
+            # the one race this lock cannot close: a caller could still be
+            # fooled by a byte-identical revert happening entirely between
+            # this request and a later one - a write and a revert back to
+            # the exact bytes this hash was taken over, both landing after
+            # this response and before /api/apply's own freshness check
+            # re-reads the file. A content-hash token can't distinguish
+            # "unchanged" from "changed and changed back", and that
+            # ambiguity is inherent to hashing bytes rather than tracking a
+            # monotonic version - no amount of locking within a single
+            # request closes it.
+            with wizard_decision_staging._lock_for_target(artifact_path):
+                artifact_hash = wizard_content_hash.hash_artifact(artifact_path)
+                fields = source.read_decisions()
             self._send_json(
                 HTTPStatus.OK,
                 {

@@ -26,6 +26,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import atomic_write as aw
 import validate_layout as vl
 from layout_decision_grammar import (
     CONFIRMED_STAMP_RE,
@@ -433,9 +434,18 @@ def run_confirm(repo_root):
             wrote += 1
         stamp_field(lines, field, timestamp)
 
+    # Atomic writes (2026-09-23, torn-read fix): a plain `Path.write_text()`
+    # here is visible mid-write to any concurrent reader - notably
+    # `wizard_layout_source.py`'s `discovery_artifact_path` property, which
+    # re-parses this exact `context-config.yaml` on every access to resolve
+    # `workspace_root`, and whose result callers use as a lock key
+    # (`wizard_decision_staging._lock_for_target`). A torn read of
+    # `workspace_root` there could resolve a different lock key than this
+    # write, silently defeating that lock. See wizard_decision_staging.py's
+    # Thread-safety docstring and atomic_write.py's module docstring.
     if config_lines:
-        config_path.write_text("\n".join(config_lines) + "\n", encoding="utf-8")
-    artifact_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        aw.write_text_atomic(config_path, "\n".join(config_lines) + "\n")
+    aw.write_text_atomic(artifact_path, "\n".join(lines) + "\n")
     return 0, [f"Confirmed {len(to_resolve)} field(s), wrote {wrote} config key(s)."]
 
 
