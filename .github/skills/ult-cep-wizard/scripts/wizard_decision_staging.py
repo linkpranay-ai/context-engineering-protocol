@@ -37,39 +37,57 @@ and the resolved path must sit inside `repo_root` -
 `wizard_containment.check_containment` is reused directly rather than
 reimplementing containment a second time.
 
-Thread-safety (2026-09-18): `stage_decision`'s read-merge-write is
-serialized per resolved `artifact_path` (see `_lock_for_target`) so two
-genuinely concurrent calls against the same artifact - the shape
-`wizard_server.py`'s `ThreadingHTTPServer` produces when two browser tabs
-POST `/api/stage` at once - can never both read the same pre-write text
-and clobber each other's change. Concurrent calls against *different*
-resolved paths never contend.
+Thread-safety (2026-09-18, extended 2026-09-23): `stage_decision`'s
+read-merge-write is serialized per resolved `artifact_path` (see
+`_lock_for_target`) so two genuinely concurrent calls against the same
+artifact - the shape `wizard_server.py`'s `ThreadingHTTPServer` produces
+when two browser tabs POST `/api/stage` at once - can never both read the
+same pre-write text and clobber each other's change. Concurrent calls
+against *different* resolved paths never contend.
 
-This lock covers only `stage_decision`-vs-`stage_decision` contention. It
-does NOT cover the same artifact being concurrently rewritten by
+This lock also now covers the cross-endpoint gap this module's 2026-09-18
+note had left open: the same artifact being concurrently rewritten by
 `confirm_layers.run_confirm()` (reached via `/api/apply` -> `wizard_apply.
 apply_confirmed()`) or by `discover_layers.run_discovery()` (reached via
-`/api/discover`), neither of which takes this lock. A `/api/stage` call
-racing a same-tick `/api/apply`/`/api/discover` call against the same
-artifact remains an open, unserialized read-merge-write window. Closing it
-does NOT require reaching into `confirm_layers.py`/`discover_layers.py`
-(neither needs to import or take this lock directly): all three code paths
-already flow through `wizard_server.py`'s three HTTP handlers, each of
-which already resolves `artifact_path` before calling out, so the same
-`_lock_for_target(artifact_path)` context manager could be taken at those
-three call sites instead. The one real obstacle is that `_TARGET_LOCKS`
-currently holds plain `threading.Lock` instances, which are not reentrant -
-wrapping `_handle_api_stage`'s call to `stage_decision` in the same lock
-`stage_decision` already acquires internally would deadlock, so this would
-also need `_TARGET_LOCKS`'s values switched to `threading.RLock` (here, in
-this module - the dict, its type annotation, and `_lock_for_target`'s
-return annotation all live in this file, not in `wizard_server.py`). Still
-a small, two-file change (this module's lock type plus `wizard_server.py`'s
-three call sites), not a three-module one; deferred as tracked scope
-because it wants its own dedicated regression test rather than being folded
-into this fix's commit (the `/api/stage`-vs-`/api/stage` read-merge-write
-race itself was closed this session via the per-target lock described
-above).
+`/api/discover`). Neither `wizard_apply.py` nor `wizard_discover.py`
+imports or takes this lock directly - both stay independently usable and
+independently unit-testable, matching this module's own
+`_find_repo_layout_scripts_dir`-duplication precedent. Instead,
+`wizard_server.py`'s three HTTP handlers (`_handle_api_stage`,
+`_handle_api_apply`, `_handle_api_discover`) each already resolve
+`artifact_path` before calling out, and each now wraps its call in this
+module's `_lock_for_target(artifact_path)` context manager - so a
+`/api/stage` call is serialized against a same-tick `/api/apply` or
+`/api/discover` call against the same artifact purely at the call-site
+layer, without either of the other two modules needing to know this lock
+exists.
+
+Because `_handle_api_stage`'s wrapper and `stage_decision`'s own internal
+`with _lock_for_target(artifact_path):` block both acquire the lock for
+the same resolved path on the same thread, `_TARGET_LOCKS` holds
+`threading.RLock` instances, not plain `threading.Lock` - a non-reentrant
+lock would deadlock on that nested acquisition. `_handle_api_apply` and
+`_handle_api_discover` acquire the lock exactly once each (`apply_confirmed`
+and `run_discover` take no lock of their own), so reentrancy is unused on
+those two paths but must still be available since all three handlers share
+the same lock instances via the same `_lock_for_target`.
+
+Known limitation (2026-09-23, not yet closed): this lock only covers the
+three *mutating* handlers. `/api/decisions` and `/api/state`
+(`wizard_onboarding_state.py`) read the discovery artifact and
+`context-config.yaml` without taking it, and `confirm_layers.run_confirm()`
+/ `discover_layers.run_discovery()` write `context-config.yaml` via plain
+`Path.write_text()` rather than this module's `write_text_atomic`. A read
+landing mid-write can see a torn file; a torn `context-config.yaml` read by
+`_try_layout_source()` in particular could yield a wrong `workspace_root`
+and therefore a different resolved `artifact_path` / lock key, silently
+defeating this section's mutual exclusion for that request. Separately,
+holding this lock across a full `run_discovery()` re-scan means an
+unrelated `/api/stage` on the same artifact blocks for that scan's full
+duration - an accepted correctness-over-latency tradeoff, not a bug.
+Neither has been observed in practice; both are flagged here for a
+follow-up pass rather than fixed in this change, which was scoped to the
+specific cross-endpoint stage/apply/discover mutual-exclusion defect.
 """
 from __future__ import annotations
 
@@ -97,26 +115,31 @@ _DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
 # thread via `ThreadingHTTPServer`, so two genuinely concurrent stages
 # against the same artifact could both read the same pre-write text and
 # then each write a whole-file replacement, silently dropping whichever
-# call's change lost the write race). One `threading.Lock` per resolved
+# call's change lost the write race). One `threading.RLock` per resolved
 # target path, created lazily under a short-lived guard lock so unrelated
 # artifacts (different repos/wizard instances sharing a process, e.g.
-# under test) never contend with each other. This closes `stage_decision`-
-# vs-`stage_decision` contention only; `confirm_layers.run_confirm()` and
-# `discover_layers.run_discovery()` also rewrite this artifact and do not
-# share this lock. Closing that gap only needs `wizard_server.py`'s three
-# handlers to take this lock too (plus switching this dict's values to
-# `threading.RLock` so the nested acquisition inside `stage_decision`
-# doesn't deadlock) - see module docstring's Thread-safety note.
+# under test) never contend with each other.
+#
+# 2026-09-23: `wizard_server.py`'s three handlers (`_handle_api_stage`,
+# `_handle_api_apply`, `_handle_api_discover`) now also take this same
+# per-target lock around their calls into `stage_decision`,
+# `wizard_apply.apply_confirmed`, and `wizard_discover.run_discover`
+# respectively, closing the residual cross-endpoint race
+# (`stage_decision`-vs-`confirm_layers.run_confirm()` and
+# `stage_decision`-vs-`discover_layers.run_discovery()`) this note used to
+# describe as open. `stage_decision` still takes this lock internally too,
+# so on the `/api/stage` path the same thread acquires it twice for the
+# same resolved path - hence `RLock`, not a plain non-reentrant `Lock`.
 _TARGET_LOCKS_GUARD = threading.Lock()
-_TARGET_LOCKS: "dict[str, threading.Lock]" = {}
+_TARGET_LOCKS: "dict[str, threading.RLock]" = {}
 
 
-def _lock_for_target(artifact_path) -> threading.Lock:
+def _lock_for_target(artifact_path) -> threading.RLock:
     key = str(Path(artifact_path).resolve())
     with _TARGET_LOCKS_GUARD:
         lock = _TARGET_LOCKS.get(key)
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
             _TARGET_LOCKS[key] = lock
         return lock
 

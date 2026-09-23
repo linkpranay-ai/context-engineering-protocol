@@ -1322,29 +1322,26 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
-            try:
-                wizard_decision_staging.stage_decision(
-                    ctx.repo_root, artifact_path, section_title, field_key, verb,
-                    arg=arg, line_no=line_no,
-                )
-            except wizard_decision_staging.DecisionStagingError as exc:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-                return
+            # Held across stage_decision() (which also takes this same
+            # per-target RLock internally - see wizard_decision_staging.py's
+            # Thread-safety note) and the hash read below, so a same-tick
+            # /api/apply or /api/discover call against this artifact can
+            # never land between this write and the hash this response
+            # returns.
+            with wizard_decision_staging._lock_for_target(artifact_path):
+                try:
+                    wizard_decision_staging.stage_decision(
+                        ctx.repo_root, artifact_path, section_title, field_key, verb,
+                        arg=arg, line_no=line_no,
+                    )
+                except wizard_decision_staging.DecisionStagingError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    return
 
-            # This hash is computed after stage_decision's lock has already
-            # been released, so a same-tick concurrent write to this
-            # artifact (another /api/stage call, or /api/apply's own
-            # confirm_layers.run_confirm rewrite) can land in between and be
-            # reflected in the hash this response returns. A caller that
-            # then uses this hash as loaded_artifact_hash for /api/apply
-            # would pass that freshness check without having seen the other
-            # write - the same residual cross-endpoint race documented in
-            # wizard_decision_staging.py's Thread-safety note, not
-            # introduced or closed by this response.
-            self._send_json(
-                HTTPStatus.OK,
-                {"staged": True, "artifact_hash": wizard_content_hash.hash_artifact(artifact_path)},
-            )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"staged": True, "artifact_hash": wizard_content_hash.hash_artifact(artifact_path)},
+                )
 
         def _handle_api_apply(self) -> None:
             body = self._read_json_body()
@@ -1362,32 +1359,38 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
-            try:
-                result = wizard_apply.apply_confirmed(
-                    ctx.repo_root, artifact_path, loaded_artifact_hash
-                )
-            except wizard_apply.StaleArtifactError as exc:
-                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
-                return
-            except wizard_apply.ValidationError as exc:
-                self._send_json(
-                    HTTPStatus.BAD_REQUEST, {"error": str(exc), "messages": exc.messages}
-                )
-                return
-            except wizard_apply.UnexpectedNoOpError as exc:
-                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
-                return
+            # Same per-target RLock _handle_api_stage and _handle_api_discover
+            # take - see wizard_decision_staging.py's Thread-safety note. Held
+            # across the whole freshness-check-through-commit call so a
+            # same-tick /api/stage or /api/discover on this artifact cannot
+            # interleave with confirm_layers.run_confirm()'s rewrite.
+            with wizard_decision_staging._lock_for_target(artifact_path):
+                try:
+                    result = wizard_apply.apply_confirmed(
+                        ctx.repo_root, artifact_path, loaded_artifact_hash
+                    )
+                except wizard_apply.StaleArtifactError as exc:
+                    self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                    return
+                except wizard_apply.ValidationError as exc:
+                    self._send_json(
+                        HTTPStatus.BAD_REQUEST, {"error": str(exc), "messages": exc.messages}
+                    )
+                    return
+                except wizard_apply.UnexpectedNoOpError as exc:
+                    self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+                    return
 
-            self._send_json(
-                HTTPStatus.OK,
-                {
-                    "config_changed": result.config_changed,
-                    "idempotent": result.idempotent,
-                    "messages": result.messages,
-                    "config_hash_after": result.config_hash_after,
-                    "artifact_hash_after": result.artifact_hash_after,
-                },
-            )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "config_changed": result.config_changed,
+                        "idempotent": result.idempotent,
+                        "messages": result.messages,
+                        "config_hash_after": result.config_hash_after,
+                        "artifact_hash_after": result.artifact_hash_after,
+                    },
+                )
 
         def _handle_api_discover(self) -> None:
             """Phase 2 (§18.14 Section B): UI-driven `discover`/re-discover. Mirrors
@@ -1405,30 +1408,36 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
-            try:
-                result = wizard_discover.run_discover(
-                    ctx.repo_root, artifact_path, loaded_artifact_hash, force=force
-                )
-            except wizard_discover.StaleArtifactError as exc:
-                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
-                return
-            except wizard_discover.AtRiskDecisionsError as exc:
-                self._send_json(
-                    HTTPStatus.CONFLICT,
-                    {"error": str(exc), "at_risk_sections": exc.at_risk_sections},
-                )
-                return
-            except wizard_discover.DiscoverError as exc:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-                return
+            # Same per-target RLock _handle_api_stage and _handle_api_apply
+            # take - see wizard_decision_staging.py's Thread-safety note. Held
+            # across the whole freshness-check-through-regenerate call so a
+            # same-tick /api/stage or /api/apply on this artifact cannot
+            # interleave with discover_layers.run_discovery()'s rewrite.
+            with wizard_decision_staging._lock_for_target(artifact_path):
+                try:
+                    result = wizard_discover.run_discover(
+                        ctx.repo_root, artifact_path, loaded_artifact_hash, force=force
+                    )
+                except wizard_discover.StaleArtifactError as exc:
+                    self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                    return
+                except wizard_discover.AtRiskDecisionsError as exc:
+                    self._send_json(
+                        HTTPStatus.CONFLICT,
+                        {"error": str(exc), "at_risk_sections": exc.at_risk_sections},
+                    )
+                    return
+                except wizard_discover.DiscoverError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    return
 
-            self._send_json(
-                HTTPStatus.OK,
-                {
-                    "artifact_hash_after": result.artifact_hash_after,
-                    "discarded_staged_sections": result.discarded_staged_sections,
-                },
-            )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "artifact_hash_after": result.artifact_hash_after,
+                        "discarded_staged_sections": result.discarded_staged_sections,
+                    },
+                )
 
         def _handle_api_init_preview(self, session: wizard_auth.Session) -> None:
             """the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: dry-run preview of the
