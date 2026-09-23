@@ -35,9 +35,11 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import wizard_apply  # noqa: E402
 import wizard_auth  # noqa: E402
+import wizard_content_hash  # noqa: E402
 import wizard_decision_staging  # noqa: E402
 import wizard_discover  # noqa: E402
 import wizard_docs  # noqa: E402
+import wizard_layout_source  # noqa: E402
 import wizard_preflight  # noqa: E402
 import wizard_server as ws  # noqa: E402
 
@@ -95,6 +97,14 @@ REAL_CONFIRM_LAYERS = (
     / "scripts"
     / "confirm_layers.py"
 )
+REAL_ATOMIC_WRITE = (
+    REAL_REPO_ROOT
+    / ".github"
+    / "skills"
+    / "ult-repo-layout"
+    / "scripts"
+    / "atomic_write.py"
+)
 
 
 def _write(path: Path, content: str = "") -> None:
@@ -116,6 +126,7 @@ def _make_valid_target_repo(root: Path) -> None:
     scripts_dir = skill_dir / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(REAL_SKILL_MD, skill_dir / "SKILL.md")
+    shutil.copy(REAL_ATOMIC_WRITE, scripts_dir / "atomic_write.py")
     shutil.copy(REAL_VALIDATE_LAYOUT, scripts_dir / "validate_layout.py")
     shutil.copy(REAL_DISCOVER_LAYERS, scripts_dir / "discover_layers.py")
     # D24 Phase 1: LayoutSource's module import now also requires
@@ -1560,25 +1571,45 @@ class TestDiscoverRoute(WizardServerTestCase):
 
 def _instrument(name, original, state, state_lock, hold_seconds=0.05):
     """Wrap a module-level entry point (stage_decision / apply_confirmed /
-    run_discover) so every real call - reached only by a genuine HTTP
-    request hitting wizard_server.py's handlers on its own
-    ThreadingHTTPServer-assigned thread, never called directly by a test -
-    records how many of the three are inside their critical section at
-    once. Sleeping while "active" widens the race window the same way
-    test_wizard_decision_staging.py's own _race_window_probe does, so a
-    missing/broken lock shows up reliably instead of by luck."""
+    run_discover / read_decisions / hash_artifact) so every real call -
+    reached only by a genuine HTTP request hitting wizard_server.py's
+    handlers on its own ThreadingHTTPServer-assigned thread, never called
+    directly by a test - records how many *distinct threads* are inside
+    their critical section at once. Sleeping while "active" widens the
+    race window the same way test_wizard_decision_staging.py's own
+    _race_window_probe does, so a missing/broken lock shows up reliably
+    instead of by luck.
+
+    Tracked by thread identity, not raw call count: apply_confirmed and
+    run_discover both call wizard_content_hash.hash_artifact internally
+    (via `import wizard_content_hash as wch`, the same module object this
+    probe patches), so a single thread's own nested call into an
+    instrumented function - fully serialized under the one lock it's
+    already holding - must not inflate "active" the way a second,
+    genuinely concurrent thread would. Only a thread's outermost
+    instrumented call adds/removes it from state["active_threads"];
+    nested re-entry from that same thread still logs to state["calls"]
+    (assertions like `assertIn("hash_artifact", ...)` depend on that) but
+    leaves the active-thread count untouched."""
 
     def wrapper(*args, **kwargs):
+        tid = threading.get_ident()
         with state_lock:
-            state["active"] += 1
-            state["max_active"] = max(state["max_active"], state["active"])
+            active_threads = state.setdefault("active_threads", set())
+            is_outermost = tid not in active_threads
+            if is_outermost:
+                active_threads.add(tid)
+                state["active"] = len(active_threads)
+                state["max_active"] = max(state["max_active"], state["active"])
             state["calls"].append(name)
         try:
             time.sleep(hold_seconds)
             return original(*args, **kwargs)
         finally:
-            with state_lock:
-                state["active"] -= 1
+            if is_outermost:
+                with state_lock:
+                    active_threads.discard(tid)
+                    state["active"] = len(active_threads)
 
     return wrapper
 
@@ -2082,6 +2113,242 @@ class TestCrossEndpointArtifactLockOutcomeIntegrity(WizardServerTestCase):
             discover_body = json.loads(responses["discover"].read().decode("utf-8"))
             self.assertIn(WHAT_L2_TITLE, discover_body["discarded_staged_sections"])
             self.assertIn(HOW_L2_TITLE, discover_body["discarded_staged_sections"])
+
+
+# --------------------------------------------------------------------------
+# 2026-09-23: read-path cross-endpoint artifact lock follow-up. The
+# _CrossEndpointProbe suite above proves the three *mutating* handlers
+# serialize against each other; it says nothing about the three *read-only*
+# handlers (`/api/decisions`, `/api/status`, `/api/state`) that used to read
+# the discovery artifact with no lock at all. All three now wrap their
+# `read_decisions()` call (and, for `/api/decisions`, the paired
+# `hash_artifact()` read) in the same `_lock_for_target(artifact_path)` -
+# see wizard_decision_staging.py's Thread-safety note and wizard_server.py's
+# three read handlers plus wizard_onboarding_state.compute_state. This class
+# proves that coverage the same way: genuine concurrent real HTTP requests,
+# with the read-side entry points instrumented in place so a missing lock on
+# either the read or the write side would show up as max_active > 1.
+# --------------------------------------------------------------------------
+
+
+class _ReadWriteCrossEndpointProbe:
+    """Like _CrossEndpointProbe, but also instruments the two entry points
+    the three read-only handlers call under the lock:
+    wizard_layout_source.LayoutSource.read_decisions (an unbound function
+    patched directly on the class, so every LayoutSource instance -
+    including the fresh one each handler constructs per request - picks it
+    up) and wizard_content_hash.hash_artifact (module-level, used only by
+    /api/decisions). Combined with the write-side instrumentation, a single
+    probe can now prove mutual exclusion between any read handler and any
+    mutating one."""
+
+    def __init__(self):
+        self.state = {"active": 0, "max_active": 0, "calls": []}
+        self.state_lock = threading.Lock()
+        self._originals = {}
+
+    def __enter__(self):
+        self._originals["stage_decision"] = wizard_decision_staging.stage_decision
+        self._originals["apply_confirmed"] = wizard_apply.apply_confirmed
+        self._originals["run_discover"] = wizard_discover.run_discover
+        self._originals["read_decisions"] = wizard_layout_source.LayoutSource.read_decisions
+        self._originals["hash_artifact"] = wizard_content_hash.hash_artifact
+        wizard_decision_staging.stage_decision = _instrument(
+            "stage", self._originals["stage_decision"], self.state, self.state_lock
+        )
+        wizard_apply.apply_confirmed = _instrument(
+            "apply", self._originals["apply_confirmed"], self.state, self.state_lock
+        )
+        wizard_discover.run_discover = _instrument(
+            "discover", self._originals["run_discover"], self.state, self.state_lock
+        )
+        wizard_layout_source.LayoutSource.read_decisions = _instrument(
+            "read_decisions", self._originals["read_decisions"], self.state, self.state_lock
+        )
+        wizard_content_hash.hash_artifact = _instrument(
+            "hash_artifact", self._originals["hash_artifact"], self.state, self.state_lock
+        )
+        return self
+
+    def __exit__(self, *exc_info):
+        wizard_decision_staging.stage_decision = self._originals["stage_decision"]
+        wizard_apply.apply_confirmed = self._originals["apply_confirmed"]
+        wizard_discover.run_discover = self._originals["run_discover"]
+        wizard_layout_source.LayoutSource.read_decisions = self._originals["read_decisions"]
+        wizard_content_hash.hash_artifact = self._originals["hash_artifact"]
+        return False
+
+
+class TestCrossEndpointArtifactLockReadWriteMutualExclusion(WizardServerTestCase):
+    """Proves /api/decisions, /api/status, and /api/state each serialize
+    against the three mutating endpoints when they target the same resolved
+    discovery-artifact path - the follow-up half of the fix
+    TestCrossEndpointArtifactLockMutualExclusion covers for the mutating
+    side. A response status of 200/400/409 from either side is a valid
+    outcome under real concurrency; what must never happen is genuine
+    temporal overlap between a read call (read_decisions/hash_artifact) and
+    a write call (stage/apply/discover)."""
+
+    def _stage_payload(self, verb="CONFIRM"):
+        return {"section_title": WHAT_L2_TITLE, "field_key": "decision", "verb": verb}
+
+    def test_decisions_read_and_stage_write_are_mutually_exclusive(self):
+        _write_discovery_artifact(self.repo_root)
+        cookie, csrf = self._authenticated_session()
+        barrier = threading.Barrier(2)
+        responses = {}
+
+        def read_worker():
+            barrier.wait(timeout=5)
+            responses["decisions"] = self._get("/api/decisions", cookie=cookie)
+
+        def stage_worker():
+            barrier.wait(timeout=5)
+            responses["stage"] = self._post_json(
+                "/api/stage", self._stage_payload(), cookie=cookie, csrf=csrf
+            )
+
+        with _ReadWriteCrossEndpointProbe() as probe:
+            threads = [threading.Thread(target=read_worker), threading.Thread(target=stage_worker)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+        self.assertEqual(probe.state["max_active"], 1)
+        self.assertIn("stage", probe.state["calls"])
+        self.assertIn("read_decisions", probe.state["calls"])
+        self.assertIn("hash_artifact", probe.state["calls"])
+        self.assertEqual(responses["decisions"].status, 200)
+        self.assertEqual(responses["stage"].status, 200)
+        payload = json.loads(responses["decisions"].read().decode("utf-8"))
+        self.assertIsNotNone(payload["artifact_hash"])
+
+    def test_status_read_and_apply_write_are_mutually_exclusive(self):
+        _write_discovery_artifact(self.repo_root)
+        cookie, csrf = self._authenticated_session()
+        barrier = threading.Barrier(2)
+        responses = {}
+
+        def read_worker():
+            barrier.wait(timeout=5)
+            responses["status"] = self._get("/api/status", cookie=cookie)
+
+        def apply_worker():
+            barrier.wait(timeout=5)
+            responses["apply"] = self._post_json(
+                "/api/apply", {"loaded_artifact_hash": "not-the-real-hash"},
+                cookie=cookie, csrf=csrf,
+            )
+
+        with _ReadWriteCrossEndpointProbe() as probe:
+            threads = [threading.Thread(target=read_worker), threading.Thread(target=apply_worker)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+        self.assertEqual(probe.state["max_active"], 1)
+        self.assertIn("apply", probe.state["calls"])
+        self.assertIn("read_decisions", probe.state["calls"])
+        self.assertEqual(responses["status"].status, 200)
+        self.assertEqual(responses["apply"].status, 409)
+        payload = json.loads(responses["status"].read().decode("utf-8"))
+        self.assertIn("stub_cards", payload)
+
+    def test_state_read_and_discover_write_are_mutually_exclusive(self):
+        _write_discovery_artifact(self.repo_root)
+        cookie, csrf = self._authenticated_session()
+        barrier = threading.Barrier(2)
+        responses = {}
+
+        def read_worker():
+            barrier.wait(timeout=5)
+            responses["state"] = self._get("/api/state", cookie=cookie)
+
+        def discover_worker():
+            barrier.wait(timeout=5)
+            responses["discover"] = self._post_json(
+                "/api/discover", {"loaded_artifact_hash": "not-the-real-hash"},
+                cookie=cookie, csrf=csrf,
+            )
+
+        with _ReadWriteCrossEndpointProbe() as probe:
+            threads = [threading.Thread(target=read_worker), threading.Thread(target=discover_worker)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+        self.assertEqual(probe.state["max_active"], 1)
+        self.assertIn("discover", probe.state["calls"])
+        self.assertIn("read_decisions", probe.state["calls"])
+        self.assertEqual(responses["state"].status, 200)
+        self.assertEqual(responses["discover"].status, 409)
+        payload = json.loads(responses["state"].read().decode("utf-8"))
+        self.assertIn(payload["state"], ("decisions_pending", "steady_state"))
+
+    def test_all_reads_and_all_writes_mixed_load_are_still_mutually_exclusive(self):
+        """9-way, mixing all three read routes against all three mutating
+        routes on the same artifact - the wider concurrency width the
+        write-side suite's own eight_way test uses, extended to the reads
+        this follow-up adds."""
+        _write_discovery_artifact(self.repo_root)
+        cookie, csrf = self._authenticated_session()
+        kinds = ("decisions", "status", "state", "stage", "apply", "discover") * 2
+        width = 9
+        barrier = threading.Barrier(width)
+        responses = [None] * width
+        errors = []
+
+        def make_worker(i):
+            kind = kinds[i]
+
+            def worker():
+                try:
+                    barrier.wait(timeout=5)
+                    if kind == "decisions":
+                        responses[i] = self._get("/api/decisions", cookie=cookie)
+                    elif kind == "status":
+                        responses[i] = self._get("/api/status", cookie=cookie)
+                    elif kind == "state":
+                        responses[i] = self._get("/api/state", cookie=cookie)
+                    elif kind == "stage":
+                        verb = "CONFIRM" if i % 2 == 0 else "SKIP"
+                        responses[i] = self._post_json(
+                            "/api/stage",
+                            {"section_title": WHAT_L2_TITLE, "field_key": "decision", "verb": verb},
+                            cookie=cookie, csrf=csrf,
+                        )
+                    elif kind == "apply":
+                        responses[i] = self._post_json(
+                            "/api/apply", {"loaded_artifact_hash": "not-the-real-hash"},
+                            cookie=cookie, csrf=csrf,
+                        )
+                    else:
+                        responses[i] = self._post_json(
+                            "/api/discover", {"loaded_artifact_hash": "not-the-real-hash"},
+                            cookie=cookie, csrf=csrf,
+                        )
+                except Exception as exc:
+                    errors.append((i, exc))
+
+            return worker
+
+        with _ReadWriteCrossEndpointProbe() as probe:
+            threads = [threading.Thread(target=make_worker(i)) for i in range(width)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=15)
+
+        self.assertEqual(errors, [], f"worker threads raised: {errors!r}")
+        self.assertEqual(probe.state["max_active"], 1)
+        self.assertTrue(all(r is not None for r in responses))
+        self.assertTrue(all(r.status in (200, 400, 409) for r in responses))
+        for r in responses:
+            json.loads(r.read().decode("utf-8"))
+        (self.repo_root / "context-layout-discovery.md").read_text(encoding="utf-8")
 
 
 class TestApiInitRoutes(WizardServerTestCase):

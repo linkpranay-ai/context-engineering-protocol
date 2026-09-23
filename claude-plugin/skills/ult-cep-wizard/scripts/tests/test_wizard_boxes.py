@@ -68,6 +68,7 @@ def _make_valid_target_repo(root: Path) -> None:
         root,
         "ult-repo-layout",
         [
+            "atomic_write.py",
             "validate_layout.py",
             "discover_layers.py",
             # D24 Phase 1: LayoutSource now also imports these two

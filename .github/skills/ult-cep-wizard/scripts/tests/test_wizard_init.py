@@ -45,6 +45,7 @@ REAL_SCRIPTS_DIR = REAL_REPO_ROOT / ".github" / "skills" / "ult-repo-layout" / "
 def _install_ult_repo_layout(repo_root: Path) -> None:
     scripts_dir = repo_root / ".github" / "skills" / "ult-repo-layout" / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(REAL_SCRIPTS_DIR / "atomic_write.py", scripts_dir / "atomic_write.py")
     shutil.copy(REAL_SCRIPTS_DIR / "validate_layout.py", scripts_dir / "validate_layout.py")
 
 

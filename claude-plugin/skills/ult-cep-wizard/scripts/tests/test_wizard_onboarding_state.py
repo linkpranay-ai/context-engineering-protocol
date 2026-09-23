@@ -60,6 +60,7 @@ def _install_ult_repo_layout(root: Path) -> None:
     scripts_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(REAL_SKILL_DIR / "SKILL.md", skill_dir / "SKILL.md")
     for name in (
+        "atomic_write.py",
         "validate_layout.py",
         "discover_layers.py",
         "layout_decision_grammar.py",

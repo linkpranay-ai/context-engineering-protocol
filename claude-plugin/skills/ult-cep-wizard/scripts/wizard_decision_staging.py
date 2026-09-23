@@ -72,22 +72,33 @@ and `run_discover` take no lock of their own), so reentrancy is unused on
 those two paths but must still be available since all three handlers share
 the same lock instances via the same `_lock_for_target`.
 
-Known limitation (2026-09-23, not yet closed): this lock only covers the
-three *mutating* handlers. `/api/decisions` and `/api/state`
-(`wizard_onboarding_state.py`) read the discovery artifact and
-`context-config.yaml` without taking it, and `confirm_layers.run_confirm()`
-/ `discover_layers.run_discovery()` write `context-config.yaml` via plain
-`Path.write_text()` rather than this module's `write_text_atomic`. A read
-landing mid-write can see a torn file; a torn `context-config.yaml` read by
-`_try_layout_source()` in particular could yield a wrong `workspace_root`
-and therefore a different resolved `artifact_path` / lock key, silently
-defeating this section's mutual exclusion for that request. Separately,
-holding this lock across a full `run_discovery()` re-scan means an
+Closed follow-up (2026-09-23): the above left two gaps, since fixed in a
+separate change scoped to them specifically. First, this lock covered only
+the three *mutating* handlers - `/api/decisions`, `/api/status`, and
+`/api/state` (`wizard_onboarding_state.py`) read the discovery artifact
+without taking it. All three now wrap their `read_decisions()` call (and, for
+`/api/decisions`, the paired `hash_artifact()` read) in this same
+`_lock_for_target(artifact_path)`. Second, `confirm_layers.run_confirm()` and
+`discover_layers.run_discovery()` wrote `context-config.yaml` and the
+discovery artifact via plain `Path.write_text()` rather than an atomic
+write - a read landing mid-write could see a torn file, and a torn
+`context-config.yaml` read by `_try_layout_source()` in particular could
+yield a wrong `workspace_root` and therefore a different resolved
+`artifact_path` / lock key than a concurrent writer, silently defeating this
+section's mutual exclusion regardless of which handlers hold the lock (the
+lock key itself is derived from an unlocked config read - unavoidable, since
+nothing can be locked before its key is known). Both writers now use
+ult-repo-layout's own `atomic_write.write_text_atomic` (duplicated from this
+skill's `wizard_atomic_write.py` rather than cross-imported, so
+ult-repo-layout stays usable without ult-cep-wizard installed - see
+atomic_write.py's module docstring), closing the torn-read case entirely;
+the remaining stale-but-whole-config read (a request seeing the old
+`workspace_root` because it read a beat before a confirm/discover call's
+atomic replace) is accepted as ordinary eventual consistency, not a bug.
+Holding this lock across a full `run_discovery()` re-scan still means an
 unrelated `/api/stage` on the same artifact blocks for that scan's full
-duration - an accepted correctness-over-latency tradeoff, not a bug.
-Neither has been observed in practice; both are flagged here for a
-follow-up pass rather than fixed in this change, which was scoped to the
-specific cross-endpoint stage/apply/discover mutual-exclusion defect.
+duration - an accepted correctness-over-latency tradeoff, unchanged by this
+follow-up.
 """
 from __future__ import annotations
 

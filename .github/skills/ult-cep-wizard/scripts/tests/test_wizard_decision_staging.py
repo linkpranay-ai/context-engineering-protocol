@@ -48,17 +48,20 @@ REAL_VALIDATE_LAYOUT = REAL_SKILLS_DIR / "scripts" / "validate_layout.py"
 REAL_DISCOVER_LAYERS = REAL_SKILLS_DIR / "scripts" / "discover_layers.py"
 REAL_LAYOUT_DECISION_GRAMMAR = REAL_SKILLS_DIR / "scripts" / "layout_decision_grammar.py"
 REAL_CONFIRM_LAYERS = REAL_SKILLS_DIR / "scripts" / "confirm_layers.py"
+REAL_ATOMIC_WRITE = REAL_SKILLS_DIR / "scripts" / "atomic_write.py"
 
 
 def _install_ult_repo_layout(repo_root: Path) -> None:
     scripts_dir = repo_root / ".github" / "skills" / "ult-repo-layout" / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     # stage_decision only ever needs confirm_layers.py (which itself imports
-    # layout_decision_grammar.py and validate_layout.py) - discover_layers.py
-    # is not on the import path this module exercises, but is copied too so
-    # this fixture is a faithful "ult-repo-layout is installed" shape, same
-    # as every other fixture in this test package.
+    # layout_decision_grammar.py and validate_layout.py, which in turn imports
+    # atomic_write.py) - discover_layers.py is not on the import path this
+    # module exercises, but is copied too so this fixture is a faithful
+    # "ult-repo-layout is installed" shape, same as every other fixture in
+    # this test package.
     for name, src in (
+        ("atomic_write.py", REAL_ATOMIC_WRITE),
         ("validate_layout.py", REAL_VALIDATE_LAYOUT),
         ("discover_layers.py", REAL_DISCOVER_LAYERS),
         ("layout_decision_grammar.py", REAL_LAYOUT_DECISION_GRAMMAR),
