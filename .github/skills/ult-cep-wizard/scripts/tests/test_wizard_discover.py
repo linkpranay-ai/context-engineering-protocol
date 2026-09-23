@@ -48,6 +48,7 @@ def _install_ult_repo_layout(repo_root: Path) -> None:
     scripts_dir = repo_root / ".github" / "skills" / "ult-repo-layout" / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     for name in (
+        "atomic_write.py",
         "validate_layout.py",
         "discover_layers.py",
         "layout_decision_grammar.py",

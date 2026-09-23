@@ -106,6 +106,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import atomic_write as aw
+
 # ---------------------------------------------------------------------------
 # §15.2 slot registry (Phase 1: context_packages; Phase 3b: + plans_output,
 # brainstorm_output; Phase 2: + compiled_guidelines, user_stories_output,
@@ -1422,7 +1424,13 @@ def run_init(repo_root, workspace_root=None, ci_hook=False, dry_run=False):
         return 0, messages
 
     _write_project_layout_section(config_lines, entries)
-    config_path.write_text("\n".join(config_lines) + "\n", encoding="utf-8")
+    # Atomic write (2026-09-23, torn-read fix): see confirm_layers.py's
+    # matching note and atomic_write.py's module docstring - a plain
+    # `Path.write_text()` here is visible mid-write to any concurrent
+    # reader of this exact context-config.yaml, notably
+    # wizard_layout_source.py's `discovery_artifact_path` property, whose
+    # result callers use as a lock key (`wizard_decision_staging._lock_for_target`).
+    aw.write_text_atomic(config_path, "\n".join(config_lines) + "\n")
     messages.append(f"Wrote project_layout with {len(entries)} slot(s) to context-config.yaml.")
 
     if ci_hook:

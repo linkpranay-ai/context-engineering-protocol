@@ -672,14 +672,21 @@ def _make_handler(ctx: _ServerContext):
             # section (starts with "Re-discovery", not "What"/"How"), and
             # COLLISION_TITLE ("Cross-layer path collisions (S30)", which
             # starts with neither and can affect either layer).
+            #
+            # 2026-09-23: wrapped in the same per-target RLock the three
+            # mutating handlers and /api/decisions take (see
+            # wizard_decision_staging.py's Thread-safety note) - this read
+            # used to be unsynchronized against a same-tick /api/stage,
+            # /api/apply, or /api/discover on this artifact.
             what_pending = how_pending = False
-            for f in source.read_decisions():
-                if f.state == "confirmed":
-                    continue
-                if "what" in f.layer:
-                    what_pending = True
-                if "how" in f.layer:
-                    how_pending = True
+            with wizard_decision_staging._lock_for_target(source.discovery_artifact_path):
+                for f in source.read_decisions():
+                    if f.state == "confirmed":
+                        continue
+                    if "what" in f.layer:
+                        what_pending = True
+                    if "how" in f.layer:
+                        how_pending = True
             what_card = wizard_stub_content.what_how_card(
                 "What",
                 ctx.repo_root,
@@ -1145,34 +1152,28 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
-            # Hash read before fields, not after: these are two independent,
-            # unsynchronized reads of the artifact (no lock spans both), so a
-            # concurrent /api/stage write between them is possible. Hashing
-            # first means a race makes the hash describe an *older* state
-            # than the fields it's paired with - a later /api/apply comparing
-            # this hash against the (now newer) on-disk hash then correctly
-            # sees a mismatch and fails closed (forces a re-fetch). Reading
-            # fields first (the prior order) would let the hash describe a
-            # *newer* state than the fields the caller actually saw, so a
-            # same-tick write could pass /api/apply's freshness check without
-            # ever having been shown to the caller - a fail-open race, not
-            # just a display artifact. This closes every single-intervening-
-            # write case; a caller could still be fooled by a byte-identical
-            # revert: a write landing after this hash read but before the
-            # fields read below (so the fields returned reflect that
-            # intervening state), followed at any later point - and no
-            # later than /api/apply's own freshness check re-reading the
-            # file - by a revert back to the exact bytes this hash was
-            # taken over. A content-hash token can't distinguish "unchanged"
-            # from "changed and changed back", and that ambiguity is
-            # inherent to hashing bytes rather than tracking a monotonic
-            # version, not something this ordering fix can close. (A write
-            # and revert that both land after the fields read below, with
-            # nothing shown to the caller in between, is not this case -
-            # the caller never saw the intervening state, so nothing was
-            # misrepresented.)
-            artifact_hash = wizard_content_hash.hash_artifact(artifact_path)
-            fields = source.read_decisions()
+            # Hash read before fields, not after, same per-target RLock the
+            # three mutating handlers take (see wizard_decision_staging.py's
+            # Thread-safety note) - 2026-09-23: this pair used to be two
+            # independent, unsynchronized reads of the artifact; now that
+            # both sit under the lock, a same-tick /api/stage, /api/apply,
+            # or /api/discover against this artifact can never land between
+            # them, so the hash and fields below always describe the exact
+            # same on-disk state. The hash-before-fields order is kept
+            # anyway as defense in depth and because it still matters for
+            # the one race this lock cannot close: a caller could still be
+            # fooled by a byte-identical revert happening entirely between
+            # this request and a later one - a write and a revert back to
+            # the exact bytes this hash was taken over, both landing after
+            # this response and before /api/apply's own freshness check
+            # re-reads the file. A content-hash token can't distinguish
+            # "unchanged" from "changed and changed back", and that
+            # ambiguity is inherent to hashing bytes rather than tracking a
+            # monotonic version - no amount of locking within a single
+            # request closes it.
+            with wizard_decision_staging._lock_for_target(artifact_path):
+                artifact_hash = wizard_content_hash.hash_artifact(artifact_path)
+                fields = source.read_decisions()
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -1322,29 +1323,26 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
-            try:
-                wizard_decision_staging.stage_decision(
-                    ctx.repo_root, artifact_path, section_title, field_key, verb,
-                    arg=arg, line_no=line_no,
-                )
-            except wizard_decision_staging.DecisionStagingError as exc:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-                return
+            # Held across stage_decision() (which also takes this same
+            # per-target RLock internally - see wizard_decision_staging.py's
+            # Thread-safety note) and the hash read below, so a same-tick
+            # /api/apply or /api/discover call against this artifact can
+            # never land between this write and the hash this response
+            # returns.
+            with wizard_decision_staging._lock_for_target(artifact_path):
+                try:
+                    wizard_decision_staging.stage_decision(
+                        ctx.repo_root, artifact_path, section_title, field_key, verb,
+                        arg=arg, line_no=line_no,
+                    )
+                except wizard_decision_staging.DecisionStagingError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    return
 
-            # This hash is computed after stage_decision's lock has already
-            # been released, so a same-tick concurrent write to this
-            # artifact (another /api/stage call, or /api/apply's own
-            # confirm_layers.run_confirm rewrite) can land in between and be
-            # reflected in the hash this response returns. A caller that
-            # then uses this hash as loaded_artifact_hash for /api/apply
-            # would pass that freshness check without having seen the other
-            # write - the same residual cross-endpoint race documented in
-            # wizard_decision_staging.py's Thread-safety note, not
-            # introduced or closed by this response.
-            self._send_json(
-                HTTPStatus.OK,
-                {"staged": True, "artifact_hash": wizard_content_hash.hash_artifact(artifact_path)},
-            )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"staged": True, "artifact_hash": wizard_content_hash.hash_artifact(artifact_path)},
+                )
 
         def _handle_api_apply(self) -> None:
             body = self._read_json_body()
@@ -1362,32 +1360,38 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
-            try:
-                result = wizard_apply.apply_confirmed(
-                    ctx.repo_root, artifact_path, loaded_artifact_hash
-                )
-            except wizard_apply.StaleArtifactError as exc:
-                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
-                return
-            except wizard_apply.ValidationError as exc:
-                self._send_json(
-                    HTTPStatus.BAD_REQUEST, {"error": str(exc), "messages": exc.messages}
-                )
-                return
-            except wizard_apply.UnexpectedNoOpError as exc:
-                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
-                return
+            # Same per-target RLock _handle_api_stage and _handle_api_discover
+            # take - see wizard_decision_staging.py's Thread-safety note. Held
+            # across the whole freshness-check-through-commit call so a
+            # same-tick /api/stage or /api/discover on this artifact cannot
+            # interleave with confirm_layers.run_confirm()'s rewrite.
+            with wizard_decision_staging._lock_for_target(artifact_path):
+                try:
+                    result = wizard_apply.apply_confirmed(
+                        ctx.repo_root, artifact_path, loaded_artifact_hash
+                    )
+                except wizard_apply.StaleArtifactError as exc:
+                    self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                    return
+                except wizard_apply.ValidationError as exc:
+                    self._send_json(
+                        HTTPStatus.BAD_REQUEST, {"error": str(exc), "messages": exc.messages}
+                    )
+                    return
+                except wizard_apply.UnexpectedNoOpError as exc:
+                    self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+                    return
 
-            self._send_json(
-                HTTPStatus.OK,
-                {
-                    "config_changed": result.config_changed,
-                    "idempotent": result.idempotent,
-                    "messages": result.messages,
-                    "config_hash_after": result.config_hash_after,
-                    "artifact_hash_after": result.artifact_hash_after,
-                },
-            )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "config_changed": result.config_changed,
+                        "idempotent": result.idempotent,
+                        "messages": result.messages,
+                        "config_hash_after": result.config_hash_after,
+                        "artifact_hash_after": result.artifact_hash_after,
+                    },
+                )
 
         def _handle_api_discover(self) -> None:
             """Phase 2 (§18.14 Section B): UI-driven `discover`/re-discover. Mirrors
@@ -1405,30 +1409,36 @@ def _make_handler(ctx: _ServerContext):
             if source is None:
                 return
             artifact_path = source.discovery_artifact_path
-            try:
-                result = wizard_discover.run_discover(
-                    ctx.repo_root, artifact_path, loaded_artifact_hash, force=force
-                )
-            except wizard_discover.StaleArtifactError as exc:
-                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
-                return
-            except wizard_discover.AtRiskDecisionsError as exc:
-                self._send_json(
-                    HTTPStatus.CONFLICT,
-                    {"error": str(exc), "at_risk_sections": exc.at_risk_sections},
-                )
-                return
-            except wizard_discover.DiscoverError as exc:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-                return
+            # Same per-target RLock _handle_api_stage and _handle_api_apply
+            # take - see wizard_decision_staging.py's Thread-safety note. Held
+            # across the whole freshness-check-through-regenerate call so a
+            # same-tick /api/stage or /api/apply on this artifact cannot
+            # interleave with discover_layers.run_discovery()'s rewrite.
+            with wizard_decision_staging._lock_for_target(artifact_path):
+                try:
+                    result = wizard_discover.run_discover(
+                        ctx.repo_root, artifact_path, loaded_artifact_hash, force=force
+                    )
+                except wizard_discover.StaleArtifactError as exc:
+                    self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                    return
+                except wizard_discover.AtRiskDecisionsError as exc:
+                    self._send_json(
+                        HTTPStatus.CONFLICT,
+                        {"error": str(exc), "at_risk_sections": exc.at_risk_sections},
+                    )
+                    return
+                except wizard_discover.DiscoverError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    return
 
-            self._send_json(
-                HTTPStatus.OK,
-                {
-                    "artifact_hash_after": result.artifact_hash_after,
-                    "discarded_staged_sections": result.discarded_staged_sections,
-                },
-            )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "artifact_hash_after": result.artifact_hash_after,
+                        "discarded_staged_sections": result.discarded_staged_sections,
+                    },
+                )
 
         def _handle_api_init_preview(self, session: wizard_auth.Session) -> None:
             """the 2026-08-31 Round-2 evaluation's finding on first-run workspace-root namespacing during init: dry-run preview of the
