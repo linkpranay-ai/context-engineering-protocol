@@ -25,21 +25,31 @@ second write.
    subprocess - there is nothing interactive in it and a subprocess would
    only add exit-code/stdout-parsing failure modes on top of the tuple
    return `run_confirm` already gives directly), then hashed again after.
-4. **Result classification (round-3 C2)**: `run_confirm` returning
-   `(0, [...])` is not by itself proof anything was committed - three
-   distinct outcomes share that same exit code:
+4. **Result classification (round-3 C2, extended V6)**: `run_confirm`
+   returning `(0, [...])` is not by itself proof anything was committed -
+   four distinct outcomes share that same exit code:
    - the config hash changed: a real commit happened (`config_changed=True`);
    - the config hash is unchanged **and** a message starts with "Nothing to
      confirm": every field was already confirmed - a legitimate idempotent
      no-op (`idempotent=True`), not a failure;
-   - the config hash is unchanged **and** no such message appears: this is
-     the round-3 C2 silent-no-op failure mode - `run_confirm` claimed
-     success but nothing happened and gave no explanation. Raised as
-     `UnexpectedNoOpError`, never reported to a caller as success.
+   - the config hash is unchanged **and** the sole message is exactly
+     `confirm_layers.py`'s own `"Confirmed N field(s), wrote 0 config
+     key(s)."` format: every resolved field this call used a verb
+     (SKIP/ACKNOWLEDGE) that `apply_field()` deterministically treats as
+     needing no config write - also a legitimate no-op (`idempotent=True`),
+     not a failure. Matched with a strict regex against that exact,
+     module-controlled message text so this cannot be spoofed by an
+     unrelated message that merely happens to mention zero;
+   - the config hash is unchanged **and** neither of the above matches:
+     this is the round-3 C2 silent-no-op failure mode - `run_confirm`
+     claimed success but nothing happened and gave no recognized
+     explanation. Raised as `UnexpectedNoOpError`, never reported to a
+     caller as success.
 """
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
@@ -48,6 +58,15 @@ from typing import List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import wizard_content_hash as wch  # noqa: E402
+
+# Matches confirm_layers.run_confirm()'s exact, self-controlled zero-write
+# success message (e.g. "Confirmed 2 field(s), wrote 0 config key(s).") -
+# produced when every resolved field this call used a verb (SKIP/
+# ACKNOWLEDGE) that apply_field() deterministically treats as needing no
+# config write. Deliberately strict (anchored, literal "wrote 0") so it
+# only recognizes this one legitimate no-op shape, not any message that
+# happens to contain "0" - see UnexpectedNoOpError and the module docstring.
+_WROTE_ZERO_RE = re.compile(r"^Confirmed \d+ field\(s\), wrote 0 config key\(s\)\.$")
 
 
 class ApplyError(Exception):
@@ -71,9 +90,10 @@ class ValidationError(ApplyError):
 
 class UnexpectedNoOpError(ApplyError):
     """run_confirm() returned success (exit code 0) but context-config.yaml's
-    content did not change and it did not say "Nothing to confirm" either -
-    round-3 C2's silent-no-op failure mode. Never present this to a caller
-    as success."""
+    content did not change, and the message was neither "Nothing to
+    confirm..." nor confirm_layers.py's own "Confirmed N field(s), wrote 0
+    config key(s)." zero-write message - round-3 C2's silent-no-op failure
+    mode. Never present this to a caller as success."""
 
 
 @dataclass
@@ -155,8 +175,10 @@ def apply_confirmed(repo_root, artifact_path, loaded_artifact_hash) -> ApplyResu
     artifact_hash_after = wch.hash_artifact(artifact_path)
     config_changed = config_hash_before != config_hash_after
     said_nothing_to_confirm = any(m.startswith("Nothing to confirm") for m in messages)
+    said_wrote_zero = len(messages) == 1 and bool(_WROTE_ZERO_RE.match(messages[0]))
+    recognized_no_op = said_nothing_to_confirm or said_wrote_zero
 
-    if not config_changed and not said_nothing_to_confirm:
+    if not config_changed and not recognized_no_op:
         raise UnexpectedNoOpError(
             "apply reported success but context-config.yaml did not change and no "
             "explanation was given - refusing to report this as success "
@@ -165,7 +187,7 @@ def apply_confirmed(repo_root, artifact_path, loaded_artifact_hash) -> ApplyResu
 
     return ApplyResult(
         config_changed=config_changed,
-        idempotent=(not config_changed) and said_nothing_to_confirm,
+        idempotent=(not config_changed) and recognized_no_op,
         messages=list(messages),
         config_hash_after=config_hash_after,
         artifact_hash_after=artifact_hash_after,

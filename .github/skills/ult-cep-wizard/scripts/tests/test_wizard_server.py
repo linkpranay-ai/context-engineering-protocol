@@ -1402,6 +1402,46 @@ class TestApplyRoute(WizardServerTestCase):
         self.assertFalse(second_result["config_changed"])
         self.assertTrue(second_result["idempotent"])
 
+    def test_skip_only_apply_is_200_not_500(self):
+        """V6 fix (issues_v6.md 2026-09-23): a browser session that stages
+        every offered field SKIP/ACKNOWLEDGE (the documented conservative
+        choice for an empty What-L2/How-L2 layer) and then clicks Apply must
+        see a normal 200 success response, not the red-error 500 this used
+        to produce - the exact end-to-end reproduction of the reported
+        defect, through the real HTTP route rather than apply_confirmed()
+        called directly."""
+        _write_discovery_artifact(
+            self.repo_root,
+            content=(
+                f"# Context Layout Discovery - test-repo\n\n"
+                f"## {WHAT_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: PENDING   # CONFIRM: docs/reqs/ | CUSTOM: <path> | SKIP\n\n"
+                f"## {HOW_L2_TITLE}\n**Status:** enabled by default.\n\n"
+                "    decision: PENDING   # CONFIRM: org/ | CUSTOM: <path> | SKIP\n"
+            ),
+        )
+        cookie, csrf = self._authenticated_session()
+        for section_title in (WHAT_L2_TITLE, HOW_L2_TITLE):
+            stage_resp = self._post_json(
+                "/api/stage",
+                {"section_title": section_title, "field_key": "decision", "verb": "SKIP"},
+                cookie=cookie, csrf=csrf,
+            )
+            self.assertEqual(stage_resp.status, 200)
+
+        decisions = json.loads(self._get("/api/decisions", cookie=cookie).read().decode("utf-8"))
+        apply_resp = self._post_json(
+            "/api/apply",
+            {"loaded_artifact_hash": decisions["artifact_hash"]},
+            cookie=cookie, csrf=csrf,
+        )
+        self.assertEqual(apply_resp.status, 200)
+        result = json.loads(apply_resp.read().decode("utf-8"))
+        self.assertFalse(result["config_changed"])
+        self.assertTrue(result["idempotent"])
+        self.assertEqual(result["messages"], ["Confirmed 2 field(s), wrote 0 config key(s)."])
+        self.assertFalse((self.repo_root / "context-config.yaml").exists())
+
 
 # --------------------------------------------------------------------------
 # D24 Phase 2 (§18.14): GET /api/state, POST /api/discover

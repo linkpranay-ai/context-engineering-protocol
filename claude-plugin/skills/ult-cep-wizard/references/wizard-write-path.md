@@ -118,15 +118,20 @@ missing artifact), so an absent key naturally routes through the same
    there is nothing interactive in it, and a subprocess would only add exit-code/
    stdout-parsing failure modes on top of the tuple `run_confirm` already returns
    directly — then hashed again after.
-4. **Result classification (round-3 C2).** Exit code 0 alone is not proof of a real
-   write; three outcomes share it:
+4. **Result classification (round-3 C2, extended V6).** Exit code 0 alone is not proof
+   of a real write; four outcomes share it:
    - config hash changed → real commit, `config_changed=true`.
    - config hash unchanged **and** a message starts with `"Nothing to confirm"` → every
      field was already confirmed, a legitimate idempotent no-op, `idempotent=true` —
      still success.
-   - config hash unchanged **and** no such message → the C2 silent-no-op failure mode.
-     `run_confirm` claimed success but nothing happened and gave no explanation.
-     `UnexpectedNoOpError`, HTTP 500. **Never** reported as success.
+   - config hash unchanged **and** the sole message is `confirm_layers.py`'s own exact
+     `"Confirmed N field(s), wrote 0 config key(s)."` format → every resolved field
+     used a verb (e.g. SKIP/ACKNOWLEDGE) that needs no config write — also a
+     legitimate idempotent no-op, `idempotent=true`, still success. Matched with a
+     strict regex against that exact message text, not a loose substring check.
+   - config hash unchanged **and** neither of the above → the C2 silent-no-op failure
+     mode. `run_confirm` claimed success but nothing happened and gave no recognized
+     explanation. `UnexpectedNoOpError`, HTTP 500. **Never** reported as success.
 
 Response on success (HTTP 200): `{"config_changed", "idempotent", "messages",
 "config_hash_after", "artifact_hash_after"}`. The frontend reloads both `/api/status`
