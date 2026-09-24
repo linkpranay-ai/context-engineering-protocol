@@ -227,11 +227,14 @@ whether Apply is driven by the browser or by a future non-browser caller:
   caller never saw.
 - **C2 (silent no-op):** `confirm_layers.run_confirm()` returning exit code 0 is not by
   itself proof anything was committed. `context-config.yaml`'s content hash is diffed
-  before and after the call and classified into three outcomes — real commit (hash
-  changed), legitimate idempotent no-op (hash unchanged, message starts with "Nothing
-  to confirm"), or the failure mode (hash unchanged, no such message) — and only the
-  third is ever raised back to the caller as an error (`UnexpectedNoOpError`, 500).
-  Never reported as success.
+  before and after the call and classified into four outcomes — real commit (hash
+  changed); legitimate idempotent no-op (hash unchanged, message starts with "Nothing
+  to confirm"); legitimate idempotent no-op (hash unchanged, sole message is
+  `confirm_layers.py`'s own exact "Confirmed N field(s), wrote 0 config key(s)."
+  format — every resolved field used a verb, e.g. SKIP/ACKNOWLEDGE, that needs no
+  config write); or the failure mode (hash unchanged, neither recognized message) —
+  and only the last is ever raised back to the caller as an error
+  (`UnexpectedNoOpError`, 500). Never reported as success.
 
 None of this expands the trust boundary described in §18.13 flag #2 (single-operator,
 no RBAC) or flag #9 (residual same-OS-user exposure) — the write routes exercise that

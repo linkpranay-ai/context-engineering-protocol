@@ -9,18 +9,26 @@ convention as test_wizard_decision_staging.py and test_wizard_layout_source.py
 - so apply_confirmed is exercised against the real run_confirm/parse_artifact/
 Field.resolve, not a paraphrase that could silently drift from them.
 
-Two of these tests are the ones the plan itself calls out as needing
-*behavioral*, not merely structural, proof (round-3 M10):
+Three of these tests are the ones the plan itself calls out as needing
+*behavioral*, not merely structural, proof (round-3 M10, extended V6):
 
 - test_idempotent_reapply_after_commit_is_success_not_error - the legitimate
   "every field already confirmed" no-op.
-- test_unexpected_no_op_raises_when_nothing_is_written - the round-3 C2
-  silent-no-op failure mode, triggered for real (a staged SKIP decision on a
-  fresh repo with no context-config.yaml at all: run_confirm's own
+- test_skip_only_apply_is_success_not_error (TestApplyConfirmedWroteZeroIsLegitimateNoOp)
+  - the *other* legitimate no-op, triggered for real (a staged SKIP decision
+  on a fresh repo with no context-config.yaml at all: run_confirm's own
   `if config_lines:` guard never fires because config_lines starts and stays
   empty, so it returns (0, ["Confirmed 1 field(s), wrote 0 config key(s)."])
-  - exit 0, hash unchanged, no "Nothing to confirm" - exactly the shape
-  apply_confirmed must not report as success), not via mocking run_confirm.
+  - exit 0, hash unchanged, no "Nothing to confirm", but a deterministic
+  SKIP/ACKNOWLEDGE outcome, not a hidden failure - see issues_v6.md
+  2026-09-23, previously a false-positive UnexpectedNoOpError here).
+- test_unrecognized_zero_change_message_still_raises
+  (TestApplyConfirmedUnexpectedNoOp) - the true round-3 C2 silent-no-op
+  failure mode. Since confirm_layers.apply_field()'s True/False return is
+  deterministic and exhaustive per field-type/verb combination, there is no
+  remaining real call path that produces this shape - so this one mocks
+  run_confirm directly to prove the guard still fires on a message it does
+  not recognize as a legitimate no-op.
 """
 
 import shutil
@@ -109,8 +117,9 @@ FULL_ARTIFACT = f"""# Context Layout Discovery - test-repo
 """
 
 # Only one decision line, offering SKIP - used for the genuine
-# UnexpectedNoOpError trigger (a fresh repo with no context-config.yaml at
-# all, where a staged SKIP writes nothing).
+# wrote-0-config-keys no-op (a fresh repo with no context-config.yaml at
+# all, where a staged SKIP writes nothing) and, via a mocked run_confirm, for
+# the true UnexpectedNoOpError trigger.
 SKIP_ONLY_ARTIFACT = f"""# Context Layout Discovery - test-repo
 
 ## {HOW_L2_TITLE}
@@ -232,17 +241,20 @@ class TestApplyConfirmedSuccess(unittest.TestCase):
         self.assertEqual(second.config_hash_after, first.config_hash_after)
 
 
-class TestApplyConfirmedUnexpectedNoOp(unittest.TestCase):
-    """The round-3 C2 silent-no-op failure mode, triggered for real rather
-    than mocked: a fresh repo with no context-config.yaml at all, and a
-    single decision staged SKIP. confirm_layers.apply_field returns False
-    for SKIP (nothing to write), and run_confirm's own
-    `if config_lines: config_path.write_text(...)` guard never fires because
-    config_lines started and stayed an empty list - so the file is never
-    created, the config hash stays None -> None (unchanged), and the
-    returned message ("Confirmed 1 field(s), wrote 0 config key(s).") does
-    not start with "Nothing to confirm". This is exactly the shape
-    apply_confirmed must refuse to report as success."""
+class TestApplyConfirmedWroteZeroIsLegitimateNoOp(unittest.TestCase):
+    """V6 fix (issues_v6.md 2026-09-23): a fresh repo with no
+    context-config.yaml at all, and a single decision staged SKIP.
+    confirm_layers.apply_field returns False for SKIP (nothing to write),
+    and run_confirm's own `if config_lines: config_path.write_text(...)`
+    guard never fires because config_lines started and stayed an empty
+    list - so the file is never created, the config hash stays
+    None -> None (unchanged), and the returned message ("Confirmed 1
+    field(s), wrote 0 config key(s).") does not start with "Nothing to
+    confirm". This is a real, deterministic outcome of a SKIP/ACKNOWLEDGE-
+    only apply, not the C2 silent-no-op failure mode, and apply_confirmed
+    must report it as a successful idempotent no-op rather than raise
+    UnexpectedNoOpError (a false positive fixed by the _WROTE_ZERO_RE
+    match in apply_confirmed)."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -254,16 +266,72 @@ class TestApplyConfirmedUnexpectedNoOp(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_unexpected_no_op_raises_when_nothing_is_written(self):
+    def test_skip_only_apply_is_success_not_error(self):
         self.assertFalse((self.root / "context-config.yaml").exists())
         loaded_hash = wch.hash_artifact(self.artifact_path)
-        with self.assertRaises(wa.UnexpectedNoOpError):
-            wa.apply_confirmed(self.root, self.artifact_path, loaded_hash)
-        # Still no config file, and run_confirm's own artifact rewrite (the
-        # CONFIRMED stamp) did happen - that part is not gated on anything
-        # being written to config_lines, so it is not itself proof of a
-        # commit; apply_confirmed's refusal is keyed on the config hash only.
+
+        result = wa.apply_confirmed(self.root, self.artifact_path, loaded_hash)
+
+        self.assertFalse(result.config_changed)
+        self.assertTrue(result.idempotent)
+        self.assertEqual(result.messages, ["Confirmed 1 field(s), wrote 0 config key(s)."])
+        # No config file was created - SKIP legitimately needed no config
+        # write; run_confirm's own artifact rewrite (the CONFIRMED stamp)
+        # did happen, but that is not gated on anything being written to
+        # config_lines, so it is not itself proof of a commit.
         self.assertFalse((self.root / "context-config.yaml").exists())
+
+
+class TestApplyConfirmedUnexpectedNoOp(unittest.TestCase):
+    """The true round-3 C2 silent-no-op failure mode. confirm_layers.
+    apply_field()'s True/False return is deterministic and exhaustive per
+    field-type/verb combination (see TestApplyConfirmedWroteZeroIsLegitimateNoOp),
+    so there is no remaining real, unmocked call path that produces exit 0,
+    an unchanged config hash, and a message apply_confirmed does not
+    recognize as a legitimate no-op - the only two success-message shapes
+    run_confirm ever emits are "Nothing to confirm..." and "Confirmed N
+    field(s), wrote M config key(s)." This test therefore mocks
+    run_confirm directly to prove the guard still catches a message it
+    does not recognize (e.g. a future confirm_layers.py regression that
+    changes the message format)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        _install_ult_repo_layout(self.root)
+        self.artifact_path = _write_artifact(self.root, SKIP_ONLY_ARTIFACT)
+        wds.stage_decision(self.root, self.artifact_path, HOW_L2_TITLE, "decision", "SKIP")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_unrecognized_zero_change_message_still_raises(self):
+        loaded_hash = wch.hash_artifact(self.artifact_path)
+        cl = wa._import_confirm_layers(self.root)
+        real_run_confirm = cl.run_confirm
+        cl.run_confirm = lambda repo_root: (0, ["Something happened, probably."])
+        try:
+            with self.assertRaises(wa.UnexpectedNoOpError):
+                wa.apply_confirmed(self.root, self.artifact_path, loaded_hash)
+        finally:
+            cl.run_confirm = real_run_confirm
+        self.assertFalse((self.root / "context-config.yaml").exists())
+
+    def test_nonzero_wrote_count_with_unchanged_hash_still_raises(self):
+        """Defense against a hypothetical confirm_layers.py regression that
+        reports writing config keys while the hash is actually unchanged -
+        _WROTE_ZERO_RE only matches a literal "wrote 0", so a nonzero count
+        must still be treated as the C2 failure mode, not trusted at face
+        value."""
+        loaded_hash = wch.hash_artifact(self.artifact_path)
+        cl = wa._import_confirm_layers(self.root)
+        real_run_confirm = cl.run_confirm
+        cl.run_confirm = lambda repo_root: (0, ["Confirmed 1 field(s), wrote 1 config key(s)."])
+        try:
+            with self.assertRaises(wa.UnexpectedNoOpError):
+                wa.apply_confirmed(self.root, self.artifact_path, loaded_hash)
+        finally:
+            cl.run_confirm = real_run_confirm
 
 
 if __name__ == "__main__":
