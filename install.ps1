@@ -8,6 +8,12 @@
     fetch. Run this from inside a clone of context-engineering-oss, pointed
     at a separate target project directory.
 
+    Each skill's own scripts/tests/ is never copied by this installer - CEP's
+    regression tests are source-only for this install path by design (see
+    Copy-LibraryTree's own comment on why; the separate claude-plugin/
+    one-click plugin does include them). Run tests from this repo's
+    checkout, not from a target installed via this script.
+
 .PARAMETER TargetPath
     Required. Path to an existing target project directory.
 
