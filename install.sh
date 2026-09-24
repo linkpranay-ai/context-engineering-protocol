@@ -5,6 +5,12 @@
 # Not a package-manager-style installer: no version pinning, no network
 # fetch. Run this from inside a clone of context-engineering-oss, pointed at
 # a separate target project directory.
+#
+# Each skill's own scripts/tests/ is never copied by this installer - CEP's
+# regression tests are source-only for this install path by design (see
+# copy_tree's own comment on why; the separate claude-plugin/ one-click
+# plugin does include them). Run tests from this repo's checkout, not from
+# a target installed via this script.
 set -euo pipefail
 
 usage() {
@@ -37,6 +43,11 @@ Usage: install.sh --target <dir> [--init-project] [--dry-run] [--only <skill1,sk
                                   flag is omitted).
   --dry-run         Print what would be done without writing anything.
   -h, --help        Show this help.
+
+Each skill's own scripts/tests/ is never installed by this script - CEP's
+regression tests are source-only for this install path by design; run them
+from this repo's checkout instead. (The separate claude-plugin/ one-click
+plugin does include them.)
 EOF
 }
 

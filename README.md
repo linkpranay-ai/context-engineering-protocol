@@ -98,6 +98,12 @@ Re-running is safe — library files are refreshed, project-owned files (like a 
 the full flag list, including `--dry-run`/`-DryRun` and `--only`/`-Only <skill1,skill2>` to
 install just a subset of skills instead of the full set.
 
+Each skill's own `scripts/tests/` is intentionally left out of what `install.sh`/`install.ps1`
+copy — these are CEP's own regression tests, source-only by design for that install path, and no
+installed skill needs them at runtime (the `claude-plugin/` one-click plugin below is a different
+distribution channel and does include them). To run a skill's tests, use this repo's own
+checkout: `python -m unittest discover -s .github/skills/<skill>/scripts/tests`.
+
 `--runtime`/`-Runtime` (default `both`) scopes what gets copied alongside `.github/skills/`
 (always copied — every value reads it natively):
 
