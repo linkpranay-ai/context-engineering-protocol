@@ -127,9 +127,12 @@ Subcommands:
   scaffold_state.py list-interfaces <state.json> [--eligible-only]
       [--with-sites --repo-root <path> --graph-path <graphify-out/graph.json>]
     Prints the interfaces list. --eligible-only filters to "pending" pairs
-    whose both endpoint modules are already "generated" in this same
-    state -- the exact tier-gating rule SKILL.md Step 5d applies, exposed
-    here so the agent doesn't hand-read/hand-cross-reference the JSON.
+    whose both endpoint modules have settled in this same state -- either
+    already "generated" (tier 1/2), or "skipped" AND tier 3 (a leaf module
+    that by design never gets its own context_md packet, so "generated"
+    would otherwise be permanently unreachable for it) -- the exact
+    tier-gating rule SKILL.md Step 5d applies, exposed here so the agent
+    doesn't hand-read/hand-cross-reference the JSON.
 
     --with-sites adds a "call_sites" key (list of "path:Lline" strings,
     sorted, empty when none found -- Sec 5.2's evidence_hints.call_sites
@@ -236,6 +239,23 @@ GENERATED_DIR_NAME_RE = re.compile(r"^(generated|gen|__generated__)$", re.I)
 GENERATED_FILE_SUFFIXES = ("_pb2.py", "_pb2_grpc.py", ".pb.go", ".g.dart")
 GENERATED_FILE_INFIXES = (".generated.",)
 GENERATED_FILE_MAJORITY_THRESHOLD = 0.5
+
+# Tier 0: orphaned-CEP-output signal, independent of the vendor/generated
+# code detection above and independent of state entirely. Every doc this
+# skill itself writes carries `generated_by: ult-autoscaffold-content` in
+# its frontmatter (see REQUIRED_FRONTMATTER_KEYS below) -- a self-describing
+# marker any content-mode template emits, regardless of which target repo
+# it was run against. _settled_output_subtrees() below only recognizes a
+# repo's own prior CEP output when it's recorded in the SAME state file
+# doing the scanning; it has no way to know about output a *different* (or
+# reset, or side/test) state file previously generated into the same
+# repo_root. Without a state-independent fallback, such a directory reads
+# as a brand-new real module full of real content on the very next scan --
+# found the hard way running a fresh acceptance state against a repo that
+# already carried a prior run's real output on disk. Reusing
+# GENERATED_FILE_MAJORITY_THRESHOLD's same "majority, not one stray file"
+# posture rather than inventing a second threshold with no cited rationale.
+ORPHANED_CEP_OUTPUT_GENERATED_BY = "ult-autoscaffold-content"
 
 # Cross-module dependency edge relations counted toward in-degree
 # (graphify graph.json's links[].relation field, empirically verified
@@ -1011,6 +1031,40 @@ def _is_generated_module(module_path, files):
         return False
     generated = sum(1 for f in files if _looks_generated(f))
     return (generated / len(files)) >= GENERATED_FILE_MAJORITY_THRESHOLD
+
+
+# --------------------------------------------------------------------------- #
+# Tier 0: orphaned CEP output detection (state-independent -- see            #
+# ORPHANED_CEP_OUTPUT_GENERATED_BY's own comment for why this exists         #
+# alongside, not instead of, _settled_output_subtrees()'s state-based check) #
+# --------------------------------------------------------------------------- #
+
+def _looks_like_orphaned_cep_output(path):
+    """True if `path` is a text file whose frontmatter's `generated_by` key
+    is exactly ORPHANED_CEP_OUTPUT_GENERATED_BY -- i.e. this skill wrote it,
+    in any run, against any repo, tracked by any state file or none at all.
+    Defensive like _read_first_line(): unreadable/binary/missing files are
+    simply not a match, never a raised error, since this runs against
+    arbitrary candidate-module files during scan()."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    frontmatter, _body = _parse_frontmatter(text)
+    return frontmatter.get("generated_by") == ORPHANED_CEP_OUTPUT_GENERATED_BY
+
+
+def _is_orphaned_cep_output_module(files):
+    """Same "majority, not one stray file" shape as _is_generated_module()'s
+    own file-suffix check, but content-sniffed rather than name-sniffed, and
+    with no directory-name shortcut (a CEP output directory's name is
+    whatever How-L2 resolved it to for that run -- e.g. "org", "docs",
+    anything -- never a fixed, guessable pattern the way "generated"/"gen"
+    is for vendor code)."""
+    if not files:
+        return False
+    marked = sum(1 for f in files if _looks_like_orphaned_cep_output(f))
+    return (marked / len(files)) >= GENERATED_FILE_MAJORITY_THRESHOLD
 
 
 # --------------------------------------------------------------------------- #
@@ -2026,16 +2080,29 @@ def scan(state, repo_root, graph_mode, graph_path=None, rescan=False):
                 and not any(d in f.resolve().parents for d in known_dirs)
             ]
         generated = _is_generated_module(module_path, files)
+        # Only worth the content-read cost when the cheaper name/suffix
+        # check above didn't already decide tier 0 -- and only meaningful
+        # to distinguish in skip_reason wording, since both bases feed the
+        # same tier-0/auto-skip outcome below.
+        orphaned_cep_output = False if generated else _is_orphaned_cep_output_module(files)
 
         if graph_mode == "graphify":
             in_degree = in_degrees.get(name, 0)
             node_count = node_counts.get(name, 0)
-            tier, basis = _tier_for_graph(in_degree, generated, node_count, len(files))
+            tier, basis = _tier_for_graph(
+                in_degree, generated or orphaned_cep_output, node_count, len(files)
+            )
         else:
             in_degree = None
-            tier, basis = _tier_for_heuristic(len(files), generated)
+            tier, basis = _tier_for_heuristic(len(files), generated or orphaned_cep_output)
 
-        if tier == 0:
+        if tier == 0 and orphaned_cep_output:
+            skip_reason = (
+                "orphaned CEP-generated output from a prior run, not tracked "
+                "by this state file (auto-detected via generated_by "
+                "frontmatter)"
+            )
+        elif tier == 0:
             skip_reason = "generated/vendor code (auto-detected)"
         elif tier is None:
             # Distinct wording from the tier-0 case above so "why was this
@@ -2535,13 +2602,33 @@ def mark_interface_deferred(state, interface_id, reason):
 def list_interfaces(state, eligible_only=False, generated_module_ids=None,
                      with_sites=False, repo_root=None, graph=None):
     """Return the interfaces list, optionally filtered to SKILL.md Step 5d's
-    exact eligibility rule: status == "pending" AND both endpoint modules
-    are already "generated" in this same state.
+    eligibility rule: status == "pending" AND both endpoint modules have
+    reached a SETTLED state in this same state -- "generated" (tier 1/2,
+    a context_md packet was actually produced), OR "skipped" AND tier == 3
+    (a tier-3 leaf, which by design at PACKET_ELIGIBLE_MODULE_TIERS never
+    gets a context_md packet at all and goes straight from "pending" to
+    "skipped" -- see plan()'s own tier filter). Without the tier-3 case, a
+    crossing edge touching ANY tier-3 endpoint could never become eligible
+    under a clean run: the endpoint would never reach "generated", full
+    stop, no matter how long the run went on -- a structural deadlock, not
+    a "not yet" state. A tier-3 leaf is real, tiered application code (scan()
+    already distinguished it from the genuinely-empty and
+    generated/vendor-code cases, which also end at "skipped" but are
+    deliberately EXCLUDED here by the explicit tier == 3 check -- neither
+    of those ever has a meaningful interface to document, and this must not
+    accidentally start treating them as eligible endpoints too); it is only
+    "skipped" as in "no per-module doc was ever planned for it", not as in
+    "there was nothing here". This is a widening of what "settled" means
+    for interface-eligibility purposes only -- it changes no module's own
+    tier, status, or packet eligibility.
 
     generated_module_ids defaults to computing itself from state["modules"]
     when not supplied -- callers that already have the module list handy
     (e.g. a single CLI invocation that just loaded state once) may pass it
-    to avoid a second pass; the CLI entry point relies on the default.
+    to avoid a second pass; the CLI entry point relies on the default. The
+    parameter name predates the tier-3 widening above and is kept for
+    backward compatibility, but it now means "settled enough to count as an
+    interface endpoint", not literally "status == generated".
 
     with_sites=True adds a "call_sites" key (Sec 5.2's
     evidence_hints.call_sites shape) to every returned entry, via
@@ -2558,7 +2645,9 @@ def list_interfaces(state, eligible_only=False, generated_module_ids=None,
     else:
         if generated_module_ids is None:
             generated_module_ids = {
-                m["id"] for m in state.get("modules", []) if m["status"] == "generated"
+                m["id"] for m in state.get("modules", [])
+                if m["status"] == "generated"
+                or (m["status"] == "skipped" and m.get("tier") == 3)
             }
         result = [
             i
@@ -3424,7 +3513,10 @@ def main(argv=None):
     p_iflist.add_argument("state")
     p_iflist.add_argument(
         "--eligible-only", action="store_true",
-        help="Filter to pending pairs whose both endpoint modules are already generated.",
+        help=(
+            "Filter to pending pairs whose both endpoint modules have settled "
+            "(generated, or skipped tier-3 leaf)."
+        ),
     )
     p_iflist.add_argument(
         "--with-sites", action="store_true",
