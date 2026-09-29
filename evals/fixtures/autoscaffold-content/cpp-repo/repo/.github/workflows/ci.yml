@@ -1,0 +1,12 @@
+name: ci
+on: [push]
+jobs:
+  fmt-check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: clang-format --version
+      - run: cpplint --version
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: cmake -S . -B build && cmake --build build && ctest --test-dir build

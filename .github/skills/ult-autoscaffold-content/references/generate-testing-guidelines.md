@@ -5,35 +5,35 @@ Read by Step 5c when the user opts in and
 
 ## 1. Detect what's actually configured
 
-Look for a test-framework or test-runner config already present — don't
-ask the user to restate what a config file already states. Check for
-(whichever apply):
+Evidence gathering for this kind is governed by
+`references/evidence-probes.md#testing_guidelines` — that file holds the
+full signal table (test-runner config, test-file convention, coverage
+config, and CI-invocation classes across languages) and the exact
+`[src: path#Lx-Ly]` / `Not evidenced. Searched: ... (absent).` reporting
+format every section must use. Read it before probing; this step doesn't
+repeat that table.
 
-| Signal file(s) | What it tells you |
-|---|---|
-| `pytest.ini`, `pyproject.toml` `[tool.pytest.ini_options]`, `tox.ini` `[pytest]` | Python via pytest |
-| `jest.config.*`, `vitest.config.*` | JS/TS via Jest or Vitest |
-| `*_test.go` convention + `go.mod` | Go's built-in `testing` package |
-| `build.gradle`/`pom.xml` + a `junit`/`JUnit` dependency | JVM via JUnit |
-| `Cargo.toml` `[dev-dependencies]` with a test crate, or bare `#[test]` usage | Rust's built-in test harness |
-| `CTestConfig.cmake`, `CMakeLists.txt` `enable_testing()` | C/C++ via CTest |
-| CI config (`.github/workflows/*.yml`, etc.) running a test command | The actual invoked command, even if no dedicated config file exists |
+If the packet driving this generation carries `must_cite` and
+`evidence_hints`, read those first — the orchestrator already probed the
+repo once; don't re-derive the same signals independently.
 
-For each one found, name it and note where tests actually live in this
-repo (the real directory/naming pattern you can observe — e.g. `tests/`,
-`*_test.go` beside the source file, `__tests__/`) — don't guess a layout
-the repo doesn't use.
+Report the real directory/naming pattern this repo actually uses for its
+tests — never a generic default a given language's ecosystem usually
+prefers.
 
 ## 2. Fill the template
 
-Open `templates/testing-guidelines-template.md` and fill it in:
+Open `templates/testing-guidelines-template.md` and fill it in, following
+that template's own per-section evidence comments (each one points back
+at the matching `evidence-probes.md#testing_guidelines` row):
 
-- **Detected tooling section**: the table from step 1, only the rows that
-  actually matched something in this repo.
+- **Detected tooling section**: one row per signal actually found, using
+  `evidence-probes.md`'s signal-class table — never list a framework this
+  repo doesn't use.
 - **Everything else**: same "TBD when genuinely unknown" rule as Step 5 —
   a coverage threshold, naming convention, or mocking policy that isn't
   evidenced by a config file or a consistent pattern across the repo's
-  actual test files gets `TBD — fill in`, not an invented number.
+  actual test files gets the honest gap line, not an invented number.
 
 ## 3. Write and record
 

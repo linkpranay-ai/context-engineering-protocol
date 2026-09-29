@@ -125,10 +125,24 @@ Subcommands:
     this run").
 
   scaffold_state.py list-interfaces <state.json> [--eligible-only]
+      [--with-sites --repo-root <path> --graph-path <graphify-out/graph.json>]
     Prints the interfaces list. --eligible-only filters to "pending" pairs
     whose both endpoint modules are already "generated" in this same
     state -- the exact tier-gating rule SKILL.md Step 5d applies, exposed
     here so the agent doesn't hand-read/hand-cross-reference the JSON.
+
+    --with-sites adds a "call_sites" key (list of "path:Lline" strings,
+    sorted, empty when none found -- Sec 5.2's evidence_hints.call_sites
+    shape) to every printed entry, derived entirely from --graph-path's
+    already-loaded node/link data: for each node-level DEPENDENCY_RELATIONS
+    edge crossing that specific pair, the edge's source node names which
+    file to look in and its target node names which symbol to look for: a
+    plain, deterministic text search of that one file (no re-running the
+    graph indexer -- see _interface_call_sites()'s docstring for the exact
+    honesty posture, matching _probe_tool_versions()'s "citation index, not
+    a parsed call verification" framing). Requires --repo-root and
+    --graph-path together; refuses otherwise. Absent any textual match,
+    "call_sites" is an honest empty list, never a guess.
 
 Interfaces (populated only when --graph-mode graphify; scan()'s one-time
 graph.json load, same access pattern as in-degree above): one entry per
@@ -1119,6 +1133,85 @@ def _graph_crossing_edges(graph):
     ]
 
 
+def _node_level_crossing_edges(graph, module_a, module_b):
+    """Every node-level DEPENDENCY_RELATIONS edge whose two endpoints fall
+    one in module_a and one in module_b (either direction), as (src_node,
+    dst_node) node-dict pairs straight from the already-loaded graph -- no
+    additional graph work, just a second pass over the same links list
+    _graph_crossing_edges() already walked, this time keeping node identity
+    instead of collapsing to the module-pair aggregate. On its own this is
+    NOT a call-site citation -- see _interface_call_sites(), which uses this
+    only to know which specific (file, symbol name) pairs are even worth a
+    text search."""
+    node_module = _node_module_map(graph)
+    node_by_id = {n.get("id"): n for n in graph.get("nodes", [])}
+    pair = frozenset((module_a, module_b))
+    edges = []
+    for link in graph.get("links", []):
+        if link.get("relation") not in DEPENDENCY_RELATIONS:
+            continue
+        src_id, dst_id = link.get("source"), link.get("target")
+        src_module, dst_module = node_module.get(src_id), node_module.get(dst_id)
+        if not src_module or not dst_module or src_module == dst_module:
+            continue
+        if frozenset((src_module, dst_module)) != pair:
+            continue
+        src_node, dst_node = node_by_id.get(src_id), node_by_id.get(dst_id)
+        if src_node is not None and dst_node is not None:
+            edges.append((src_node, dst_node))
+    return edges
+
+
+def _interface_call_sites(repo_root, graph, module_a, module_b):
+    """Best-effort "path:Lline" call-site citations for one interface
+    pair, derived entirely from the already-loaded graph -- closes F18
+    (Sec 1.2 R7) without re-running the graph indexer: graph.json's own
+    links carry no reliable per-edge line number (every real consumer in
+    this file already treats that as absent, see
+    _compute_module_graph_evidence()'s docstring), so instead of trusting
+    an unpopulated field this walks _node_level_crossing_edges() for the
+    pair, and for each edge does a plain, deterministic text search of the
+    edge's own SOURCE node's source_file for its TARGET node's own name --
+    exactly _probe_tool_versions()'s established "citation index, not a
+    parsed/verified match" posture (a needle found at a real line, never a
+    guessed one, never a claim that the match IS the call expression itself
+    rather than a textual mention of the target's name on that line).
+
+    Returns a sorted, deduplicated list of "path:Lline" strings -- empty,
+    honestly, when no crossing edge's target name is ever textually found
+    in its source edge's file (e.g. a name too generic to have been
+    written, or a source file this call can't read). Never raises on a
+    missing/unreadable file -- that file is just skipped, same tolerance
+    _probe_tool_versions() already applies."""
+    repo_root = Path(repo_root)
+    sites = set()
+    file_lines_cache = {}
+    for src_node, dst_node in _node_level_crossing_edges(graph, module_a, module_b):
+        # Same "name" field with an id fallback that
+        # _compute_module_graph_evidence()'s top_symbols_by_in_degree
+        # already relies on (real graphify output doesn't always populate
+        # "name" -- see that function's node.get("name") or node_id line).
+        target_name = dst_node.get("name") or dst_node.get("id")
+        source_file = src_node.get("source_file")
+        if not target_name or not source_file:
+            continue
+        rel_path = source_file.replace("\\", "/")
+        if rel_path not in file_lines_cache:
+            try:
+                text = (repo_root / rel_path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                file_lines_cache[rel_path] = None
+            else:
+                file_lines_cache[rel_path] = text.splitlines()
+        lines = file_lines_cache[rel_path]
+        if not lines:
+            continue
+        for line_no, line in enumerate(lines, start=1):
+            if target_name in line:
+                sites.add("{}:L{}".format(rel_path, line_no))
+    return sorted(sites)
+
+
 def _merge_interfaces(existing_interfaces, crossing_edges):
     """Merge a fresh _graph_crossing_edges() result into the prior
     `interfaces` list, same "state is a record of decisions made" posture
@@ -1202,13 +1295,17 @@ def _compute_module_graph_evidence(graph):
 
     Scope note -- Sec 5.2's evidence_hints.call_sites (a file:line citation
     of one specific cross-module call, e.g. "orm_lib/src/DbClient.cc:L96")
-    is NOT produced here: graph.json's nodes/links carry no line-number
-    field anywhere in this codebase (grep-verified against every existing
-    graph consumer in this file), and Sec 1.2's R7 [F18] already names
-    this as a known, still-open ("Contributing", not "Primary") gap, not
-    something this function should fabricate. Every packet still gets a
-    `"call_sites": []` key so the schema shape stays stable across hosts;
-    only the content is honestly empty until a future task closes F18.
+    is NOT produced here: this function only ever aggregates per-module
+    fan-in/fan-out, it doesn't walk individual crossing edges. Populating
+    call_sites for a specific interface PAIR is `list-interfaces
+    --with-sites`'s job (see _interface_call_sites()), which this codebase
+    treats as a distinct, later step -- Step 5d only reaches an interface
+    pair once both endpoint modules already have a CONTEXT.md, so
+    call-site evidence for it is naturally gathered then, not during this
+    earlier per-module pass. Every packet still gets a `"call_sites": []`
+    key here so the schema shape stays stable across hosts even when this
+    function is the only evidence source consulted (e.g. a context_md
+    packet, which has no interface pair to look sites up for at all).
     """
     node_module = _node_module_map(graph)
     node_by_id = {n.get("id"): n for n in graph.get("nodes", [])}
@@ -2435,7 +2532,8 @@ def mark_interface_deferred(state, interface_id, reason):
     return interface
 
 
-def list_interfaces(state, eligible_only=False, generated_module_ids=None):
+def list_interfaces(state, eligible_only=False, generated_module_ids=None,
+                     with_sites=False, repo_root=None, graph=None):
     """Return the interfaces list, optionally filtered to SKILL.md Step 5d's
     exact eligibility rule: status == "pending" AND both endpoint modules
     are already "generated" in this same state.
@@ -2443,22 +2541,44 @@ def list_interfaces(state, eligible_only=False, generated_module_ids=None):
     generated_module_ids defaults to computing itself from state["modules"]
     when not supplied -- callers that already have the module list handy
     (e.g. a single CLI invocation that just loaded state once) may pass it
-    to avoid a second pass; the CLI entry point relies on the default."""
+    to avoid a second pass; the CLI entry point relies on the default.
+
+    with_sites=True adds a "call_sites" key (Sec 5.2's
+    evidence_hints.call_sites shape) to every returned entry, via
+    _interface_call_sites() against the already-loaded graph -- no
+    additional graph work beyond what the caller already loaded. Requires
+    repo_root and graph both given; the CLI entry point enforces that
+    pairing before calling in with with_sites=True -- this function itself
+    just needs both present to do the lookup, and returns entries with no
+    "call_sites" key at all when with_sites is False, so callers that never
+    asked for sites see the exact same shape as before this flag existed."""
     interfaces = state.get("interfaces", [])
     if not eligible_only:
-        return interfaces
+        result = interfaces
+    else:
+        if generated_module_ids is None:
+            generated_module_ids = {
+                m["id"] for m in state.get("modules", []) if m["status"] == "generated"
+            }
+        result = [
+            i
+            for i in interfaces
+            if i["status"] == "pending"
+            and (i["module_a"] + "/") in generated_module_ids
+            and (i["module_b"] + "/") in generated_module_ids
+        ]
 
-    if generated_module_ids is None:
-        generated_module_ids = {
-            m["id"] for m in state.get("modules", []) if m["status"] == "generated"
-        }
-    return [
-        i
-        for i in interfaces
-        if i["status"] == "pending"
-        and (i["module_a"] + "/") in generated_module_ids
-        and (i["module_b"] + "/") in generated_module_ids
-    ]
+    if not with_sites:
+        return result
+
+    with_sites_result = []
+    for i in result:
+        entry = dict(i)
+        entry["call_sites"] = _interface_call_sites(
+            repo_root, graph, i["module_a"], i["module_b"]
+        )
+        with_sites_result.append(entry)
+    return with_sites_result
 
 
 # --------------------------------------------------------------------------- #
@@ -3127,8 +3247,26 @@ def _cmd_mark_interface_deferred(args):
 
 
 def _cmd_list_interfaces(args):
+    if args.with_sites and not (args.repo_root and args.graph_path):
+        print(
+            "ERROR: --with-sites requires --repo-root and --graph-path together",
+            file=sys.stderr,
+        )
+        return 1
+
     state = load_state(args.state)
-    print(json.dumps(list_interfaces(state, eligible_only=args.eligible_only), indent=2))
+    graph = None
+    if args.with_sites:
+        try:
+            graph = _load_graph(args.graph_path)
+        except (ValueError, FileNotFoundError) as e:
+            print("ERROR: {}".format(e), file=sys.stderr)
+            return 1
+    result = list_interfaces(
+        state, eligible_only=args.eligible_only, with_sites=args.with_sites,
+        repo_root=args.repo_root, graph=graph,
+    )
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -3287,6 +3425,20 @@ def main(argv=None):
     p_iflist.add_argument(
         "--eligible-only", action="store_true",
         help="Filter to pending pairs whose both endpoint modules are already generated.",
+    )
+    p_iflist.add_argument(
+        "--with-sites", action="store_true",
+        help="Add a 'call_sites' key (evidence_hints.call_sites shape) to each "
+             "entry, derived from --graph-path. Requires --repo-root and "
+             "--graph-path together.",
+    )
+    p_iflist.add_argument(
+        "--repo-root", default=None,
+        help="Repo root call sites are searched relative to. Required with --with-sites.",
+    )
+    p_iflist.add_argument(
+        "--graph-path", default=None,
+        help="graphify-out/graph.json. Required with --with-sites.",
     )
     p_iflist.set_defaults(func=_cmd_list_interfaces)
 

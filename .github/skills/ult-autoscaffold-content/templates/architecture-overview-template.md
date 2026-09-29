@@ -2,13 +2,26 @@
 generated_by: ult-autoscaffold-content
 generated_at: <YYYY-MM-DD>
 status: draft
+content_mode: <content-mode>
+doc_kind: architecture_overview
+skill_version: <skill-version>
 ---
 
 <!-- Generated starting point — genuine draft for a human to extend, never
      a claim of completeness. Base every claim on what you can actually
-     observe; where you genuinely don't know, write
-     "TBD — <what's missing and why>" instead of guessing plausibly. A
-     wrong answer stated confidently is worse than an honest gap. -->
+     observe.
+
+     Evidence: see references/evidence-probes.md#architecture_overview for
+     what to look for per section below (prioritize the work packet's own
+     must_cite/evidence_hints, when this run has any, first, then that
+     checklist).
+
+     Every claim needs one of exactly two things, never a plausible-sounding
+     guess in between:
+       - a citation, inline: [src: path#Lx-Ly]
+       - or, if genuinely not observable after looking, the literal gap
+         line: "Not evidenced. Searched: <signal 1>, <signal 2> (absent)."
+     A wrong answer stated confidently is worse than an honest gap. -->
 
 # <Project name> — Architecture & Conventions Overview
 

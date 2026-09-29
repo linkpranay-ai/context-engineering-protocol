@@ -22,19 +22,33 @@ now versus leave for a later run.
 
 ## 2. Fill the template — grounded facts only
 
-Open `templates/interface-boundary-template.md` and fill in:
+Evidence gathering for this kind is governed by
+`references/evidence-probes.md#interface_boundary` — read it before
+filling the template; it names which fields the interface entry itself
+already grounds versus which fields need a real call site or ownership
+file, and the exact `[src: path#Lx-Ly]` / `Not evidenced. Searched: ...
+(absent).` reporting format every section must use.
+
+Open `templates/interface-boundary-template.md` and fill in, following
+that template's own per-section evidence comments:
 
 - **`module_a` / `module_b`**: from the interface entry, verbatim.
 - **Relations observed**: the `relations` and `weight` fields, stated as
   what they are — a count of graph-observed dependency edges, not a claim
   about the interface's actual API surface.
-- **Everything else** (API shape, request/response contract, versioning
-  policy, deprecation policy): a dependency-graph edge cannot evidence any
-  of this — it only proves *that* two modules are coupled, not *how*. Every
-  one of these fields is `TBD — fill in` in the generated file. Do not
-  infer a contract shape from either module's name or from general
-  conventions; that would be exactly the kind of confident-but-ungrounded
-  claim this skill's honesty standard (`SKILL.md` Step 5) exists to avoid.
+- **Contract**: cite an actual import/include statement or call
+  expression connecting the two modules. Use `evidence_hints.call_sites`
+  when the packet has populated it (from `list-interfaces --with-sites`);
+  otherwise inspect each module's own source directly for the concrete
+  site.
+- **Everything else** (versioning policy, deprecation policy, owners): a
+  dependency-graph edge cannot evidence any of this — it only proves
+  *that* two modules are coupled, not *how*. Where no CODEOWNERS/
+  MAINTAINERS file or explicit deprecation marker exists, the field gets
+  the honest gap line, never a guess. Do not infer a contract shape from
+  either module's name or from general conventions; that would be exactly
+  the kind of confident-but-ungrounded claim this skill's honesty standard
+  (`SKILL.md` Step 5) exists to avoid.
 
 ## 3. Write and record
 

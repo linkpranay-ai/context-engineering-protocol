@@ -1,0 +1,28 @@
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "nodes": [
+    {"id": "alpha_Widget_class", "name": "Widget", "label": "Widget",
+     "file_type": "code", "source_file": "alpha/Widget.h",
+     "source_location": "L5", "_origin": "ast"},
+    {"id": "alpha_Widget_compute", "name": "compute", "label": "Widget::compute",
+     "file_type": "code", "source_file": "alpha/Widget.cpp",
+     "source_location": "L7", "_origin": "ast"},
+    {"id": "beta_Helper_class", "name": "Helper", "label": "Helper",
+     "file_type": "code", "source_file": "beta/Helper.h",
+     "source_location": "L6", "_origin": "ast"},
+    {"id": "beta_Helper_run", "name": "run", "label": "Helper::run",
+     "file_type": "code", "source_file": "beta/Helper.cpp",
+     "source_location": "L5", "_origin": "ast"}
+  ],
+  "links": [
+    {"source": "alpha_Widget_compute", "target": "beta_Helper_class",
+     "relation": "imports_from", "context": "#include \"beta/Helper.h\"",
+     "confidence": "EXTRACTED", "source_file": "alpha/Widget.cpp",
+     "source_location": "L3", "weight": 1.0},
+    {"source": "alpha_Widget_compute", "target": "beta_Helper_run",
+     "relation": "calls", "context": "helper.run(input)",
+     "confidence": "EXTRACTED", "source_file": "alpha/Widget.cpp",
+     "source_location": "L1", "weight": 1.0}
+  ]
+}

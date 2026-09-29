@@ -1,0 +1,39 @@
+{
+  "substantive_modules": [],
+  "count": 0,
+  "classification": "small",
+  "signals": {
+    "formatter_config": [
+      ".style.yapf"
+    ],
+    "linter_config": [
+      "ruff.toml"
+    ],
+    "wrapper_scripts": [
+      "lint.sh"
+    ],
+    "test_config": [
+      "pytest.ini"
+    ],
+    "ci": [
+      ".github/workflows/ci.yml"
+    ],
+    "contributing": [],
+    "tool_versions": {
+      "ruff": [
+        "lint.sh:L4",
+        "lint.sh:L5",
+        ".github/workflows/ci.yml:L8"
+      ],
+      "yapf": [
+        ".github/workflows/ci.yml:L7"
+      ]
+    }
+  },
+  "grounded_viable": {
+    "coding_standards": true,
+    "testing_guidelines": true,
+    "requirements_overview": true
+  },
+  "greenfield": false
+}

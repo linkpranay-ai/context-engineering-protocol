@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "repo_scan": {
+    "graph_source": "graphify",
+    "graph_path": "../../../../evals/fixtures/autoscaffold-content/cpp-repo/graph.json",
+    "scanned_at": "2026-09-29T09:57:31Z",
+    "graph_module_overlap_warning": null,
+    "graph_cep_contamination_warning": null
+  },
+  "modules": [
+    {
+      "id": "alpha/",
+      "tier": 3,
+      "in_degree": 0,
+      "file_count": 2,
+      "basis": "graph:in-degree",
+      "status": "pending",
+      "generated_at": null,
+      "output_path": null,
+      "skip_reason": null
+    },
+    {
+      "id": "beta/",
+      "tier": 2,
+      "in_degree": 1,
+      "file_count": 2,
+      "basis": "graph:in-degree",
+      "status": "pending",
+      "generated_at": null,
+      "output_path": null,
+      "skip_reason": null
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "alpha--beta",
+      "module_a": "alpha",
+      "module_b": "beta",
+      "relations": [
+        "calls",
+        "imports_from"
+      ],
+      "weight": 2,
+      "status": "pending",
+      "output_path": null,
+      "generated_at": null,
+      "defer_reason": null
+    }
+  ],
+  "repo_docs": {
+    "coding_standards": {
+      "status": "pending",
+      "output_path": null,
+      "generated_at": null,
+      "skip_reason": null
+    },
+    "testing_guidelines": {
+      "status": "pending",
+      "output_path": null,
+      "generated_at": null,
+      "skip_reason": null
+    }
+  },
+  "index": {
+    "output_path": null,
+    "rendered_at": null
+  }
+}

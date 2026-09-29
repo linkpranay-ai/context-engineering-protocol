@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "repo_scan": {
+    "graph_source": "graphify",
+    "graph_path": "C:/Users/pmishra/OneDrive - RadiSys Corporation/Desktop/Liberary/Experiment_Threat_Modeling/context-engineering-oss/evals/fixtures/autoscaffold-content/python-repo/graph.json",
+    "scanned_at": "2026-09-29T10:05:01Z",
+    "graph_module_overlap_warning": null,
+    "graph_cep_contamination_warning": null
+  },
+  "total_modules": 2,
+  "by_tier": {
+    "3": {
+      "pending": 1,
+      "generated": 0,
+      "skipped": 0
+    },
+    "2": {
+      "pending": 1,
+      "generated": 0,
+      "skipped": 0
+    }
+  },
+  "generated": 0,
+  "pending": 2,
+  "skipped": 0,
+  "repo_docs": {
+    "coding_standards": "pending",
+    "testing_guidelines": "pending"
+  },
+  "interfaces": {
+    "total": 1,
+    "generated": 0,
+    "pending": 1,
+    "deferred": 0
+  }
+}

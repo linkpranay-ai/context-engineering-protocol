@@ -2,12 +2,25 @@
 generated_by: ult-autoscaffold-content
 generated_at: <YYYY-MM-DD>
 status: draft
+content_mode: <content-mode>
+doc_kind: testing_guidelines
+skill_version: <skill-version>
 ---
 
 <!-- Generated starting point — genuine draft for a human to extend, not a
      finished policy document. Where a section below is marked TBD, that
      means no config file or consistent test-file pattern evidenced an
-     answer at generation time, not that it doesn't matter. -->
+     answer at generation time, not that it doesn't matter.
+
+     Evidence: see references/evidence-probes.md#testing_guidelines for
+     what to look for per section below (prioritize the work packet's own
+     must_cite/evidence_hints first, then that checklist).
+
+     Every claim needs one of exactly two things, never a plausible-sounding
+     guess in between:
+       - a citation, inline: [src: path#Lx-Ly]
+       - or, if genuinely not observable after looking, the literal gap
+         line: "Not evidenced. Searched: <signal 1>, <signal 2> (absent)." -->
 
 # Testing Guidelines
 

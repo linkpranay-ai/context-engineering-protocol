@@ -7,6 +7,8 @@ with scaffold_state.py itself. Run with:
 """
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -622,6 +624,119 @@ class GraphCrossingEdgesTests(unittest.TestCase):
 
     def test_interface_id_joins_sorted_pair(self):
         self.assertEqual(ss._interface_id("core", "utils"), "core--utils")
+
+
+class NodeLevelCrossingEdgesTests(unittest.TestCase):
+    """_node_level_crossing_edges() -- the node-identity-preserving sibling
+    of _graph_crossing_edges() that _interface_call_sites() walks. Same
+    _fixture_graph() as GraphCrossingEdgesTests, so the module-pair weights
+    asserted there are the edge counts asserted here."""
+
+    def test_endpoint_matching_returns_only_this_pairs_edges(self):
+        # core/utils has 4 qualifying node-level edges per
+        # test_crossing_edges_deduplicated_and_weighted; none of them may be
+        # a core/legacy or same-module edge.
+        edges = ss._node_level_crossing_edges(_fixture_graph(), "core", "utils")
+        self.assertEqual(len(edges), 4)
+        pairs = {(src["id"], dst["id"]) for src, dst in edges}
+        self.assertEqual(
+            pairs,
+            {
+                ("core_main", "utils_helpers_add"),
+                ("core_main_run", "utils_helpers_add"),
+                ("core_main_run", "utils_helpers_mul"),
+                ("core_service", "utils_helpers_add"),
+            },
+        )
+
+    def test_endpoint_matching_excludes_other_pairs(self):
+        # core/legacy has exactly 1 edge; it must never show up when asking
+        # for core/utils, and vice versa.
+        edges = ss._node_level_crossing_edges(_fixture_graph(), "core", "legacy")
+        self.assertEqual(len(edges), 1)
+        src, dst = edges[0]
+        self.assertEqual((src["id"], dst["id"]), ("core_main", "legacy_old"))
+
+    def test_direction_independent_pair_lookup(self):
+        # Asking for ("utils", "core") must return the exact same edges as
+        # ("core", "utils") -- an interface pair has no inherent direction.
+        forward = ss._node_level_crossing_edges(_fixture_graph(), "core", "utils")
+        reverse = ss._node_level_crossing_edges(_fixture_graph(), "utils", "core")
+        forward_pairs = {(s["id"], d["id"]) for s, d in forward}
+        reverse_pairs = {(s["id"], d["id"]) for s, d in reverse}
+        self.assertEqual(forward_pairs, reverse_pairs)
+
+    def test_no_edges_for_unrelated_pair(self):
+        self.assertEqual(ss._node_level_crossing_edges(_fixture_graph(), "core", "orphan"), [])
+
+
+class InterfaceCallSitesTests(unittest.TestCase):
+    """_interface_call_sites() -- closes F18 by deriving "path:Lline"
+    citations from a targeted text search of each crossing edge's own
+    source file, using the already-loaded graph (no re-running graphify).
+    Fixture files/repo are entirely generic/synthetic, never modeled on
+    any specific real repo's actual layout."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def test_finds_textual_call_site_and_cites_the_source_edges_file(self):
+        # core_main_run -> utils_helpers_add is one of the core/utils edges;
+        # the citation must be against core/main.py (the SOURCE node's own
+        # file), at the line where the TARGET's name actually appears.
+        _write(
+            self.repo_root / "core" / "main.py",
+            "def run():\n    utils_helpers_add(1, 2)\n",
+        )
+        _write(self.repo_root / "utils" / "helpers.py", "def add():\n    pass\n")
+        sites = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        self.assertIn("core/main.py:L2", sites)
+
+    def test_stable_ordering_sorted_and_deduplicated(self):
+        _write(
+            self.repo_root / "core" / "main.py",
+            "def run():\n"
+            "    utils_helpers_add(1, 2)\n"
+            "    utils_helpers_mul(3, 4)\n"
+            "    utils_helpers_add(5, 6)\n",  # second mention -- must not duplicate
+        )
+        _write(self.repo_root / "core" / "service.py", "utils_helpers_add()\n")
+        _write(self.repo_root / "utils" / "helpers.py", "pass\n")
+        first = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        second = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        self.assertEqual(first, second)  # deterministic across repeated calls
+        self.assertEqual(first, sorted(set(first)))  # sorted, no duplicates
+        self.assertIn("core/main.py:L2", first)
+        self.assertIn("core/main.py:L4", first)
+
+    def test_endpoint_matching_never_cites_an_unrelated_pairs_file(self):
+        _write(
+            self.repo_root / "core" / "main.py",
+            "def run():\n    legacy_old()\n    utils_helpers_add()\n",
+        )
+        sites = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        # legacy_old is core/legacy's target, not core/utils's -- must not
+        # leak in even though it's textually present in the same file.
+        self.assertTrue(all("legacy" not in s for s in sites))
+
+    def test_absent_site_returns_empty_list_no_crash(self):
+        # Source files exist but never mention the target names at all.
+        _write(self.repo_root / "core" / "main.py", "def run():\n    pass\n")
+        _write(self.repo_root / "utils" / "helpers.py", "def add():\n    pass\n")
+        sites = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        self.assertEqual(sites, [])
+
+    def test_missing_source_file_skipped_without_crash(self):
+        # core/main.py and core/service.py are never written to disk at all.
+        sites = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        self.assertEqual(sites, [])
+
+    def test_no_edges_for_unrelated_pair_returns_empty_list(self):
+        self.assertEqual(
+            ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "orphan"), []
+        )
 
 
 class MergeInterfacesTests(unittest.TestCase):
@@ -2482,8 +2597,21 @@ class GeneratedValidationTests(unittest.TestCase):
     # -- conflicts (coding_standards only) -------------------------------------- #
 
     def _coding_standards_packet(self):
-        tool_files = [".clang-format", "format.sh", ".github/workflows/cpp.yml"]
-        _write(self.repo_root / ".clang-format", "BasedOnStyle: Google\n")
+        # Four distinct signal classes, all synthetic/generic (never modeled
+        # on a specific real repo's actual layout): formatter_config
+        # (.clang-format), linter_config (CPPLINT.cfg), wrapper_scripts
+        # (format.sh), ci (cpp.yml). Only clang-format is mentioned from two
+        # distinct sources (format.sh + cpp.yml) -- cpplint's config exists
+        # but its name appears nowhere else, so it must NOT itself trigger a
+        # conflict requirement (see the precision test below).
+        # Every file here needs >= 2 lines: _prose() below always cites
+        # "#L1-L2", so a 1-line file would itself fail citation-range
+        # validation independently of anything this fixture is testing.
+        tool_files = [
+            ".clang-format", "CPPLINT.cfg", "format.sh", ".github/workflows/cpp.yml",
+        ]
+        _write(self.repo_root / ".clang-format", "BasedOnStyle: Google\nColumnLimit: 100\n")
+        _write(self.repo_root / "CPPLINT.cfg", "linelength=100\nfilter=-whitespace\n")
         _write(self.repo_root / "format.sh", "#!/bin/sh\nclang-format --version\n")
         _write(self.repo_root / ".github" / "workflows" / "cpp.yml",
                "jobs:\n  fmt:\n    run: clang-format --version\n")
@@ -2494,7 +2622,7 @@ class GeneratedValidationTests(unittest.TestCase):
             "template": ss.TEMPLATE_PATH_BY_KIND["coding_standards"],
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["coding_standards"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["coding_standards"],
-            "must_cite": [".clang-format"],
+            "must_cite": [".clang-format", "CPPLINT.cfg"],
             "validation_floor": dict(ss.VALIDATION_FLOORS[("coding_standards", None)]),
             "read_budget": ss.READ_BUDGET_REPO_DOC,
         })
@@ -2503,7 +2631,7 @@ class GeneratedValidationTests(unittest.TestCase):
     def test_coding_standards_tool_version_disagreement_requires_conflict_line(self):
         packet, tool_files = self._coding_standards_packet()
         sections = _full_sections(packet["required_sections"], tool_files)
-        path = self._write_doc(_make_doc(packet, sections))
+        path = self._write_doc(_make_doc(packet, sections), path=packet["output_path"])
         result = ss.validate(self.repo_root, path, packet)
         self.assertFalse(result["valid"])
         self.assertTrue(any("conflict" in f.lower() for f in result["failures"]))
@@ -2516,9 +2644,28 @@ class GeneratedValidationTests(unittest.TestCase):
             "clang-format independently [src: format.sh#L2] "
             "[src: .github/workflows/cpp.yml#L3]."
         )
-        path = self._write_doc(_make_doc(packet, sections))
+        path = self._write_doc(_make_doc(packet, sections), path=packet["output_path"])
         result = ss.validate(self.repo_root, path, packet)
         self.assertFalse(any("conflict" in f.lower() for f in result["failures"]))
+
+    def test_coding_standards_single_source_tool_does_not_require_its_own_conflict_line(self):
+        # cpplint's config is present and cited (must_cite), but "cpplint"
+        # is never mentioned in any wrapper_scripts/ci/contributing file --
+        # only clang-format has two-source citation. Adding the clang-format
+        # conflict line must satisfy the check for BOTH tools; cpplint must
+        # never have generated a failure of its own in the first place, and
+        # this document must otherwise validate completely cleanly.
+        packet, tool_files = self._coding_standards_packet()
+        sections = _full_sections(packet["required_sections"], tool_files)
+        sections["Formatting"] += (
+            "\nConflicting evidence: format.sh and cpp.yml both pin "
+            "clang-format independently [src: format.sh#L2] "
+            "[src: .github/workflows/cpp.yml#L3]."
+        )
+        path = self._write_doc(_make_doc(packet, sections), path=packet["output_path"])
+        result = ss.validate(self.repo_root, path, packet)
+        self.assertEqual(result["failures"], [])
+        self.assertTrue(result["valid"])
 
     # -- thin boilerplate doc must fail end to end -------------------------------- #
 
@@ -3397,6 +3544,77 @@ class RenderIndexOutSlotEnforcementTests(unittest.TestCase):
             "    kind: file\n    file: ROUTER.md\n",
         )
         rc = self._run(self.repo_root / "a/ROUTER.md")
+        self.assertEqual(rc, 1)
+
+
+class ListInterfacesWithSitesCLITests(unittest.TestCase):
+    """`list-interfaces --with-sites` -- the CLI surface over
+    _interface_call_sites() (TASK-0205). Exercises _cmd_list_interfaces()
+    and the main() argparse wiring directly, matching this suite's existing
+    argparse.Namespace() convention for CLI-entry-point tests."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        self.graph_path = self.repo_root / "graph.json"
+        _write(self.graph_path, json.dumps(_fixture_graph()))
+        _write(
+            self.repo_root / "core" / "main.py",
+            "def run():\n    utils_helpers_add(1, 2)\n",
+        )
+        state = {
+            "modules": [], "repo_docs": {},
+            "interfaces": [{
+                "id": "core--utils", "module_a": "core", "module_b": "utils",
+                "relations": ["calls", "imports", "imports_from"], "weight": 4,
+                "status": "pending", "output_path": None,
+                "generated_at": None, "defer_reason": None,
+            }],
+        }
+        _write(self.state_path, json.dumps(state))
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            state=str(self.state_path), eligible_only=False,
+            with_sites=False, repo_root=None, graph_path=None,
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_list_interfaces(args)
+        return rc, buf.getvalue()
+
+    def test_with_sites_adds_call_sites_key_from_the_loaded_graph(self):
+        rc, out = self._run(
+            with_sites=True, repo_root=str(self.repo_root), graph_path=str(self.graph_path),
+        )
+        self.assertEqual(rc, 0)
+        entries = json.loads(out)
+        self.assertEqual(len(entries), 1)
+        self.assertIn("core/main.py:L2", entries[0]["call_sites"])
+
+    def test_without_with_sites_no_call_sites_key_at_all(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        entries = json.loads(out)
+        self.assertNotIn("call_sites", entries[0])
+
+    def test_with_sites_without_repo_root_refuses(self):
+        rc, out = self._run(with_sites=True, graph_path=str(self.graph_path))
+        self.assertEqual(rc, 1)
+
+    def test_with_sites_without_graph_path_refuses(self):
+        rc, out = self._run(with_sites=True, repo_root=str(self.repo_root))
+        self.assertEqual(rc, 1)
+
+    def test_with_sites_missing_graph_file_reports_error_not_crash(self):
+        rc, out = self._run(
+            with_sites=True, repo_root=str(self.repo_root),
+            graph_path=str(self.repo_root / "missing-graph.json"),
+        )
         self.assertEqual(rc, 1)
 
 
