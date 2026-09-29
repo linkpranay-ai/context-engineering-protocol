@@ -1151,10 +1151,19 @@ class TestRegistryConsistency(unittest.TestCase):
     absent file is always a no-op."""
 
     def _registry_text(self, slot_ids, extra_ids=()):
+        # Field-complete (TASK-0110) for any id that is a real SLOT_REGISTRY
+        # entry, so these id-level-only tests don't spuriously trip the
+        # field-level parity check added below; an id with no SLOT_REGISTRY
+        # spec (e.g. a deliberately made-up extra id) falls back to the bare
+        # id/project_layout_slot shape, since it has no fields to mirror.
         lines = ["slots:\n"]
         for slot_id in list(slot_ids) + list(extra_ids):
-            lines.append(f"  - id: {slot_id}\n")
-            lines.append("    project_layout_slot: true\n")
+            spec = vl.SLOT_REGISTRY.get(slot_id)
+            if spec is not None:
+                lines.append(self._full_registry_entry(slot_id, spec))
+            else:
+                lines.append(f"  - id: {slot_id}\n")
+                lines.append("    project_layout_slot: true\n")
         return "".join(lines)
 
     def test_absent_file_is_a_no_op(self):
@@ -1228,6 +1237,132 @@ class TestRegistryConsistency(unittest.TestCase):
         registry_path = repo_root / "layout-slots-registry.yaml"
         self.assertTrue(registry_path.exists(), "layout-slots-registry.yaml is missing from the repo root")
         self.assertEqual(vl.check_registry_consistency(repo_root), [])
+
+    # -- TASK-0110: field-level parity, not just ID presence/absence --------
+    # check_registry_consistency previously only compared slot *ids*; two
+    # files could agree on which slots exist while disagreeing on where one
+    # of them resolves to (kind/pre_d21_default/workspace_root_leaf/producer)
+    # with nothing catching it. The file's own header comment says these four
+    # columns "mirror validate_layout.py's SLOT_REGISTRY... exactly" - so
+    # that's the contract under test here. default_bucket/config_key/
+    # consumers are documented as registry-only columns SLOT_REGISTRY doesn't
+    # separately carry, so they're deliberately not compared.
+
+    def _full_registry_entry(self, slot_id, spec, **overrides):
+        fields = {
+            "kind": spec["kind"],
+            "pre_d21_default": spec["default"],
+            "workspace_root_leaf": spec["workspace_root_leaf"],
+            "producer": spec["owning_skill"],
+        }
+        fields.update(overrides)
+        lines = [f"  - id: {slot_id}\n", "    project_layout_slot: true\n"]
+        for key, val in fields.items():
+            lines.append(f"    {key}: {val}\n")
+        return "".join(lines)
+
+    def _full_registry_text(self, overrides_by_slot=None):
+        overrides_by_slot = overrides_by_slot or {}
+        lines = ["slots:\n"]
+        for slot_id, spec in vl.SLOT_REGISTRY.items():
+            lines.append(self._full_registry_entry(slot_id, spec, **overrides_by_slot.get(slot_id, {})))
+        return "".join(lines)
+
+    def test_field_level_match_across_every_real_field_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "layout-slots-registry.yaml", self._full_registry_text())
+            self.assertEqual(vl.check_registry_consistency(root), [])
+
+    def test_mismatched_kind_is_flagged(self):
+        slot_id = next(iter(vl.SLOT_REGISTRY))
+        wrong_kind = "directory" if vl.SLOT_REGISTRY[slot_id]["kind"] == "file" else "file"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "layout-slots-registry.yaml",
+                self._full_registry_text({slot_id: {"kind": wrong_kind}}),
+            )
+            problems = vl.check_registry_consistency(root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn(slot_id, problems[0])
+            self.assertIn("kind", problems[0])
+
+    def test_mismatched_pre_d21_default_is_flagged(self):
+        slot_id = next(iter(vl.SLOT_REGISTRY))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "layout-slots-registry.yaml",
+                self._full_registry_text({slot_id: {"pre_d21_default": "totally/different/path.md"}}),
+            )
+            problems = vl.check_registry_consistency(root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn(slot_id, problems[0])
+            self.assertIn("default", problems[0])
+
+    def test_mismatched_workspace_root_leaf_is_flagged(self):
+        slot_id = next(iter(vl.SLOT_REGISTRY))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "layout-slots-registry.yaml",
+                self._full_registry_text({slot_id: {"workspace_root_leaf": "totally/different/leaf.md"}}),
+            )
+            problems = vl.check_registry_consistency(root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn(slot_id, problems[0])
+            self.assertIn("workspace_root_leaf", problems[0])
+
+    def test_mismatched_producer_is_flagged(self):
+        slot_id = next(iter(vl.SLOT_REGISTRY))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "layout-slots-registry.yaml",
+                self._full_registry_text({slot_id: {"producer": "some-other-skill"}}),
+            )
+            problems = vl.check_registry_consistency(root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn(slot_id, problems[0])
+            self.assertIn("producer", problems[0])
+
+    def test_field_drift_does_not_suppress_id_drift_reporting(self):
+        # A slot with a field mismatch AND a separate missing slot must both
+        # be reported - field-level checking must be additive, not a
+        # replacement for the existing id-set check.
+        slot_ids = list(vl.SLOT_REGISTRY.keys())
+        present_id = slot_ids[0]
+        missing_id = slot_ids[1]
+        wrong_kind = "directory" if vl.SLOT_REGISTRY[present_id]["kind"] == "file" else "file"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            text = "slots:\n"
+            for slot_id in slot_ids:
+                if slot_id == missing_id:
+                    continue
+                overrides = {"kind": wrong_kind} if slot_id == present_id else {}
+                text += self._full_registry_entry(slot_id, vl.SLOT_REGISTRY[slot_id], **overrides)
+            write(root / "layout-slots-registry.yaml", text)
+            problems = vl.check_registry_consistency(root)
+            self.assertTrue(any(missing_id in p and "registry/code drift" in p for p in problems))
+            self.assertTrue(any(present_id in p and "kind" in p for p in problems))
+
+    def test_config_key_and_default_bucket_are_not_compared(self):
+        # These are documented registry-only columns SLOT_REGISTRY doesn't
+        # separately carry (the file's own header comment) - a real-looking
+        # but SLOT_REGISTRY-absent config_key/default_bucket value must never
+        # be flagged as drift.
+        slot_id = next(iter(vl.SLOT_REGISTRY))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "layout-slots-registry.yaml",
+                self._full_registry_text(
+                    {slot_id: {"config_key": "some.made.up.key", "default_bucket": "made_up_bucket"}}
+                ),
+            )
+            self.assertEqual(vl.check_registry_consistency(root), [])
 
 
 class TestSkillMdSlotRegistryTableConsistency(unittest.TestCase):
