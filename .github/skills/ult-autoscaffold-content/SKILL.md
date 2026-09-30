@@ -354,7 +354,10 @@ to cover in Step 4:
    a recognized gap-line.
    - **Concurrency:** on a host that supports dispatching multiple workers
      at once, run up to 4 packets in parallel (`max_parallel_workers`, a
-     current fixed default — not yet a `context-config.yaml` key). On a
+     current fixed default — `context-config.yaml`'s
+     `autoscaffold_content.max_parallel_workers` documents this as a
+     reserved key for a future increment, but this skill doesn't read it
+     yet, so setting it has no effect). On a
      host without concurrent subagent dispatch, fall back to one worker at
      a time, sequentially. State plainly which mode actually ran ("N
      workers dispatched in parallel" / "sequential dispatch — host has no
@@ -372,8 +375,9 @@ to cover in Step 4:
    file both stay current mid-run — if the run is interrupted after this
    point, nothing generated so far is lost or miscounted.
 3. **On validation failure:** the orchestrator gets **one retry**
-   (`worker_retries`, a current fixed default of 1 — not yet a
-   `context-config.yaml` key): re-dispatch a fresh worker for the *same*
+   (`worker_retries`, a current fixed default of 1 — likewise documented
+   in `context-config.yaml` as a reserved, not-yet-read key, accepted
+   range 0-2 once wired up): re-dispatch a fresh worker for the *same*
    packet (do not hand the failing draft back to the same worker instance;
    start clean). Re-run `mark-generated` against the retry's output.
    - If the retry also fails, call the same command again with `--final`
