@@ -3775,17 +3775,25 @@ class ContentModePrecedenceTests(unittest.TestCase):
       1. prompt_override      -- explicit instruction this run
       2. config_overrides[kind] -- per-(layer, kind) config override
       3. global_mode          -- the config's global content_mode value
-      4. DEFAULT_CONTENT_MODE -- "grounded" (proposal Sec 9.1: absent means
-         grounded, matching today's pre-P1 behaviour)
+      4. the per-layer default -- no flat constant: TASK-0303 states this
+         explicitly as "default What-L2 overview to skeleton", which only
+         makes sense as a *per-layer* default, not a single global one --
+         how_l2 (today's only implemented packet layer) defaults to
+         "grounded", matching current pre-P1 behaviour, while what_l2
+         (no packet-generation path in this release) defaults to
+         "skeleton" until a mode is explicitly requested for it (still
+         capped at "grounded" per Sec 4.4/F4 if someone does ask for
+         more). See DefaultModeByLayerTests for the level-4 cases
+         specifically.
 
-    These tests pin the requested-mode winner only -- they use
-    coding_standards under how_l2, the one (layer, kind) pair whose cap is
-    "augmented" (Sec 4.4/F15), so the cap never masks the precedence
-    result. Cap and evidence-gate clamping are covered separately by
+    Most tests here pin the requested-mode winner using coding_standards
+    under how_l2, the one (layer, kind) pair whose cap is "augmented"
+    (Sec 4.4/F15), so the cap never masks the precedence result. Cap and
+    evidence-gate clamping are covered separately by
     ContentModeCapMatrixTests and ContentModeEvidenceGateTests.
     """
 
-    def test_no_inputs_defaults_to_grounded(self):
+    def test_no_inputs_defaults_to_grounded_for_how_l2(self):
         result = ss.resolve_content_mode("coding_standards", ss.PACKET_LAYER)
         self.assertEqual(result["content_mode_requested"], "grounded")
         self.assertEqual(result["content_mode"], "grounded")
@@ -3852,6 +3860,66 @@ class ContentModePrecedenceTests(unittest.TestCase):
             config_overrides={"testing_guidelines": "not-a-mode"},
         )
         self.assertEqual(result["content_mode_requested"], "grounded")
+
+
+class DefaultModeByLayerTests(unittest.TestCase):
+    """TASK-0303's own wording -- "Default What-L2 overview to skeleton;
+    allow grounded on explicit request" -- only makes sense if
+    precedence level 4 (REQ-001) is a *per-layer* default, not the single
+    flat "grounded" a plain reading of proposal Sec 9.1 ("Absent means
+    grounded") would suggest for every layer alike. how_l2 is today's
+    only implemented packet layer, so its default of "grounded" simply
+    continues current pre-P1 behaviour (every how_l2 packet already ships
+    grounded content unconditionally); what_l2 has no packet-generation
+    path in this release at all, so its default is the conservative
+    "skeleton" -- it still honours an explicit request up to its own cap
+    ("grounded", Sec 4.4/F4), it just never volunteers grounded content
+    for a layer that isn't implemented yet.
+    """
+
+    def test_how_l2_kind_with_no_inputs_defaults_to_grounded(self):
+        for kind in ("context_md", "coding_standards", "testing_guidelines", "interface_boundary"):
+            result = ss.resolve_content_mode(kind, "how_l2")
+            self.assertEqual(result["content_mode_requested"], "grounded", kind)
+
+    def test_what_l2_kind_with_no_inputs_defaults_to_skeleton(self):
+        for kind in ("context_md", "requirements_overview"):
+            result = ss.resolve_content_mode(kind, "what_l2")
+            self.assertEqual(result["content_mode_requested"], "skeleton", kind)
+            self.assertEqual(result["content_mode"], "skeleton", kind)
+
+    def test_what_l2_kind_honours_explicit_grounded_request(self):
+        # "allow grounded on explicit request" -- the low per-layer
+        # default is not a ceiling; an explicit ask still resolves to
+        # grounded (what_l2's own cap), same as any other layer.
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="grounded",
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_what_l2_kind_explicit_augmented_request_still_capped_at_grounded(self):
+        # The low default doesn't change the cap: F4 still caps every
+        # what_l2 kind at grounded even when the request is explicit.
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_global_mode_still_overrides_the_what_l2_default(self):
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", global_mode="grounded",
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+
+    def test_unlisted_layer_defaults_to_the_safest_mode(self):
+        # Any future layer not yet in the default table must fail safe
+        # (skeleton -- no claims) rather than silently inherit how_l2's
+        # grounded default.
+        result = ss.resolve_content_mode("some_future_kind", "some_future_layer")
+        self.assertEqual(result["content_mode_requested"], "skeleton")
 
 
 class ContentModeCapMatrixTests(unittest.TestCase):
