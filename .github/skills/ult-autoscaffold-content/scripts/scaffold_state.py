@@ -2474,7 +2474,19 @@ def emit_skeleton(packet, *, generated_at=None, skill_version=None):
 
     replacements = {
         "<YYYY-MM-DD>": generated_at,
+        # TASK-0307 (P1): frontmatter always carries what was actually asked
+        # for too, plus a reason when the two differ -- Sec 4's "each
+        # lowered mode is recorded in frontmatter... and stated in chat"
+        # applies to skeleton mode as much as to a worker's grounded/
+        # augmented draft. `content_mode_requested` falls back to the
+        # packet's own recorded value; `mode_reason` renders as the
+        # literal string "none" (not blank/absent) when there was no
+        # downgrade -- _parse_frontmatter() is a flat key:value splitter
+        # with no null handling, so a real, greppable token beats an
+        # empty value that would look like a missing key.
+        "<content-mode-requested>": packet.get("content_mode_requested") or "skeleton",
         "<content-mode>": "skeleton",
+        "<mode-reason>": packet.get("mode_reason") or "none",
         "<skill-version>": skill_version,
     }
     if packet["kind"] == "interface_boundary":
@@ -2785,6 +2797,38 @@ def _record_validation_or_raise(record, validation_result, accept_validation_fai
     return outcome
 
 
+def _finalize_mode_frontmatter(repo_root, output_path, packet):
+    """TASK-0307 (P1): SKILL.md Step 5a tells a grounded/augmented worker
+    never to read `content_mode_requested` -- that field is for the
+    orchestrator's own reporting, not a signal the worker gets to act on
+    -- so the worker leaves the template's `<content-mode-requested>`/
+    `<mode-reason>` frontmatter placeholders untouched. This is the
+    orchestrator-only counterpart, called from every packet-driven
+    mark-*-generated path right before `validate()`: it mechanically
+    fills those same two tokens from the packet, the same way
+    `emit_skeleton()` already does for skeleton mode. A no-op (nothing to
+    replace) once the file already carries real values -- skeleton-mode
+    output already arrives with both fields filled by `emit_skeleton()`
+    itself, so a second pass over already-correct text changes nothing.
+
+    Never touches `output_sha256`: that hash is computed over the body
+    with frontmatter stripped (`_normalized_body_hash()`), so a
+    frontmatter-only rewrite here can't perturb the staleness/regenerate
+    detection Sec 9.4 relies on. Silently does nothing if the file
+    doesn't exist yet -- `validate()`'s own "file does not exist" failure
+    is the right place for that to surface, not a second error here."""
+    full_path = Path(repo_root) / output_path
+    if not full_path.is_file():
+        return
+    text = full_path.read_text(encoding="utf-8")
+    requested = packet.get("content_mode_requested") or packet.get("content_mode")
+    reason = packet.get("mode_reason") or "none"
+    patched = text.replace("<content-mode-requested>", requested)
+    patched = patched.replace("<mode-reason>", reason)
+    if patched != text:
+        full_path.write_text(patched, encoding="utf-8")
+
+
 def mark_generated(state, module_id, output_path, packet=None, repo_root=None,
                     accept_validation_failure=None, final=False):
     """`packet`/`repo_root` are optional at the function level (existing
@@ -2803,6 +2847,7 @@ def mark_generated(state, module_id, output_path, packet=None, repo_root=None,
             "module '{}' is already '{}' -- not pending".format(module_id, module["status"])
         )
     if packet is not None:
+        _finalize_mode_frontmatter(repo_root, output_path, packet)
         result = validate(repo_root, output_path, packet)
         outcome = _record_validation_or_raise(
             module, result, accept_validation_failure, packet,
@@ -2840,6 +2885,7 @@ def mark_repo_doc_generated(state, kind, output_path, packet=None, repo_root=Non
             "repo doc '{}' is already '{}' -- not pending".format(kind, doc["status"])
         )
     if packet is not None:
+        _finalize_mode_frontmatter(repo_root, output_path, packet)
         result = validate(repo_root, output_path, packet)
         outcome = _record_validation_or_raise(
             doc, result, accept_validation_failure, packet,
@@ -2896,6 +2942,7 @@ def mark_interface_generated(state, interface_id, output_path, packet=None, repo
             )
         )
     if packet is not None:
+        _finalize_mode_frontmatter(repo_root, output_path, packet)
         result = validate(repo_root, output_path, packet)
         outcome = _record_validation_or_raise(
             interface, result, accept_validation_failure, packet,
@@ -3474,7 +3521,50 @@ def _validation_failed_note(record):
     return " -- VALIDATION-FAILED: {}".format("; ".join(validation.get("reasons") or []))
 
 
-def render_index(state, repo_name):
+def _mode_note(record, repo_root):
+    """TASK-0307 (P1): Sec 9.3 "The mode is not stored in state. Frontmatter
+    is the source of truth, and render-index reads it from there" -- so a
+    generated module/repo-doc/interface's index line shows its actual
+    content mode by reading the mode fields straight out of the output
+    file's own frontmatter, the same way list_generated() (TASK-0306)
+    already does, never from anything persisted in TRIAGE-STATE.json.
+
+    Returns "" in every one of these cases, so a caller that doesn't care
+    about modes yet -- or hits one it can't read -- gets exactly the old
+    rendering back, never a crash:
+      - `repo_root` wasn't given (back-compat: the 2-arg render_index()
+        call every pre-TASK-0307 caller/test still makes)
+      - the record was never generated, or has no output_path yet
+      - the output file is missing, unreadable, or has no content_mode
+        in its frontmatter (e.g. a hand-authored legacy doc predating
+        this skill's frontmatter contract entirely)
+
+    When the file *is* readable: plain "-- mode: <content_mode>" when
+    nothing was downgraded, or "-- mode: <content_mode> (requested
+    <content_mode_requested> -- <mode_reason>)" when the two differ --
+    Sec 4's "each lowered mode is ... stated in chat" extends naturally to
+    stating it in the router file workers/humans actually read."""
+    if repo_root is None or record.get("status") != "generated" or not record.get("output_path"):
+        return ""
+    full_path = Path(repo_root) / record["output_path"]
+    try:
+        text = full_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    frontmatter, _body = _parse_frontmatter(text)
+    content_mode = frontmatter.get("content_mode")
+    if not content_mode:
+        return ""
+    requested = frontmatter.get("content_mode_requested")
+    if requested and requested != content_mode:
+        reason = frontmatter.get("mode_reason")
+        if not reason or reason == "none":
+            reason = "no reason recorded"
+        return " -- mode: {} (requested {} -- {})".format(content_mode, requested, reason)
+    return " -- mode: {}".format(content_mode)
+
+
+def render_index(state, repo_name, repo_root=None):
     modules = state.get("modules", [])
     by_tier = {0: [], 1: [], 2: [], 3: [], None: []}
     for m in modules:
@@ -3528,8 +3618,9 @@ def render_index(state, repo_name):
                 detail = "{} files".format(m.get("file_count"))
             path_note = " -> `{}`".format(m["output_path"]) if m.get("output_path") else ""
             lines.append(
-                "- `{}` ({}, {}) -- **{}**{}{}{}".format(
+                "- `{}` ({}, {}) -- **{}**{}{}{}{}".format(
                     m["id"], detail, m["basis"], m["status"], path_note,
+                    _mode_note(m, repo_root),
                     _validation_bypass_note(m), _validation_failed_note(m),
                 )
             )
@@ -3554,8 +3645,9 @@ def render_index(state, repo_name):
         doc = repo_docs[kind]
         label = kind.replace("_", " ").title()
         path_note = " -> `{}`".format(doc["output_path"]) if doc.get("output_path") else ""
-        lines.append("- {} -- **{}**{}{}{}".format(
+        lines.append("- {} -- **{}**{}{}{}{}".format(
             label, doc["status"], path_note,
+            _mode_note(doc, repo_root),
             _validation_bypass_note(doc), _validation_failed_note(doc),
         ))
     lines.append("")
@@ -3570,9 +3662,10 @@ def render_index(state, repo_name):
         for i in sorted(interfaces, key=lambda e: e["id"]):
             path_note = " -> `{}`".format(i["output_path"]) if i.get("output_path") else ""
             lines.append(
-                "- `{}` <-> `{}` ({}, weight {}) -- **{}**{}{}{}".format(
+                "- `{}` <-> `{}` ({}, weight {}) -- **{}**{}{}{}{}".format(
                     i["module_a"], i["module_b"], ",".join(i["relations"]), i["weight"],
                     i["status"], path_note,
+                    _mode_note(i, repo_root),
                     _validation_bypass_note(i), _validation_failed_note(i),
                 )
             )
@@ -3802,15 +3895,21 @@ def _cmd_render_index(args):
             return 1
         with state_lock(args.state):
             state = load_state(args.state)
-            text = render_index(state, args.repo_name)
+            text = render_index(state, args.repo_name, repo_root=repo_root)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             aaw.write_text_atomic(out_path, text)
             mark_index_rendered(state, args.out)
             save_state(args.state, state)
             print("wrote {}".format(out_path))
         return 0
+    # TASK-0307 (P1): --repo-root is optional here (only --out forces it,
+    # above) but when it IS given on a stdout-only call, still thread it
+    # through so the rendered index shows mode/downgrade notes -- no
+    # reason to make a human ask for --out just to see that.
+    repo_root_arg = getattr(args, "repo_root", None)
+    repo_root = Path(repo_root_arg).resolve() if repo_root_arg else None
     state = load_state(args.state)
-    text = render_index(state, args.repo_name)
+    text = render_index(state, args.repo_name, repo_root=repo_root)
     print(text)
     return 0
 

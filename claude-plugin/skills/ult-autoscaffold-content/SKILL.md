@@ -225,10 +225,21 @@ uses).
        under it in graph mode — also auto-skipped and shown for the same
        reason: never silently omitted, just never offered as a module
        worth generating content for).
-    3. Ask **how much to generate now**: all pending modules, Tier 1 only,
-       or a hand-picked subset. This is a "how much work right now" call,
-       not a layout-config decision — one question, answered once per run,
-       not a PENDING-field-editing artifact.
+    3. Ask **how much to generate now, and at what content mode**: all
+       pending modules, Tier 1 only (the default — paired with the two
+       repo-wide docs from Step 5c, so a bare "Tier 1" answer doesn't
+       silently leave coding-standards/testing-guidelines unoffered), or a
+       hand-picked subset. This is a "how much work right now" call, not a
+       layout-config decision — one question, answered once per run, not a
+       PENDING-field-editing artifact. In the same breath, state the
+       content mode each in-scope packet will actually run at — resolved
+       per the precedence an explicit instruction beats a per-(layer,
+       kind) `content-config.yaml` override beats `content_mode` beats the
+       (layer, kind) default — and whether the greenfield-evidence probe
+       found enough history to support grounded mode where that's what
+       resolved. This is reporting already-resolved values, not a second
+       question: don't make the user pick a mode here unless they want to
+       override what was resolved.
     4. Proceed to Step 5a to plan work packets for the chosen modules.
   - **Between the two thresholds (the ambiguous band)** → the one case
     with no safe default. State the count and ask the user directly which
@@ -339,7 +350,13 @@ exactly what the orchestrator itself recorded.
    applied), plus `mode_reason` explaining any downgrade. Never improvise a
    different mode than `content_mode` says, and never ask the worker to
    read `content_mode_requested` — that field is for the orchestrator's own
-   reporting, not for the worker.
+   reporting, not for the worker. In the template, the worker fills in only
+   `<content-mode>` (it already needs to know what it's producing); it must
+   leave `<content-mode-requested>` and `<mode-reason>` exactly as written
+   in the template. The orchestrator's own `mark-generated` /
+   `mark-repo-doc-generated` / `mark-interface-generated` call fills those
+   two placeholders from the packet, mechanically, after the worker
+   returns — that's the only place they're written.
 
 ## Step 5b — Per-module generation (large repos only, packet-driven)
 

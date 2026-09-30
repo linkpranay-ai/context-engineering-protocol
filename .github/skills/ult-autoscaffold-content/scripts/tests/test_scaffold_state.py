@@ -3096,6 +3096,225 @@ class MarkGeneratedValidationWiringTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# TASK-0307 (P1): `content_mode_requested`/`mode_reason` frontmatter is      #
+# orchestrator-filled, not worker-filled (SKILL.md Step 5a: "never ask the   #
+# worker to read content_mode_requested -- that field is for the            #
+# orchestrator's own reporting, not for the worker"). A worker leaves the    #
+# template's <content-mode-requested>/<mode-reason> tokens untouched; every  #
+# packet-driven mark-*-generated call finalizes them from the packet before  #
+# validate() runs, the same way emit_skeleton() already does for skeleton    #
+# mode. render_index() then reads the finished values back out of the       #
+# output file's own frontmatter (Sec 9.3: mode lives in frontmatter, never   #
+# in state), the same way list_generated() (TASK-0306) already does.        #
+# --------------------------------------------------------------------------- #
+
+class FinalizeModeFrontmatterTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.citable_files = ["src/a.py", "src/b.py", "src/c.py"]
+        for f in self.citable_files:
+            _write(self.repo_root / f, "line1\nline2\nline3\n")
+        self.packet = {
+            "packet_id": "how-l2--core--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "core/",
+            "tier": 2,
+            "output_path": "org/core/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
+            "mode_reason": None,
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": ["src/a.py"],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+        self.good_sections = _full_sections(self.packet["required_sections"], self.citable_files)
+
+    def _write_worker_doc(self, packet, **frontmatter_overrides):
+        # Simulates exactly what a worker leaves behind: the template's
+        # <content-mode-requested>/<mode-reason> tokens untouched, since
+        # SKILL.md tells it never to read content_mode_requested at all.
+        overrides = {
+            "content_mode_requested": "<content-mode-requested>",
+            "mode_reason": "<mode-reason>",
+        }
+        overrides.update(frontmatter_overrides)
+        sections = _full_sections(packet["required_sections"], self.citable_files)
+        doc = _make_doc(packet, sections, frontmatter_overrides=overrides)
+        _write(self.repo_root / packet["output_path"], doc)
+
+    # -- mark_generated (module) ------------------------------------------ #
+
+    def test_mark_generated_fills_placeholders_left_untouched_by_worker(self):
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(self.packet)
+        module = ss.mark_generated(
+            state, "core/", self.packet["output_path"],
+            packet=self.packet, repo_root=self.repo_root,
+        )
+        self.assertEqual(module["status"], "generated")
+        text = (self.repo_root / self.packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "grounded")
+        # packet's mode_reason is None (no downgrade) -- literal "none",
+        # not blank/absent, since the frontmatter parser has no null type.
+        self.assertEqual(frontmatter["mode_reason"], "none")
+
+    def test_mark_generated_fills_a_real_downgrade_reason(self):
+        packet = dict(self.packet)
+        packet["mode_reason"] = "greenfield -- no prior commits to ground citations in"
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(packet)
+        ss.mark_generated(
+            state, "core/", packet["output_path"], packet=packet, repo_root=self.repo_root,
+        )
+        text = (self.repo_root / packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(
+            frontmatter["mode_reason"], "greenfield -- no prior commits to ground citations in"
+        )
+
+    def test_mark_generated_does_not_disturb_already_filled_mode_fields(self):
+        # No <content-mode-requested>/<mode-reason> tokens present at all --
+        # simulates skeleton-mode output, already finalized by
+        # emit_skeleton() itself. The replace-by-token approach must be a
+        # true no-op here, never an unconditional overwrite.
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(
+            self.packet, content_mode_requested="augmented", mode_reason="already-final"
+        )
+        ss.mark_generated(
+            state, "core/", self.packet["output_path"],
+            packet=self.packet, repo_root=self.repo_root,
+        )
+        text = (self.repo_root / self.packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "augmented")
+        self.assertEqual(frontmatter["mode_reason"], "already-final")
+
+    # -- mark_repo_doc_generated / mark_interface_generated ----------------- #
+
+    def _repo_doc_packet(self):
+        packet = dict(self.packet)
+        packet.update({
+            "packet_id": "repo--coding-standards",
+            "kind": "coding_standards",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/CODING-STANDARDS.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["coding_standards"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["coding_standards"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["coding_standards"],
+            "must_cite": [],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("coding_standards", None)]),
+            "read_budget": ss.READ_BUDGET_REPO_DOC,
+        })
+        return packet
+
+    def test_mark_repo_doc_generated_fills_placeholders(self):
+        packet = self._repo_doc_packet()
+        state = {"modules": [], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(packet)
+        ss.mark_repo_doc_generated(
+            state, "coding_standards", packet["output_path"],
+            packet=packet, repo_root=self.repo_root,
+        )
+        text = (self.repo_root / packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "grounded")
+        self.assertEqual(frontmatter["mode_reason"], "none")
+
+    def _interface_packet(self):
+        packet = dict(self.packet)
+        packet.update({
+            "packet_id": "interface--core--utils",
+            "kind": "interface_boundary",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/interfaces/core-to-utils.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["interface_boundary"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["interface_boundary"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["interface_boundary"],
+            "must_cite": [],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("interface_boundary", None)]),
+            "read_budget": ss.READ_BUDGET_INTERFACE,
+        })
+        return packet
+
+    def test_mark_interface_generated_fills_placeholders(self):
+        interface_id = ss._interface_id("core/", "utils/")
+        packet = self._interface_packet()
+        state = {
+            "modules": [], "repo_docs": _repo_docs(),
+            "interfaces": [_interface("core/", "utils/")],
+        }
+        self._write_worker_doc(packet)
+        ss.mark_interface_generated(
+            state, interface_id, packet["output_path"],
+            packet=packet, repo_root=self.repo_root,
+        )
+        text = (self.repo_root / packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "grounded")
+        self.assertEqual(frontmatter["mode_reason"], "none")
+
+    # -- render_index() mode display ---------------------------------------- #
+
+    def test_render_index_with_no_repo_root_omits_mode_note(self):
+        # Back-compat: every pre-TASK-0307 caller passes only 2 args.
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(self.packet)
+        ss.mark_generated(
+            state, "core/", self.packet["output_path"],
+            packet=self.packet, repo_root=self.repo_root,
+        )
+        text = ss.render_index(state, "demo-repo")
+        self.assertNotIn("mode:", text)
+
+    def test_render_index_with_repo_root_shows_mode_when_no_downgrade(self):
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(self.packet, content_mode_requested="grounded", mode_reason="none")
+        ss.mark_generated(
+            state, "core/", self.packet["output_path"],
+            packet=self.packet, repo_root=self.repo_root,
+        )
+        text = ss.render_index(state, "demo-repo", repo_root=self.repo_root)
+        self.assertIn("-- mode: grounded", text)
+        self.assertNotIn("requested", text)
+
+    def test_render_index_with_repo_root_shows_downgrade_reason(self):
+        packet = dict(self.packet)
+        packet["content_mode"] = "augmented"
+        packet["mode_reason"] = "probe found no prior commits"
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(packet)
+        ss.mark_generated(
+            state, "core/", packet["output_path"], packet=packet, repo_root=self.repo_root,
+        )
+        text = ss.render_index(state, "demo-repo", repo_root=self.repo_root)
+        self.assertIn(
+            "-- mode: augmented (requested grounded -- probe found no prior commits)", text
+        )
+
+    def test_render_index_tolerates_missing_output_file(self):
+        # A generated record whose file got moved/deleted out from under it
+        # must never crash render-index -- just no mode note for that line.
+        state = {"modules": [_module("core/", 2, status="generated")], "repo_docs": _repo_docs(),
+                 "interfaces": []}
+        state["modules"][0]["output_path"] = "org/core/CONTEXT.md"  # never written to disk
+        text = ss.render_index(state, "demo-repo", repo_root=self.repo_root)
+        self.assertNotIn("mode:", text)
+
+
+# --------------------------------------------------------------------------- #
 # TASK-0108: `final=True` -- the second, terminal half of Sec 5.4's retry     #
 # contract. The default (final=False, exercised above by                     #
 # MarkGeneratedValidationWiringTests) is the *first* attempt: validation     #
@@ -4241,6 +4460,29 @@ class EmitSkeletonTests(unittest.TestCase):
         self.assertEqual(frontmatter["doc_kind"], "context_md")
         self.assertEqual(frontmatter["skill_version"], "0.5.0")
 
+    def test_frontmatter_carries_requested_mode_and_downgrade_reason(self):
+        # TASK-0307 (P1): the fixture's own content_mode_requested/
+        # mode_reason ("grounded"/"greenfield") differ from the "skeleton"
+        # content_mode emit_skeleton() always forces -- exactly the
+        # downgrade case Sec 4 says must be "recorded in frontmatter...
+        # and stated in chat".
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "grounded")
+        self.assertEqual(frontmatter["mode_reason"], "greenfield")
+
+    def test_frontmatter_mode_reason_renders_as_literal_none_when_absent(self):
+        # _parse_frontmatter() is a flat key:value splitter with no null
+        # handling -- a packet.get("mode_reason") of None must still land
+        # as a real, greppable token, not vanish or blank the line out.
+        packet = self._context_packet(mode_reason=None)
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["mode_reason"], "none")
+
     def test_interface_frontmatter_carries_both_module_names(self):
         packet = self._interface_packet()
         text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
@@ -4293,7 +4535,8 @@ class EmitSkeletonTests(unittest.TestCase):
         packet = self._context_packet()
         text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
                                  skill_version="0.5.0")
-        for token in ("<content-mode>", "<skill-version>", "<YYYY-MM-DD>",
+        for token in ("<content-mode>", "<content-mode-requested>", "<mode-reason>",
+                      "<skill-version>", "<YYYY-MM-DD>",
                       "<module-name>", "<module-path>"):
             self.assertNotIn(token, text)
 

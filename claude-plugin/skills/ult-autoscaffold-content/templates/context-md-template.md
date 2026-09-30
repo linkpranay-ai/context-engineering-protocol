@@ -2,7 +2,9 @@
 generated_by: ult-autoscaffold-content
 generated_at: <YYYY-MM-DD>
 status: draft
+content_mode_requested: <content-mode-requested>
 content_mode: <content-mode>
+mode_reason: <mode-reason>
 doc_kind: context_md
 skill_version: <skill-version>
 ---
