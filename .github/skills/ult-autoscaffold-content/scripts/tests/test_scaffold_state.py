@@ -4520,5 +4520,468 @@ class EmitSkeletonCLITests(unittest.TestCase):
         self.assertEqual(out, direct)
 
 
+# --------------------------------------------------------------------------- #
+# TASK-0305 (P1): reset / check-regenerable / list-generated --mode          #
+# (Proposal Sec 9.4's "Regenerate and upgrade" table -- these tests describe #
+# the four target-state rows before TASK-0306 implements them.)             #
+# --------------------------------------------------------------------------- #
+
+class ResetTests(unittest.TestCase):
+    """`ss.reset(state, kind, record_id, repo_root, reason)`: Sec 9.4 row 2
+    ("generated_by is autoscaffold and the normalised hash matches
+    output_sha256" -> offer to regenerate via reset). Reset itself
+    re-verifies "untouched" rather than trusting the caller, since a wrong
+    reset would let a later mark-* clobber a human edit -- rows 3/4's "never
+    overwritten" guarantee has to hold even if something calls reset()
+    directly instead of going through check_regenerable() first."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def _generated_module_state(self, body="hello\n"):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(self.repo_root / output_path, body)
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        return state, output_path
+
+    def test_untouched_matching_hash_module_transitions_to_pending(self):
+        state, _output_path = self._generated_module_state()
+        module = ss.reset(state, "module", "core/", self.repo_root, "regenerate at skeleton")
+        self.assertEqual(module["status"], "pending")
+
+    def test_reset_records_reason(self):
+        state, _output_path = self._generated_module_state()
+        module = ss.reset(state, "module", "core/", self.repo_root, "regenerate at skeleton")
+        self.assertEqual(module["reset_reason"], "regenerate at skeleton")
+        self.assertIsNotNone(module["reset_at"])
+
+    def test_reset_preserves_previous_sha256_through_the_next_mark_generated(self):
+        # Uses the real mark_generated(..., packet=...) hash-rotation path
+        # (accept_validation_failure so arbitrary fixture text doesn't need
+        # to satisfy validate()'s floors) -- the plain mark_generated(state,
+        # id, path) call used elsewhere in this class never touches
+        # previous_sha256/output_sha256 at all (only the packet-carrying
+        # branch does), so this is the one test that needs it.
+        packet = {
+            "packet_id": "how-l2--core--context", "layer": "how_l2", "kind": "context_md",
+            "module_id": "core/", "tier": 1, "output_path": "org/core/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded", "content_mode": "grounded",
+            "mode_reason": None,
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": [], "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 1)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[1], "head_commit": None,
+        }
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = packet["output_path"]
+        _write(self.repo_root / output_path, "first generation, deliberately invalid\n")
+        ss.mark_generated(
+            state, "core/", output_path, packet=packet, repo_root=self.repo_root,
+            accept_validation_failure="test-fixture",
+        )
+        first_hash = ss._find_module(state, "core/")["output_sha256"]
+        ss.reset(state, "module", "core/", self.repo_root, "regenerate at skeleton")
+        # A fresh cycle: new content, new packet, mark-generated again --
+        # exactly the "reset, then a new packet, then mark-*" flow Sec 9.4
+        # describes for this row.
+        _write(self.repo_root / output_path, "second generation, also deliberately invalid\n")
+        ss.mark_generated(
+            state, "core/", output_path, packet=packet, repo_root=self.repo_root,
+            accept_validation_failure="test-fixture",
+        )
+        module = ss._find_module(state, "core/")
+        self.assertEqual(module["previous_sha256"], first_hash)
+        self.assertNotEqual(module["output_sha256"], first_hash)
+
+    def test_reset_refuses_when_file_was_edited_since_generation(self):
+        state, output_path = self._generated_module_state()
+        _write(self.repo_root / output_path, "a human edited this\n")
+        with self.assertRaises(ValueError):
+            ss.reset(state, "module", "core/", self.repo_root, "regenerate")
+        # Refused reset must not have moved the record out of "generated" --
+        # this is the "changed output is never overwritten" guarantee.
+        self.assertEqual(ss._find_module(state, "core/")["status"], "generated")
+
+    def test_reset_refuses_legacy_output_with_no_stored_hash(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("legacy/", 1))
+        output_path = "org/legacy/CONTEXT.md"
+        _write(self.repo_root / output_path, "a hand-authored legacy draft\n")
+        ss.mark_generated(state, "legacy/", output_path)
+        # No output_sha256 was ever recorded for this record (the legacy-
+        # draft case Sec 9.4 calls out) -- reset must refuse, not treat a
+        # missing hash as "vacuously untouched".
+        self.assertIsNone(ss._find_module(state, "legacy/").get("output_sha256"))
+        with self.assertRaises(ValueError):
+            ss.reset(state, "module", "legacy/", self.repo_root, "regenerate")
+        self.assertEqual(ss._find_module(state, "legacy/")["status"], "generated")
+
+    def test_reset_refuses_when_status_is_not_generated(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1, status="pending"))
+        with self.assertRaises(ValueError):
+            ss.reset(state, "module", "core/", self.repo_root, "regenerate")
+
+    def test_reset_refuses_when_output_file_is_missing(self):
+        state, output_path = self._generated_module_state()
+        (self.repo_root / output_path).unlink()
+        with self.assertRaises(ValueError):
+            ss.reset(state, "module", "core/", self.repo_root, "regenerate")
+
+    def test_reset_works_for_repo_doc_kind(self):
+        state = ss.empty_state()
+        output_path = "org/CODING-STANDARDS.md"
+        _write(self.repo_root / output_path, "standards\n")
+        ss.mark_repo_doc_generated(state, "coding_standards", output_path)
+        doc = state["repo_docs"]["coding_standards"]
+        doc["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        result = ss.reset(state, "repo_doc", "coding_standards", self.repo_root, "regenerate")
+        self.assertEqual(result["status"], "pending")
+
+    def test_reset_works_for_interface_kind(self):
+        state = ss.empty_state()
+        interface = _interface("core/", "utils/")
+        interface["status"] = "generated"
+        state["interfaces"].append(interface)
+        output_path = "org/interfaces/core--utils.md"
+        _write(self.repo_root / output_path, "interface doc\n")
+        interface["output_path"] = output_path
+        interface["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        result = ss.reset(state, "interface", interface["id"], self.repo_root, "regenerate")
+        self.assertEqual(result["status"], "pending")
+
+    def test_reset_unknown_kind_raises(self):
+        state, _output_path = self._generated_module_state()
+        with self.assertRaises(ValueError):
+            ss.reset(state, "not-a-kind", "core/", self.repo_root, "regenerate")
+
+    def test_normalized_hash_treats_crlf_and_lf_as_identical_for_reset(self):
+        state, output_path = self._generated_module_state(body="line one\nline two\n")
+        full_path = self.repo_root / output_path
+        crlf_bytes = full_path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8")
+        full_path.write_bytes(crlf_bytes)
+        # On-disk bytes are now CRLF, but the stored hash was computed (and
+        # is re-computed here) over normalized (LF) text -- reset must still
+        # see this as "untouched" rather than "edited".
+        module = ss.reset(state, "module", "core/", self.repo_root, "regenerate")
+        self.assertEqual(module["status"], "pending")
+
+
+class CheckRegenerableTests(unittest.TestCase):
+    """`ss.check_regenerable(state, kind, record_id, repo_root)`: read-only
+    Sec 9.4 classification. Never mutates state or touches disk."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def test_pending_module_with_no_output_is_absent_or_empty(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "absent_or_empty")
+        self.assertIsNone(result["proposed_path"])
+
+    def test_generated_record_whose_file_is_empty_is_absent_or_empty(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(self.repo_root / output_path, "")
+        ss.mark_generated(state, "core/", output_path)
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "absent_or_empty")
+
+    def test_untouched_autoscaffold_output_is_regenerable(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "regenerable")
+        self.assertIsNone(result["proposed_path"])
+
+    def test_edited_output_proposes_instead_of_offering_regenerate(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\na human edited this\n",
+        )
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "propose_edited")
+        self.assertEqual(
+            result["proposed_path"], "cache/autoscaffold-content/proposed/" + output_path
+        )
+
+    def test_legacy_draft_with_no_stored_hash_always_proposes(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("legacy/", 1))
+        output_path = "org/legacy/CONTEXT.md"
+        _write(self.repo_root / output_path, "a hand-authored legacy draft, no frontmatter\n")
+        ss.mark_generated(state, "legacy/", output_path)
+        result = ss.check_regenerable(state, "module", "legacy/", self.repo_root)
+        self.assertEqual(result["decision"], "propose_legacy")
+        self.assertEqual(
+            result["proposed_path"], "cache/autoscaffold-content/proposed/" + output_path
+        )
+
+    def test_matching_hash_but_not_generated_by_autoscaffold_still_proposes(self):
+        # Defense in depth for Sec 9.4's "generated_by is autoscaffold AND
+        # hash matches" -- both conditions must hold, not just the hash.
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(self.repo_root / output_path, "---\ngenerated_by: some-other-tool\n---\n\nbody\n")
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "propose_edited")
+
+    def test_check_regenerable_does_not_mutate_state_or_disk(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        before = json.dumps(state, sort_keys=True)
+        before_bytes = (self.repo_root / output_path).read_bytes()
+        ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(json.dumps(state, sort_keys=True), before)
+        self.assertEqual((self.repo_root / output_path).read_bytes(), before_bytes)
+
+    def test_crlf_on_disk_still_counts_as_untouched(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        text = "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\nline two\n"
+        _write(self.repo_root / output_path, text)
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        crlf_bytes = text.replace("\n", "\r\n").encode("utf-8")
+        (self.repo_root / output_path).write_bytes(crlf_bytes)
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "regenerable")
+
+
+class ListGeneratedTests(unittest.TestCase):
+    """`ss.list_generated(state, repo_root, mode=None)`: Sec 9.3 -- "the mode
+    is not stored in state", so this always reads content_mode live from
+    each generated record's own output file's frontmatter."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state = ss.empty_state()
+
+    def _generate_module(self, module_id, output_path, content_mode):
+        self.state["modules"].append(_module(module_id, 1))
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\ncontent_mode: {}\n---\n\nbody\n".format(
+                content_mode
+            ),
+        )
+        ss.mark_generated(self.state, module_id, output_path)
+
+    def test_lists_only_generated_records(self):
+        self.state["modules"].append(_module("pending-mod/", 1, status="pending"))
+        self._generate_module("core/", "org/core/CONTEXT.md", "grounded")
+        results = ss.list_generated(self.state, self.repo_root)
+        ids = [r["id"] for r in results]
+        self.assertIn("core/", ids)
+        self.assertNotIn("pending-mod/", ids)
+
+    def test_reads_content_mode_from_frontmatter_not_state(self):
+        self._generate_module("core/", "org/core/CONTEXT.md", "skeleton")
+        results = ss.list_generated(self.state, self.repo_root)
+        [core] = [r for r in results if r["id"] == "core/"]
+        self.assertEqual(core["content_mode"], "skeleton")
+        # Confirms the state record itself was never asked to carry a mode.
+        self.assertNotIn("content_mode", ss._find_module(self.state, "core/"))
+
+    def test_filters_by_mode(self):
+        self._generate_module("core/", "org/core/CONTEXT.md", "grounded")
+        self._generate_module("utils/", "org/utils/CONTEXT.md", "skeleton")
+        results = ss.list_generated(self.state, self.repo_root, mode="skeleton")
+        ids = [r["id"] for r in results]
+        self.assertEqual(ids, ["utils/"])
+
+    def test_includes_all_record_kinds(self):
+        self._generate_module("core/", "org/core/CONTEXT.md", "grounded")
+        _write(
+            self.repo_root / "org/CODING-STANDARDS.md",
+            "---\ngenerated_by: ult-autoscaffold-content\ncontent_mode: grounded\n---\n\nx\n",
+        )
+        ss.mark_repo_doc_generated(self.state, "coding_standards", "org/CODING-STANDARDS.md")
+        results = ss.list_generated(self.state, self.repo_root)
+        kinds = {r["kind"] for r in results}
+        self.assertEqual(kinds, {"module", "repo_doc"})
+
+    def test_missing_output_file_is_included_with_none_mode_not_raised(self):
+        self._generate_module("core/", "org/core/CONTEXT.md", "grounded")
+        (self.repo_root / "org/core/CONTEXT.md").unlink()
+        results = ss.list_generated(self.state, self.repo_root)
+        [core] = [r for r in results if r["id"] == "core/"]
+        self.assertIsNone(core["content_mode"])
+
+
+class ResetCLITests(unittest.TestCase):
+    """`reset` -- matching this suite's argparse.Namespace() CLI-entry-point
+    convention (see EmitSkeletonCLITests)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        self.output_path = "org/core/CONTEXT.md"
+        _write(self.repo_root / self.output_path, "body\n")
+        ss.mark_generated(state, "core/", self.output_path)
+        state["modules"][0]["output_sha256"] = ss._normalized_body_hash(
+            self.repo_root / self.output_path
+        )
+        ss.save_state(self.state_path, state)
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            state=str(self.state_path), kind="module", id="core/",
+            repo_root=str(self.repo_root), reason="regenerate at skeleton",
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_reset(args)
+        return rc, buf.getvalue()
+
+    def test_reset_cli_transitions_module_to_pending_and_persists(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        self.assertIn('"pending"', out)
+        reloaded = ss.load_state(self.state_path)
+        self.assertEqual(ss._find_module(reloaded, "core/")["status"], "pending")
+
+    def test_reset_cli_reports_error_on_hash_mismatch_without_persisting(self):
+        _write(self.repo_root / self.output_path, "edited\n")
+        rc, _out = self._run()
+        self.assertEqual(rc, 1)
+        reloaded = ss.load_state(self.state_path)
+        self.assertEqual(ss._find_module(reloaded, "core/")["status"], "generated")
+
+
+class CheckRegenerableCLITests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        state["modules"][0]["output_sha256"] = ss._normalized_body_hash(
+            self.repo_root / output_path
+        )
+        ss.save_state(self.state_path, state)
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            state=str(self.state_path), kind="module", id="core/",
+            repo_root=str(self.repo_root),
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_check_regenerable(args)
+        return rc, buf.getvalue()
+
+    def test_prints_regenerable_decision_as_json(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["decision"], "regenerable")
+
+
+class ListGeneratedCLITests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\ncontent_mode: skeleton\n---\n\nb\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        ss.save_state(self.state_path, state)
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            state=str(self.state_path), repo_root=str(self.repo_root), mode=None,
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_list_generated(args)
+        return rc, buf.getvalue()
+
+    def test_lists_generated_records_as_json(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["content_mode"], "skeleton")
+
+    def test_mode_filter_excludes_non_matching(self):
+        rc, out = self._run(mode="grounded")
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload, [])
+
+
 if __name__ == "__main__":
     unittest.main()

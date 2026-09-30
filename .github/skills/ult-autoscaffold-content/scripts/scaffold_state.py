@@ -2927,6 +2927,212 @@ def mark_interface_deferred(state, interface_id, reason):
     return interface
 
 
+# --------------------------------------------------------------------------- #
+# TASK-0305/0306 (P1): reset / check-regenerable / list-generated --mode     #
+# (Proposal Sec 9.4 "Regenerate and upgrade" [F6, Q5]).                     #
+# --------------------------------------------------------------------------- #
+
+_RESETTABLE_KINDS = ("module", "repo_doc", "interface")
+
+_PROPOSED_CACHE_PREFIX = "cache/autoscaffold-content/proposed/"
+
+_DECISION_ABSENT_OR_EMPTY = "absent_or_empty"
+_DECISION_REGENERABLE = "regenerable"
+_DECISION_PROPOSE_EDITED = "propose_edited"
+_DECISION_PROPOSE_LEGACY = "propose_legacy"
+
+
+def _find_record(state, kind, record_id):
+    """Dispatch to the existing per-kind lookup (`_find_module`/
+    `_find_repo_doc`/`_find_interface`) so `reset`/`check_regenerable` work
+    across all three record shapes without a fourth, parallel storage
+    convention -- `kind` is exactly the vocabulary Sec 9.4's table uses."""
+    if kind == "module":
+        return _find_module(state, record_id)
+    if kind == "repo_doc":
+        return _find_repo_doc(state, record_id)
+    if kind == "interface":
+        return _find_interface(state, record_id)
+    raise ValueError(
+        "unknown kind '{}' -- must be one of {}".format(kind, _RESETTABLE_KINDS)
+    )
+
+
+def _proposed_path_for(output_path):
+    """Sec 9.4's mirrored proposal location: the same relative path, moved
+    under cache/autoscaffold-content/proposed/ -- the already-established
+    cache root (CEP-INDEX.md/TRIAGE-STATE.json live at its top level) --
+    so a caller that must never overwrite a real file always has an
+    unambiguous, collision-free place to write its candidate instead. Pure
+    path arithmetic; nothing is read or written here."""
+    return _PROPOSED_CACHE_PREFIX + output_path.lstrip("/")
+
+
+def reset(state, kind, record_id, repo_root, reason):
+    """Sec 9.4 row 2: a `generated` record whose on-disk file is still, by
+    normalised hash, exactly what autoscaffold last wrote there goes back to
+    `pending`, clearing the way for a fresh packet + mark-* cycle (Sec 9.4:
+    "reset <state> <id> --reason, then a new packet, then mark-*").
+
+    Reset independently re-verifies "untouched" rather than trusting the
+    caller already ran check_regenerable() -- rows 3/4's "never overwritten"
+    guarantee must hold even when reset() is called directly, so it raises
+    ValueError (leaving the record exactly as it was) unless ALL of:
+      - the record's status is "generated",
+      - it has a stored `output_sha256` (a legacy draft that autoscaffold
+        never hashed is refused outright -- Sec 9.4 row 4), and
+      - the output file still exists and its current normalised hash still
+        matches that stored `output_sha256` (row 3: a human edit is refused).
+
+    `output_sha256` is deliberately left untouched here (not cleared to
+    None): the next mark_generated/mark_repo_doc_generated/
+    mark_interface_generated call's own `previous_sha256 = record.get(
+    "output_sha256")` line is what shifts this value into `previous_sha256`,
+    exactly as it already does for every ordinary re-mark. Reset must not
+    add a second, competing writer of `previous_sha256`, or a reset
+    immediately followed by mark-* would overwrite it with None instead of
+    carrying it forward -- this is how "previous_sha256 is preserved on
+    reset" is satisfied without reimplementing the rotation."""
+    record = _find_record(state, kind, record_id)
+    if record["status"] != "generated":
+        raise ValueError(
+            "{} '{}' is '{}', not 'generated' -- only a generated record can "
+            "be reset".format(kind, record_id, record["status"])
+        )
+    stored_hash = record.get("output_sha256")
+    if not stored_hash:
+        raise ValueError(
+            "{} '{}' has no stored output_sha256 -- it looks like a legacy "
+            "draft autoscaffold never hashed, or was generated before this "
+            "field existed. reset refuses it rather than guess (Sec 9.4: "
+            "legacy output is never silently overwritten); write a proposal "
+            "to {} instead".format(
+                kind, record_id, _proposed_path_for(record.get("output_path") or "<output>")
+            )
+        )
+    output_path = record.get("output_path")
+    full_path = Path(repo_root) / output_path if output_path else None
+    if not output_path or not full_path.is_file():
+        raise ValueError(
+            "{} '{}' output '{}' does not exist on disk -- cannot verify it "
+            "is untouched before resetting".format(kind, record_id, output_path)
+        )
+    current_hash = _normalized_body_hash(full_path)
+    if current_hash != stored_hash:
+        raise ValueError(
+            "{} '{}' output '{}' has changed since autoscaffold generated it "
+            "(normalised hash mismatch) -- reset refuses to discard what may "
+            "be a human edit; write a proposal to {} instead of "
+            "resetting".format(kind, record_id, output_path, _proposed_path_for(output_path))
+        )
+    record["status"] = "pending"
+    record["reset_reason"] = reason
+    record["reset_at"] = _now_iso()
+    return record
+
+
+def check_regenerable(state, kind, record_id, repo_root):
+    """Read-only Sec 9.4 classification for one already-scanned record --
+    never mutates `state` and never writes to disk. Tells the caller (the
+    orchestrator, deciding where to write freshly generated content) which
+    of the four target-state rows applies:
+
+      - "absent_or_empty":   no output recorded yet, or the file is missing
+                              or empty -- just generate normally.
+      - "regenerable":       generated_by is autoscaffold AND the current
+                              normalised hash still matches output_sha256 --
+                              safe to `reset` then regenerate.
+      - "propose_edited":    a stored hash exists but no longer matches (a
+                              human edited it), or the file's own
+                              `generated_by` frontmatter isn't autoscaffold's
+                              -- never overwritten; propose instead.
+      - "propose_legacy":    generated but no output_sha256 was ever stored
+                              (a legacy draft -- e.g. hand-authored docs that
+                              predate autoscaffold in any target repo) --
+                              always propose.
+
+    `proposed_path` (Sec 9.4's mirrored `cache/autoscaffold-content/
+    proposed/<mirrored path>` location) is set for the two "never overwrite"
+    decisions and None otherwise."""
+    record = _find_record(state, kind, record_id)
+    output_path = record.get("output_path")
+    full_path = Path(repo_root) / output_path if output_path else None
+    if not output_path or not full_path.is_file():
+        return {"decision": _DECISION_ABSENT_OR_EMPTY, "proposed_path": None}
+
+    text = full_path.read_text(encoding="utf-8")
+    if not text.strip():
+        return {"decision": _DECISION_ABSENT_OR_EMPTY, "proposed_path": None}
+
+    stored_hash = record.get("output_sha256")
+    if not stored_hash:
+        return {
+            "decision": _DECISION_PROPOSE_LEGACY,
+            "proposed_path": _proposed_path_for(output_path),
+        }
+
+    frontmatter, _body = _parse_frontmatter(text)
+    generated_by = frontmatter.get("generated_by")
+    current_hash = _normalized_body_hash(full_path)
+    if generated_by == ORPHANED_CEP_OUTPUT_GENERATED_BY and current_hash == stored_hash:
+        return {"decision": _DECISION_REGENERABLE, "proposed_path": None}
+
+    return {
+        "decision": _DECISION_PROPOSE_EDITED,
+        "proposed_path": _proposed_path_for(output_path),
+    }
+
+
+def _iter_records(state):
+    """Every module/repo-doc/interface record in `state`, tagged with the
+    same `kind` vocabulary `_find_record`/`reset`/`check_regenerable` use, so
+    `list_generated` can walk all three shapes uniformly."""
+    for m in state.get("modules", []):
+        yield "module", m["id"], m
+    for doc_kind, doc in (state.get("repo_docs") or {}).items():
+        yield "repo_doc", doc_kind, doc
+    for i in state.get("interfaces", []):
+        yield "interface", i["id"], i
+
+
+def list_generated(state, repo_root, mode=None):
+    """Sec 9.4's `list-generated --mode <m>` [M10]: every record currently
+    `generated`, with its `content_mode` read live from the output file's
+    own frontmatter -- Sec 9.3: "The mode is not stored in state. Frontmatter
+    is the source of truth" -- never from a field on the state record itself.
+
+    `mode=None` lists every generated record regardless of mode; otherwise
+    only those whose frontmatter `content_mode` equals `mode` exactly. A
+    generated record whose output file has since vanished or can't be read
+    is still included, with `content_mode: None`, rather than raising --
+    "generated but its file disappeared" is itself worth surfacing, not
+    hiding behind an exception. Read-only."""
+    results = []
+    for kind, record_id, record in _iter_records(state):
+        if record.get("status") != "generated":
+            continue
+        output_path = record.get("output_path")
+        content_mode = None
+        if output_path:
+            full_path = Path(repo_root) / output_path
+            try:
+                text = full_path.read_text(encoding="utf-8")
+            except OSError:
+                text = None
+            if text is not None:
+                frontmatter, _body = _parse_frontmatter(text)
+                content_mode = frontmatter.get("content_mode")
+        if mode is not None and content_mode != mode:
+            continue
+        results.append({
+            "kind": kind,
+            "id": record_id,
+            "output_path": output_path,
+            "content_mode": content_mode,
+        })
+    return results
+
+
 def list_interfaces(state, eligible_only=False, generated_module_ids=None,
                      with_sites=False, repo_root=None, graph=None):
     """Return the interfaces list, optionally filtered to SKILL.md Step 5d's
@@ -3681,6 +3887,42 @@ def _cmd_mark_interface_deferred(args):
         return 0
 
 
+def _cmd_reset(args):
+    """TASK-0306: CLI surface over reset() -- state_lock-guarded like every
+    other mutating command."""
+    with state_lock(args.state):
+        state = load_state(args.state)
+        try:
+            record = reset(state, args.kind, args.id, args.repo_root, args.reason)
+        except ValueError as e:
+            print("ERROR: {}".format(e), file=sys.stderr)
+            return 1
+        save_state(args.state, state)
+        print(json.dumps(record, indent=2))
+        return 0
+
+
+def _cmd_check_regenerable(args):
+    """TASK-0306: CLI surface over check_regenerable() -- read-only, no
+    state_lock needed since nothing is written."""
+    state = load_state(args.state)
+    try:
+        result = check_regenerable(state, args.kind, args.id, args.repo_root)
+    except ValueError as e:
+        print("ERROR: {}".format(e), file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_list_generated(args):
+    """TASK-0306: CLI surface over list_generated() -- read-only."""
+    state = load_state(args.state)
+    result = list_generated(state, args.repo_root, mode=args.mode)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def _cmd_list_interfaces(args):
     if args.with_sites and not (args.repo_root and args.graph_path):
         print(
@@ -3871,6 +4113,48 @@ def main(argv=None):
     p_ifdef.add_argument("interface_id")
     p_ifdef.add_argument("--reason", required=True)
     p_ifdef.set_defaults(func=_cmd_mark_interface_deferred)
+
+    p_reset = sub.add_parser(
+        "reset",
+        help="TASK-0306: transition an untouched, matching-hash 'generated' "
+        "record back to 'pending' (Sec 9.4 row 2), clearing the way for a "
+        "fresh packet + mark-* cycle. Refuses (no state change) if the "
+        "record was edited since generation or is a legacy draft with no "
+        "stored hash.",
+    )
+    p_reset.add_argument("state")
+    p_reset.add_argument("kind", choices=_RESETTABLE_KINDS)
+    p_reset.add_argument("id")
+    p_reset.add_argument("--repo-root", required=True)
+    p_reset.add_argument("--reason", required=True)
+    p_reset.set_defaults(func=_cmd_reset)
+
+    p_checkregen = sub.add_parser(
+        "check-regenerable",
+        help="TASK-0306: read-only Sec 9.4 classification of one record -- "
+        "'regenerable', or 'propose_edited'/'propose_legacy' with the "
+        "mirrored cache/autoscaffold-content/proposed/ path to write a "
+        "candidate to instead of overwriting the real output.",
+    )
+    p_checkregen.add_argument("state")
+    p_checkregen.add_argument("kind", choices=_RESETTABLE_KINDS)
+    p_checkregen.add_argument("id")
+    p_checkregen.add_argument("--repo-root", required=True)
+    p_checkregen.set_defaults(func=_cmd_check_regenerable)
+
+    p_listgen = sub.add_parser(
+        "list-generated",
+        help="TASK-0306: list generated records, with content_mode read "
+        "live from each output file's frontmatter (never stored in state).",
+    )
+    p_listgen.add_argument("state")
+    p_listgen.add_argument("--repo-root", required=True)
+    p_listgen.add_argument(
+        "--mode", default=None,
+        help="Only list records whose frontmatter content_mode equals this "
+        "value. Omit to list every generated record regardless of mode.",
+    )
+    p_listgen.set_defaults(func=_cmd_list_generated)
 
     p_iflist = sub.add_parser("list-interfaces", help="Print the interfaces list.")
     p_iflist.add_argument("state")
