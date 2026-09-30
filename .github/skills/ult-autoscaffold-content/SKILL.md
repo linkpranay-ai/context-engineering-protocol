@@ -332,9 +332,14 @@ exactly what the orchestrator itself recorded.
 3. Each packet fully specifies what its worker is allowed to depend on:
    `output_path` (the only path the worker may write), `template`,
    `required_sections`, `must_cite`, `evidence_hints`, `read_budget`, and
-   `validation_floor`. `effective_mode` is fixed to `"grounded"` for every
-   packet this release — mode selection (skeleton/grounded/augmented) is
-   future work, not something to improvise here.
+   `validation_floor`. Each packet also carries `content_mode_requested`
+   (what was asked for — an explicit request, a config override, or the
+   per-layer default) and `content_mode` (what the worker must actually
+   produce, after the layer/kind cap and the greenfield evidence gate are
+   applied), plus `mode_reason` explaining any downgrade. Never improvise a
+   different mode than `content_mode` says, and never ask the worker to
+   read `content_mode_requested` — that field is for the orchestrator's own
+   reporting, not for the worker.
 
 ## Step 5b — Per-module generation (large repos only, packet-driven)
 

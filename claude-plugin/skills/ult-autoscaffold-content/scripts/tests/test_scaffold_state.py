@@ -2203,10 +2203,12 @@ def _interface(module_a, module_b, status="pending"):
 
 
 class WorkPacketPlanningTests(unittest.TestCase):
-    """TASK-0103: deterministic packet IDs/content, the P0a fixed
-    effective_mode, output-path uniqueness/containment, must_cite
-    derivation, tier-based soft read budgets, and recorded HEAD commit --
-    against build_work_packets()/`plan` (Sec 5.2)."""
+    """TASK-0103: deterministic packet IDs/content, per-packet content-mode
+    resolution (TASK-0303 -- resolve_content_mode() wired through real
+    probe_size() evidence, so a greenfield fixture downgrades every kind to
+    skeleton), output-path uniqueness/containment, must_cite derivation,
+    tier-based soft read budgets, and recorded HEAD commit -- against
+    build_work_packets()/`plan` (Sec 5.2)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -2276,9 +2278,13 @@ class WorkPacketPlanningTests(unittest.TestCase):
         packets = ss.build_work_packets(state, self.repo_root, "org")
         self.assertEqual([p["module_id"] for p in packets], ["core/"])
 
-    # -- P0a fixed effective_mode --------------------------------------- #
+    # -- TASK-0303 real content-mode resolution ------------------------- #
 
-    def test_effective_mode_is_fixed_to_grounded_for_every_kind(self):
+    def test_greenfield_repo_downgrades_every_packet_to_skeleton(self):
+        # self.repo_root is a genuinely empty tmp dir, so probe_size()
+        # reports greenfield=True and resolve_content_mode() collapses
+        # every kind's default ("grounded" for how_l2) down to skeleton,
+        # recording a non-None mode_reason (Sec 6.2, TASK-0303).
         state = self._state(
             modules=[_module("core/", 1)],
             interfaces=[_interface("core", "utils")],
@@ -2286,8 +2292,9 @@ class WorkPacketPlanningTests(unittest.TestCase):
         packets = ss.build_work_packets(state, self.repo_root, "org")
         self.assertEqual(len(packets), 2)
         for packet in packets:
-            self.assertEqual(packet["effective_mode"], "grounded")
-            self.assertIsNone(packet["mode_reason"])
+            self.assertEqual(packet["content_mode_requested"], "grounded")
+            self.assertEqual(packet["content_mode"], "skeleton")
+            self.assertIsNotNone(packet["mode_reason"])
 
     # -- repo docs (coding_standards / testing_guidelines) --------------- #
 
@@ -2494,7 +2501,7 @@ def _make_doc(packet, sections, frontmatter_overrides=None):
         "generated_by": "ult-autoscaffold-content",
         "generated_at": "2026-09-28",
         "status": "draft",
-        "content_mode": packet["effective_mode"],
+        "content_mode": packet["content_mode"],
         "doc_kind": packet["kind"],
         "skill_version": "2.0.0-dev",
     }
@@ -2533,7 +2540,8 @@ class GeneratedValidationTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -2600,7 +2608,7 @@ class GeneratedValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("status" in f for f in result["failures"]))
 
-    def test_content_mode_mismatch_with_packet_effective_mode_fails(self):
+    def test_content_mode_mismatch_with_packet_content_mode_fails(self):
         doc = _make_doc(self.packet, self.baseline_sections,
                          frontmatter_overrides={"content_mode": "skeleton"})
         path = self._write_doc(doc)
@@ -2866,7 +2874,8 @@ class MarkGeneratedValidationWiringTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3113,7 +3122,8 @@ class FinalFailureStatusTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3360,7 +3370,8 @@ class StalePacketHeadWarningTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3764,6 +3775,336 @@ class ListInterfacesWithSitesCLITests(unittest.TestCase):
             graph_path=str(self.repo_root / "missing-graph.json"),
         )
         self.assertEqual(rc, 1)
+
+
+class ContentModePrecedenceTests(unittest.TestCase):
+    """TASK-0301 (AutoScaffold_Mode_Plan.md Phase 3 / P1). REQ-001's
+    precedence chain for `content_mode_requested`, resolved by
+    `resolve_content_mode(kind, layer, prompt_override=, config_overrides=,
+    global_mode=)`, highest wins:
+
+      1. prompt_override      -- explicit instruction this run
+      2. config_overrides[kind] -- per-(layer, kind) config override
+      3. global_mode          -- the config's global content_mode value
+      4. the per-layer default -- no flat constant: TASK-0303 states this
+         explicitly as "default What-L2 overview to skeleton", which only
+         makes sense as a *per-layer* default, not a single global one --
+         how_l2 (today's only implemented packet layer) defaults to
+         "grounded", matching current pre-P1 behaviour, while what_l2
+         (no packet-generation path in this release) defaults to
+         "skeleton" until a mode is explicitly requested for it (still
+         capped at "grounded" per Sec 4.4/F4 if someone does ask for
+         more). See DefaultModeByLayerTests for the level-4 cases
+         specifically.
+
+    Most tests here pin the requested-mode winner using coding_standards
+    under how_l2, the one (layer, kind) pair whose cap is "augmented"
+    (Sec 4.4/F15), so the cap never masks the precedence result. Cap and
+    evidence-gate clamping are covered separately by
+    ContentModeCapMatrixTests and ContentModeEvidenceGateTests.
+    """
+
+    def test_no_inputs_defaults_to_grounded_for_how_l2(self):
+        result = ss.resolve_content_mode("coding_standards", ss.PACKET_LAYER)
+        self.assertEqual(result["content_mode_requested"], "grounded")
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_global_mode_beats_default(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER, global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_config_override_beats_global_mode(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"coding_standards": "augmented"},
+            global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "augmented")
+
+    def test_config_override_only_applies_to_its_own_kind(self):
+        # A testing_guidelines override must not leak into a
+        # coding_standards resolution -- overrides are per-(layer, kind).
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"testing_guidelines": "augmented"},
+            global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_prompt_override_beats_everything(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            prompt_override="skeleton",
+            config_overrides={"coding_standards": "augmented"},
+            global_mode="augmented",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_invalid_prompt_override_raises_before_resolving(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER, prompt_override="thorough",
+            )
+
+    def test_invalid_config_override_raises(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER,
+                config_overrides={"coding_standards": "verbose"},
+            )
+
+    def test_invalid_global_mode_raises(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER, global_mode="full",
+            )
+
+    def test_config_override_for_a_different_kind_does_not_raise(self):
+        # An invalid value under a kind that isn't being resolved right now
+        # must not block this resolution -- only the entry actually in play
+        # is validated.
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"testing_guidelines": "not-a-mode"},
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+
+
+class DefaultModeByLayerTests(unittest.TestCase):
+    """TASK-0303's own wording -- "Default What-L2 overview to skeleton;
+    allow grounded on explicit request" -- only makes sense if
+    precedence level 4 (REQ-001) is a *per-layer* default, not the single
+    flat "grounded" a plain reading of proposal Sec 9.1 ("Absent means
+    grounded") would suggest for every layer alike. how_l2 is today's
+    only implemented packet layer, so its default of "grounded" simply
+    continues current pre-P1 behaviour (every how_l2 packet already ships
+    grounded content unconditionally); what_l2 has no packet-generation
+    path in this release at all, so its default is the conservative
+    "skeleton" -- it still honours an explicit request up to its own cap
+    ("grounded", Sec 4.4/F4), it just never volunteers grounded content
+    for a layer that isn't implemented yet.
+    """
+
+    def test_how_l2_kind_with_no_inputs_defaults_to_grounded(self):
+        for kind in ("context_md", "coding_standards", "testing_guidelines", "interface_boundary"):
+            result = ss.resolve_content_mode(kind, "how_l2")
+            self.assertEqual(result["content_mode_requested"], "grounded", kind)
+
+    def test_what_l2_kind_with_no_inputs_defaults_to_skeleton(self):
+        for kind in ("context_md", "requirements_overview"):
+            result = ss.resolve_content_mode(kind, "what_l2")
+            self.assertEqual(result["content_mode_requested"], "skeleton", kind)
+            self.assertEqual(result["content_mode"], "skeleton", kind)
+
+    def test_what_l2_kind_honours_explicit_grounded_request(self):
+        # "allow grounded on explicit request" -- the low per-layer
+        # default is not a ceiling; an explicit ask still resolves to
+        # grounded (what_l2's own cap), same as any other layer.
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="grounded",
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_what_l2_kind_explicit_augmented_request_still_capped_at_grounded(self):
+        # The low default doesn't change the cap: F4 still caps every
+        # what_l2 kind at grounded even when the request is explicit.
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_global_mode_still_overrides_the_what_l2_default(self):
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", global_mode="grounded",
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+
+    def test_unlisted_layer_defaults_to_the_safest_mode(self):
+        # Any future layer not yet in the default table must fail safe
+        # (skeleton -- no claims) rather than silently inherit how_l2's
+        # grounded default.
+        result = ss.resolve_content_mode("some_future_kind", "some_future_layer")
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+
+class ContentModeCapMatrixTests(unittest.TestCase):
+    """The (layer, kind) ceiling matrix (proposal Sec 4.4), corrected by
+    adversarial-review F4 (keyed on (layer, kind), not kind alone --
+    context_md is written under both what_l2 and how_l2 with different
+    ceilings) and F15 (v1 simplification: the "augmented, restricted"
+    distinction for CONTEXT.md/architecture overview can't be
+    linted/enforced, so v1 caps everything except how_l2's
+    coding_standards/testing_guidelines at grounded). content_mode =
+    min(requested, cap) -- these tests always request "augmented" (the
+    highest mode) so the cap is what's under test, not precedence.
+    """
+
+    def test_how_l2_coding_standards_reaches_augmented(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_how_l2_testing_guidelines_reaches_augmented(self):
+        result = ss.resolve_content_mode(
+            "testing_guidelines", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_how_l2_context_md_caps_at_grounded(self):
+        # F15: the "restricted" carve-out for CONTEXT.md can't be
+        # enforced automatically, so v1 caps it at grounded even though
+        # the original proposal draft allowed "augmented, restricted".
+        result = ss.resolve_content_mode(
+            "context_md", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_how_l2_architecture_overview_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "architecture_overview", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_how_l2_interface_boundary_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "interface_boundary", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_what_l2_context_md_caps_at_grounded_regardless_of_kind(self):
+        # F4: What-L2 is always capped at grounded, whatever kind name is
+        # used -- context_md is the exact kind name that collides with
+        # the how_l2 row above, so this pins the layer (not just the
+        # kind string) as the discriminator.
+        result = ss.resolve_content_mode(
+            "context_md", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_what_l2_requirements_overview_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_cap_never_upgrades_a_lower_request(self):
+        # A cap is a ceiling, never a floor -- requesting skeleton under a
+        # kind capped at augmented must still yield skeleton.
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="skeleton",
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_grounded_request_under_augmented_cap_is_unaffected(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_unknown_layer_kind_pair_defaults_to_grounded_cap(self):
+        # Anything not explicitly listed in the cap matrix caps at
+        # grounded -- v1 has no uncapped (layer, kind) pair.
+        result = ss.resolve_content_mode(
+            "some_future_kind", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+
+class ContentModeEvidenceGateTests(unittest.TestCase):
+    """The evidence gate (proposal Sec 6.2): a requested/capped mode above
+    skeleton collapses to skeleton when its kind lacks grounded-mode
+    evidence. `evidence` is the dict probe_size() already returns
+    (`greenfield`, `grounded_viable` keyed by GROUNDED_VIABLE_KINDS) --
+    resolve_content_mode() takes it as-is, no adapter needed.
+    """
+
+    def _evidence(self, greenfield=False, **grounded_viable):
+        return {"greenfield": greenfield, "grounded_viable": grounded_viable}
+
+    def test_no_evidence_argument_never_downgrades(self):
+        # Callers that haven't run probe-evidence yet (or don't need to,
+        # e.g. tests above) get pre-P1 behaviour: no evidence gate applied.
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+
+    def test_viable_kind_is_not_downgraded(self):
+        evidence = self._evidence(coding_standards=True)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_non_viable_kind_collapses_to_skeleton(self):
+        evidence = self._evidence(coding_standards=False)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_non_viable_kind_does_not_affect_a_different_kind(self):
+        # testing_guidelines lacking evidence must not collapse a
+        # coding_standards resolution in the same run.
+        evidence = self._evidence(coding_standards=True, testing_guidelines=False)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_greenfield_collapses_every_kind_to_skeleton(self):
+        # TASK-0303 (plan doc): "Greenfield downgrades every kind to
+        # skeleton" -- unconditional, even for coding_standards/
+        # testing_guidelines whose grounded_viable happens to read True
+        # (greenfield always wins; Sec 6.2).
+        evidence = self._evidence(
+            greenfield=True, coding_standards=True, testing_guidelines=True,
+        )
+        for kind in ("coding_standards", "testing_guidelines", "context_md"):
+            result = ss.resolve_content_mode(
+                kind, "how_l2", prompt_override="augmented", evidence=evidence,
+            )
+            self.assertEqual(result["content_mode"], "skeleton", kind)
+            self.assertIsNotNone(result["mode_reason"])
+
+    def test_kind_outside_grounded_viable_kinds_is_viable_unless_greenfield(self):
+        # context_md/interface_boundary/architecture_overview have no
+        # entry in GROUNDED_VIABLE_KINDS -- they're evidenced by the
+        # module/interface's own existence, so they're viable whenever the
+        # repo isn't greenfield, with no signal dict entry needed for them.
+        evidence = self._evidence()
+        result = ss.resolve_content_mode(
+            "context_md", "how_l2", prompt_override="grounded", evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_requesting_skeleton_is_never_gated(self):
+        # skeleton mode makes no claims to evidence -- the gate only ever
+        # applies to grounded/augmented.
+        evidence = self._evidence(greenfield=True)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="skeleton",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNone(result["mode_reason"])
 
 
 if __name__ == "__main__":

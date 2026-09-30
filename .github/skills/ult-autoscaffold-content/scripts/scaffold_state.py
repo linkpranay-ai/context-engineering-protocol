@@ -1465,14 +1465,150 @@ def _path_is_contained(candidate, root):
     return candidate_parts[:len(root_parts)] == root_parts
 
 
+# --------------------------------------------------------------------------- #
+# TASK-0303 (AutoScaffold_Mode_Plan.md Phase 3 / P1): content-mode           #
+# resolution -- REQ-001's precedence chain, Sec 4.4's (layer, kind) cap      #
+# matrix (F4/F15-corrected), and Sec 6.2's evidence gate. See TASK-0301's    #
+# test classes (ContentModePrecedenceTests, DefaultModeByLayerTests,        #
+# ContentModeCapMatrixTests, ContentModeEvidenceGateTests) for the full     #
+# behavioral contract this implements.                                      #
+# --------------------------------------------------------------------------- #
+
+CONTENT_MODES = ("skeleton", "grounded", "augmented")
+CONTENT_MODE_RANK = {mode: rank for rank, mode in enumerate(CONTENT_MODES)}
+
+# Precedence level 4 (REQ-001): the per-kind default when no
+# prompt/config/global value applies. Deliberately per-LAYER, not one flat
+# constant -- TASK-0303's own wording ("Default What-L2 overview to
+# skeleton") only makes sense that way. how_l2 (today's only implemented
+# packet layer) keeps continuing pre-P1 behaviour (every how_l2 packet
+# already shipped grounded content unconditionally); what_l2 has no
+# packet-generation path in this release, so it defaults low rather than
+# volunteering content for a layer that isn't built yet. Looked up with
+# `.get(layer, "skeleton")` -- any future, not-yet-listed layer fails safe
+# to the same conservative default as what_l2.
+DEFAULT_MODE_BY_LAYER = {"how_l2": "grounded", "what_l2": "skeleton"}
+
+# Sec 4.4's ceiling matrix, corrected by adversarial-review F4 (keyed on
+# (layer, kind), not kind alone -- context_md means something different
+# under how_l2 vs. what_l2) and F15 (the original proposal's "augmented,
+# restricted" carve-out for CONTEXT.md/architecture-overview can't be
+# linted/enforced, so v1 ships only these two pairs able to reach
+# "augmented" at all). Any (layer, kind) pair not listed here -- including
+# every what_l2 pair, whatever its kind -- caps at "grounded" via
+# `_mode_cap()`'s `.get(..., "grounded")` default: v1 has no uncapped pair.
+MODE_CAP_BY_LAYER_KIND = {
+    ("how_l2", "coding_standards"): "augmented",
+    ("how_l2", "testing_guidelines"): "augmented",
+}
+
+
+def _mode_cap(layer, kind):
+    return MODE_CAP_BY_LAYER_KIND.get((layer, kind), "grounded")
+
+
+def _kind_grounded_viable(kind, evidence):
+    """True if `kind` has grounded-mode evidence, per probe_size()'s own
+    `evidence` shape (`greenfield`, `grounded_viable` keyed by
+    GROUNDED_VIABLE_KINDS) -- no adapter needed at the call site. Greenfield
+    always wins (Sec 6.2: "greenfield downgrades every kind to skeleton"),
+    even for a kind whose own `grounded_viable` entry happens to read True.
+    A kind outside GROUNDED_VIABLE_KINDS (context_md, interface_boundary,
+    architecture_overview) has no independent signal of its own -- it's
+    evidenced by the module/interface's own existence, so it's viable
+    whenever the repo isn't greenfield."""
+    if evidence.get("greenfield"):
+        return False
+    per_kind = evidence.get("grounded_viable") or {}
+    if kind in GROUNDED_VIABLE_KINDS:
+        return bool(per_kind.get(kind))
+    return True
+
+
+def resolve_content_mode(kind, layer=PACKET_LAYER, *, prompt_override=None,
+                          config_overrides=None, global_mode=None, evidence=None):
+    """REQ-001's precedence chain for one (layer, kind) pair: explicit
+    prompt override > per-(layer, kind) config override > the config's
+    global `content_mode` > the per-layer default (DEFAULT_MODE_BY_LAYER).
+    The winning value is then capped by Sec 4.4's (layer, kind) ceiling
+    (MODE_CAP_BY_LAYER_KIND / `_mode_cap()`) and, unless `evidence` is
+    omitted entirely (pre-P1 callers that haven't run probe_size() get no
+    gate at all), collapsed to "skeleton" when Sec 6.2's evidence gate
+    finds the kind isn't grounded-viable.
+
+    Returns {"content_mode_requested": ..., "content_mode": ...,
+    "mode_reason": str or None} -- `mode_reason` is set exactly when the
+    cap or the evidence gate changed the requested value, explaining why.
+
+    Raises ValueError if any of prompt_override, config_overrides[kind], or
+    global_mode is given but isn't one of CONTENT_MODES -- validated before
+    precedence is resolved, and scoped to only the entries relevant to this
+    (layer, kind) call: an invalid value under a *different* kind's config
+    override must not raise here."""
+    config_overrides = config_overrides or {}
+    kind_override = config_overrides.get(kind)
+    for label, value in (
+        ("prompt_override", prompt_override),
+        ("config_overrides[{!r}]".format(kind), kind_override),
+        ("global_mode", global_mode),
+    ):
+        if value is not None and value not in CONTENT_MODE_RANK:
+            raise ValueError(
+                "invalid content mode {!r} for {} -- must be one of {}".format(
+                    value, label, CONTENT_MODES
+                )
+            )
+
+    if prompt_override is not None:
+        requested = prompt_override
+    elif kind_override is not None:
+        requested = kind_override
+    elif global_mode is not None:
+        requested = global_mode
+    else:
+        requested = DEFAULT_MODE_BY_LAYER.get(layer, "skeleton")
+
+    effective = requested
+    reason = None
+
+    cap = _mode_cap(layer, kind)
+    if CONTENT_MODE_RANK[effective] > CONTENT_MODE_RANK[cap]:
+        effective = cap
+        reason = "capped at {} ({}/{} ceiling, Sec 4.4)".format(cap, layer, kind)
+
+    if evidence is not None and effective != "skeleton" and not _kind_grounded_viable(kind, evidence):
+        effective = "skeleton"
+        if evidence.get("greenfield"):
+            reason = "downgraded to skeleton: repo is greenfield (Sec 6.2)"
+        else:
+            reason = (
+                "downgraded to skeleton: no grounded-mode evidence for {} "
+                "(Sec 6.2)".format(kind)
+            )
+
+    return {
+        "content_mode_requested": requested,
+        "content_mode": effective,
+        "mode_reason": reason,
+    }
+
+
 def _make_packet(kind, packet_id, module_id, tier, output_path, must_cite,
-                  evidence_hints, read_budget, head_commit):
+                  evidence_hints, read_budget, head_commit, *,
+                  prompt_override=None, config_overrides=None,
+                  global_mode=None, evidence=None):
     """Assemble one Sec 5.2 work-packet dict from already-resolved,
-    kind-specific inputs. Every schema field always present, with P0a's
-    fixed `effective_mode: "grounded"` compatibility default and
-    `mode_reason: null` -- P1 is what adds real requested-mode selection
-    and cap-matrix precedence (Sec 4.2); `plan` doesn't guess at that
-    logic early."""
+    kind-specific inputs. Every schema field always present. `content_mode`
+    (and `content_mode_requested`/`mode_reason` alongside it) comes from
+    `resolve_content_mode()` (TASK-0303) -- callers that pass none of
+    prompt_override/config_overrides/global_mode/evidence get exactly
+    that function's own no-input default for `layer` (PACKET_LAYER here),
+    which for how_l2 is "grounded", matching pre-P1 behaviour."""
+    mode = resolve_content_mode(
+        kind, PACKET_LAYER, prompt_override=prompt_override,
+        config_overrides=config_overrides, global_mode=global_mode,
+        evidence=evidence,
+    )
     return {
         "packet_id": packet_id,
         "layer": PACKET_LAYER,
@@ -1481,8 +1617,9 @@ def _make_packet(kind, packet_id, module_id, tier, output_path, must_cite,
         "tier": tier,
         "output_path": output_path,
         "template": TEMPLATE_PATH_BY_KIND[kind],
-        "effective_mode": "grounded",
-        "mode_reason": None,
+        "content_mode_requested": mode["content_mode_requested"],
+        "content_mode": mode["content_mode"],
+        "mode_reason": mode["mode_reason"],
         "required_sections": list(REQUIRED_SECTIONS_BY_KIND[kind]),
         "probe_checklist_ref": PROBE_CHECKLIST_REF_BY_KIND[kind],
         "must_cite": list(must_cite),
@@ -1494,7 +1631,10 @@ def _make_packet(kind, packet_id, module_id, tier, output_path, must_cite,
     }
 
 
-def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
+def build_work_packets(state, repo_root, how_l2_path, graph_path=None, *,
+                        content_mode_prompt_override=None,
+                        content_mode_config_overrides=None,
+                        content_mode_global=None):
     """Sec 5.2: one work packet per pending How-L2 document `scan`/the
     repo-doc and interface trackers already selected (module status ==
     "pending" and tier in PACKET_ELIGIBLE_MODULE_TIERS; repo_docs[kind]
@@ -1527,6 +1667,16 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
     and Sec 5.6's containment/uniqueness refusal enforced here at build
     time, in addition to (never instead of) mark-*'s own later runtime
     check on the actual written file.
+
+    TASK-0303: every packet's `content_mode`/`content_mode_requested`/
+    `mode_reason` comes from `resolve_content_mode()`, fed this call's own
+    `content_mode_prompt_override`/`content_mode_config_overrides`/
+    `content_mode_global` (all optional; a caller passing none of them
+    gets exactly resolve_content_mode()'s own how_l2 default, i.e. today's
+    pre-P1 "grounded" behaviour) plus a fresh `probe_size(repo_root)`
+    evidence read for the Sec 6.2 evidence gate -- greenfield or a kind
+    lacking grounded-mode signals collapses that packet to "skeleton"
+    regardless of what was requested.
     """
     repo_root = Path(repo_root)
     how_l2_path = how_l2_path.replace("\\", "/").rstrip("/")
@@ -1536,7 +1686,20 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
     if graph_path:
         graph_evidence = _compute_module_graph_evidence(_load_graph(graph_path))
 
-    signals = probe_size(repo_root)["signals"]
+    probe = probe_size(repo_root)
+    signals = probe["signals"]
+    content_mode_evidence = {
+        "greenfield": probe["greenfield"],
+        "grounded_viable": probe["grounded_viable"],
+    }
+
+    def _resolved_mode_kwargs():
+        return dict(
+            prompt_override=content_mode_prompt_override,
+            config_overrides=content_mode_config_overrides,
+            global_mode=content_mode_global,
+            evidence=content_mode_evidence,
+        )
     repo_doc_must_cite = {
         "coding_standards": sorted(set(
             signals["formatter_config"] + signals["linter_config"]
@@ -1573,6 +1736,7 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
             },
             read_budget=READ_BUDGET_BY_TIER[tier],
             head_commit=head_commit,
+            **_resolved_mode_kwargs()
         ))
 
     repo_docs = state.get("repo_docs") or {}
@@ -1594,6 +1758,7 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
             evidence_hints=dict(_EMPTY_EVIDENCE_HINTS),
             read_budget=READ_BUDGET_REPO_DOC,
             head_commit=head_commit,
+            **_resolved_mode_kwargs()
         ))
 
     for interface in state.get("interfaces", []):
@@ -1616,6 +1781,7 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
             evidence_hints=dict(_EMPTY_EVIDENCE_HINTS),
             read_budget=READ_BUDGET_INTERFACE,
             head_commit=head_commit,
+            **_resolved_mode_kwargs()
         ))
 
     packets.sort(key=lambda p: p["packet_id"])
@@ -2275,10 +2441,10 @@ def validate(repo_root, path, packet):
         )
 
     content_mode = frontmatter.get("content_mode")
-    if content_mode and content_mode != packet["effective_mode"]:
+    if content_mode and content_mode != packet["content_mode"]:
         failures.append(
-            "frontmatter content_mode '{}' does not match packet effective_mode "
-            "'{}'".format(content_mode, packet["effective_mode"])
+            "frontmatter content_mode '{}' does not match packet content_mode "
+            "'{}'".format(content_mode, packet["content_mode"])
         )
 
     doc_kind = frontmatter.get("doc_kind")

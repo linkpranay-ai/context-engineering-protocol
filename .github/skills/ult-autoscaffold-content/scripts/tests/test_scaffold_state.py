@@ -2203,10 +2203,12 @@ def _interface(module_a, module_b, status="pending"):
 
 
 class WorkPacketPlanningTests(unittest.TestCase):
-    """TASK-0103: deterministic packet IDs/content, the P0a fixed
-    effective_mode, output-path uniqueness/containment, must_cite
-    derivation, tier-based soft read budgets, and recorded HEAD commit --
-    against build_work_packets()/`plan` (Sec 5.2)."""
+    """TASK-0103: deterministic packet IDs/content, per-packet content-mode
+    resolution (TASK-0303 -- resolve_content_mode() wired through real
+    probe_size() evidence, so a greenfield fixture downgrades every kind to
+    skeleton), output-path uniqueness/containment, must_cite derivation,
+    tier-based soft read budgets, and recorded HEAD commit -- against
+    build_work_packets()/`plan` (Sec 5.2)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -2276,9 +2278,13 @@ class WorkPacketPlanningTests(unittest.TestCase):
         packets = ss.build_work_packets(state, self.repo_root, "org")
         self.assertEqual([p["module_id"] for p in packets], ["core/"])
 
-    # -- P0a fixed effective_mode --------------------------------------- #
+    # -- TASK-0303 real content-mode resolution ------------------------- #
 
-    def test_effective_mode_is_fixed_to_grounded_for_every_kind(self):
+    def test_greenfield_repo_downgrades_every_packet_to_skeleton(self):
+        # self.repo_root is a genuinely empty tmp dir, so probe_size()
+        # reports greenfield=True and resolve_content_mode() collapses
+        # every kind's default ("grounded" for how_l2) down to skeleton,
+        # recording a non-None mode_reason (Sec 6.2, TASK-0303).
         state = self._state(
             modules=[_module("core/", 1)],
             interfaces=[_interface("core", "utils")],
@@ -2286,8 +2292,9 @@ class WorkPacketPlanningTests(unittest.TestCase):
         packets = ss.build_work_packets(state, self.repo_root, "org")
         self.assertEqual(len(packets), 2)
         for packet in packets:
-            self.assertEqual(packet["effective_mode"], "grounded")
-            self.assertIsNone(packet["mode_reason"])
+            self.assertEqual(packet["content_mode_requested"], "grounded")
+            self.assertEqual(packet["content_mode"], "skeleton")
+            self.assertIsNotNone(packet["mode_reason"])
 
     # -- repo docs (coding_standards / testing_guidelines) --------------- #
 
@@ -2494,7 +2501,7 @@ def _make_doc(packet, sections, frontmatter_overrides=None):
         "generated_by": "ult-autoscaffold-content",
         "generated_at": "2026-09-28",
         "status": "draft",
-        "content_mode": packet["effective_mode"],
+        "content_mode": packet["content_mode"],
         "doc_kind": packet["kind"],
         "skill_version": "2.0.0-dev",
     }
@@ -2533,7 +2540,8 @@ class GeneratedValidationTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -2600,7 +2608,7 @@ class GeneratedValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("status" in f for f in result["failures"]))
 
-    def test_content_mode_mismatch_with_packet_effective_mode_fails(self):
+    def test_content_mode_mismatch_with_packet_content_mode_fails(self):
         doc = _make_doc(self.packet, self.baseline_sections,
                          frontmatter_overrides={"content_mode": "skeleton"})
         path = self._write_doc(doc)
@@ -2866,7 +2874,8 @@ class MarkGeneratedValidationWiringTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3113,7 +3122,8 @@ class FinalFailureStatusTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3360,7 +3370,8 @@ class StalePacketHeadWarningTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3929,7 +3940,7 @@ class ContentModeCapMatrixTests(unittest.TestCase):
     ceilings) and F15 (v1 simplification: the "augmented, restricted"
     distinction for CONTEXT.md/architecture overview can't be
     linted/enforced, so v1 caps everything except how_l2's
-    coding_standards/testing_guidelines at grounded). effective_mode =
+    coding_standards/testing_guidelines at grounded). content_mode =
     min(requested, cap) -- these tests always request "augmented" (the
     highest mode) so the cap is what's under test, not precedence.
     """
