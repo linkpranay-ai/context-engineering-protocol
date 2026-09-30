@@ -35,7 +35,13 @@ that template's own per-section evidence comments:
 - **`module_a` / `module_b`**: from the interface entry, verbatim.
 - **Relations observed**: the `relations` and `weight` fields, stated as
   what they are — a count of graph-observed dependency edges, not a claim
-  about the interface's actual API surface.
+  about the interface's actual API surface. `validate()` still requires
+  this section to carry a real `[src: path#Lx-Ly]` citation or a
+  `Not evidenced...` gap line like every other required section — the
+  graph fact alone does not exempt it. Reuse one concrete citation you are
+  about to write into **Contract** anyway (the same import/call site that
+  makes the relation kind true) rather than running a second probe; do not
+  leave this section citation-free.
 - **Contract**: cite an actual import/include statement or call
   expression connecting the two modules. Use `evidence_hints.call_sites`
   when the packet has populated it (from `list-interfaces --with-sites`);
