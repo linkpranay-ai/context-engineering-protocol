@@ -2,6 +2,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Local Claude Code state (per-machine settings, and worktrees this tool
+# creates under .claude/worktrees/ for isolated agent runs) - never shared
+# project config, never intended to be committed.
+.claude/
+
 # md_index.py build artifacts embed the local machine's absolute filesystem
 # path in their "root" field - never commit these (see
 # starter_kits/context_engineering/context-config.yaml.template).
