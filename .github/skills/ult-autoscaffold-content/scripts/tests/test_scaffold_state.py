@@ -3766,5 +3766,267 @@ class ListInterfacesWithSitesCLITests(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+class ContentModePrecedenceTests(unittest.TestCase):
+    """TASK-0301 (AutoScaffold_Mode_Plan.md Phase 3 / P1). REQ-001's
+    precedence chain for `content_mode_requested`, resolved by
+    `resolve_content_mode(kind, layer, prompt_override=, config_overrides=,
+    global_mode=)`, highest wins:
+
+      1. prompt_override      -- explicit instruction this run
+      2. config_overrides[kind] -- per-(layer, kind) config override
+      3. global_mode          -- the config's global content_mode value
+      4. DEFAULT_CONTENT_MODE -- "grounded" (proposal Sec 9.1: absent means
+         grounded, matching today's pre-P1 behaviour)
+
+    These tests pin the requested-mode winner only -- they use
+    coding_standards under how_l2, the one (layer, kind) pair whose cap is
+    "augmented" (Sec 4.4/F15), so the cap never masks the precedence
+    result. Cap and evidence-gate clamping are covered separately by
+    ContentModeCapMatrixTests and ContentModeEvidenceGateTests.
+    """
+
+    def test_no_inputs_defaults_to_grounded(self):
+        result = ss.resolve_content_mode("coding_standards", ss.PACKET_LAYER)
+        self.assertEqual(result["content_mode_requested"], "grounded")
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_global_mode_beats_default(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER, global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_config_override_beats_global_mode(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"coding_standards": "augmented"},
+            global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "augmented")
+
+    def test_config_override_only_applies_to_its_own_kind(self):
+        # A testing_guidelines override must not leak into a
+        # coding_standards resolution -- overrides are per-(layer, kind).
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"testing_guidelines": "augmented"},
+            global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_prompt_override_beats_everything(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            prompt_override="skeleton",
+            config_overrides={"coding_standards": "augmented"},
+            global_mode="augmented",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_invalid_prompt_override_raises_before_resolving(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER, prompt_override="thorough",
+            )
+
+    def test_invalid_config_override_raises(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER,
+                config_overrides={"coding_standards": "verbose"},
+            )
+
+    def test_invalid_global_mode_raises(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER, global_mode="full",
+            )
+
+    def test_config_override_for_a_different_kind_does_not_raise(self):
+        # An invalid value under a kind that isn't being resolved right now
+        # must not block this resolution -- only the entry actually in play
+        # is validated.
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"testing_guidelines": "not-a-mode"},
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+
+
+class ContentModeCapMatrixTests(unittest.TestCase):
+    """The (layer, kind) ceiling matrix (proposal Sec 4.4), corrected by
+    adversarial-review F4 (keyed on (layer, kind), not kind alone --
+    context_md is written under both what_l2 and how_l2 with different
+    ceilings) and F15 (v1 simplification: the "augmented, restricted"
+    distinction for CONTEXT.md/architecture overview can't be
+    linted/enforced, so v1 caps everything except how_l2's
+    coding_standards/testing_guidelines at grounded). effective_mode =
+    min(requested, cap) -- these tests always request "augmented" (the
+    highest mode) so the cap is what's under test, not precedence.
+    """
+
+    def test_how_l2_coding_standards_reaches_augmented(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_how_l2_testing_guidelines_reaches_augmented(self):
+        result = ss.resolve_content_mode(
+            "testing_guidelines", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_how_l2_context_md_caps_at_grounded(self):
+        # F15: the "restricted" carve-out for CONTEXT.md can't be
+        # enforced automatically, so v1 caps it at grounded even though
+        # the original proposal draft allowed "augmented, restricted".
+        result = ss.resolve_content_mode(
+            "context_md", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_how_l2_architecture_overview_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "architecture_overview", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_how_l2_interface_boundary_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "interface_boundary", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_what_l2_context_md_caps_at_grounded_regardless_of_kind(self):
+        # F4: What-L2 is always capped at grounded, whatever kind name is
+        # used -- context_md is the exact kind name that collides with
+        # the how_l2 row above, so this pins the layer (not just the
+        # kind string) as the discriminator.
+        result = ss.resolve_content_mode(
+            "context_md", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_what_l2_requirements_overview_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_cap_never_upgrades_a_lower_request(self):
+        # A cap is a ceiling, never a floor -- requesting skeleton under a
+        # kind capped at augmented must still yield skeleton.
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="skeleton",
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_grounded_request_under_augmented_cap_is_unaffected(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_unknown_layer_kind_pair_defaults_to_grounded_cap(self):
+        # Anything not explicitly listed in the cap matrix caps at
+        # grounded -- v1 has no uncapped (layer, kind) pair.
+        result = ss.resolve_content_mode(
+            "some_future_kind", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+
+class ContentModeEvidenceGateTests(unittest.TestCase):
+    """The evidence gate (proposal Sec 6.2): a requested/capped mode above
+    skeleton collapses to skeleton when its kind lacks grounded-mode
+    evidence. `evidence` is the dict probe_size() already returns
+    (`greenfield`, `grounded_viable` keyed by GROUNDED_VIABLE_KINDS) --
+    resolve_content_mode() takes it as-is, no adapter needed.
+    """
+
+    def _evidence(self, greenfield=False, **grounded_viable):
+        return {"greenfield": greenfield, "grounded_viable": grounded_viable}
+
+    def test_no_evidence_argument_never_downgrades(self):
+        # Callers that haven't run probe-evidence yet (or don't need to,
+        # e.g. tests above) get pre-P1 behaviour: no evidence gate applied.
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+
+    def test_viable_kind_is_not_downgraded(self):
+        evidence = self._evidence(coding_standards=True)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_non_viable_kind_collapses_to_skeleton(self):
+        evidence = self._evidence(coding_standards=False)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_non_viable_kind_does_not_affect_a_different_kind(self):
+        # testing_guidelines lacking evidence must not collapse a
+        # coding_standards resolution in the same run.
+        evidence = self._evidence(coding_standards=True, testing_guidelines=False)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_greenfield_collapses_every_kind_to_skeleton(self):
+        # TASK-0303 (plan doc): "Greenfield downgrades every kind to
+        # skeleton" -- unconditional, even for coding_standards/
+        # testing_guidelines whose grounded_viable happens to read True
+        # (greenfield always wins; Sec 6.2).
+        evidence = self._evidence(
+            greenfield=True, coding_standards=True, testing_guidelines=True,
+        )
+        for kind in ("coding_standards", "testing_guidelines", "context_md"):
+            result = ss.resolve_content_mode(
+                kind, "how_l2", prompt_override="augmented", evidence=evidence,
+            )
+            self.assertEqual(result["content_mode"], "skeleton", kind)
+            self.assertIsNotNone(result["mode_reason"])
+
+    def test_kind_outside_grounded_viable_kinds_is_viable_unless_greenfield(self):
+        # context_md/interface_boundary/architecture_overview have no
+        # entry in GROUNDED_VIABLE_KINDS -- they're evidenced by the
+        # module/interface's own existence, so they're viable whenever the
+        # repo isn't greenfield, with no signal dict entry needed for them.
+        evidence = self._evidence()
+        result = ss.resolve_content_mode(
+            "context_md", "how_l2", prompt_override="grounded", evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_requesting_skeleton_is_never_gated(self):
+        # skeleton mode makes no claims to evidence -- the gate only ever
+        # applies to grounded/augmented.
+        evidence = self._evidence(greenfield=True)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="skeleton",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNone(result["mode_reason"])
+
+
 if __name__ == "__main__":
     unittest.main()
