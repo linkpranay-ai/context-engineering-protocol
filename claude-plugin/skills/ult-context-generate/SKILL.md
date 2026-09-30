@@ -194,6 +194,25 @@ repo's own `output_docs_structure/Requirements/`, `output_docs_structure/Designs
 via D20's per-slot override) rejoin the What-L2 corpus without adopting
 `workspace_root`'s single-root shape.
 
+**Autoscaffold-content drafts (`autoscaffold_content`):** a document whose
+frontmatter carries `generated_by: ult-autoscaffold-content` is a draft, not a
+ground-truth source, regardless of which layer (What-L2 in Step 5, or the
+constraints compilation in Step 5.5) surfaces it — see
+`scripts/draft_coverage.py` and Steps 5/5.5/6 below for the fail-closed rules
+this drives. The one project setting under this namespace:
+`include_external_suggestions` (default `false`). When `false` (or the
+key/section is absent), any `cep:ext` provenance-marked block (external,
+not-from-this-repo suggestions that only appear in `content_mode: augmented`
+drafts) is dropped
+entirely before its content reaches context assembly. When `true`, each
+`cep:ext` block instead becomes a normal context item with `layer:
+llm-generated`, `confidence: SUGGESTED`, feeding the existing SUGGESTED
+reviewer block (see Step 7.2/Step 9's `confidence: SUGGESTED` handling) —
+regardless of the marker's own `confidence=` attribute, which records model
+provenance, not a trust level to inherit. This flag has no effect on the
+non-`cep:ext` body of a draft; that is always governed by the
+skeleton/draft_coverage/reviewed rules above, never by this flag.
+
 **How-L1 (`how_l1`):** when `enabled: true`, `path` points at a directory of
 `.md` files (default `org/process-standards/`) that Step 2.1 indexes with the
 same `scripts/md_index.py` mechanism as What-L1, at `index_path` (default
@@ -568,16 +587,49 @@ continuing.
   4. Extract requirements/status from the sections read, same as direct-read
      mode.
 
+**Autoscaffold-drafted sources — fail-closed classification
+(`scripts/draft_coverage.py`):** before recording a matched section as a
+requirement, parse the containing file's frontmatter. If it carries
+`generated_by: ult-autoscaffold-content`, do not treat the match as an
+ordinary requirement — call
+`draft_coverage.classify_l2_match_with_review(frontmatter, section_text,
+is_generated_path)` (`is_generated_path` resolves a `[src: ...]` citation's
+path against the autoscaffold-content output slot) and record per its result:
+- `{"coverage": False, ...}` (skeleton mode, or no citation to a
+  non-generated file): do not record a requirement for this section at all —
+  it contributes nothing, exactly as if no section had matched.
+- `{"coverage": True, "confidence": "INFERRED", "clears_gap": False, ...}`
+  (a non-skeleton draft citing real repo content, not yet reviewed): record
+  the requirement as usual but with `layer: draft_coverage`, `confidence:
+  INFERRED`, and do **not** count it toward `l2_coverage` for this aspect —
+  Step 7 must still see this as a candidate gap.
+- `{"coverage": True, "confidence": "EXTRACTED", "clears_gap": True, ...}`
+  (the draft has `status: reviewed` and `reviewed_by`, and cites real repo
+  content): record it as an ordinary `confidence: EXTRACTED` requirement and
+  count it toward `l2_coverage`, same as a non-autoscaffold match.
+
+For any file *not* carrying `generated_by: ult-autoscaffold-content`, extract
+and record exactly as before (`classify_l2_match_with_review` reports
+`{"coverage": False, "reason": "not-autoscaffold"}` and is a no-op — this
+path is unaffected).
+
 For each relevant requirement found, record:
 - File name and section heading (becomes the `source` field)
 - Requirement text (becomes the `summary` field)
 - Status (Implemented / Partial / Not implemented — if stated)
 - Which aspect it addresses
+- `layer`/`confidence` as classified above (omit `layer` for a normal,
+  non-autoscaffold match — its implicit layer is the What-L2 requirements
+  layer itself)
 
-**Record coverage:** for each aspect, set `l2_coverage[aspect.aspect_id] = true` if
-at least one relevant section was found (either mode), else `false`. Step 7
-uses this per-aspect map for gap detection — do not collapse it into a single
-feature-wide yes/no.
+**Record coverage:** for each aspect, set `l2_coverage[aspect.aspect_id] = true`
+only if at least one relevant section was found (either mode) **and** that
+match's classification above counted toward `l2_coverage` (i.e. it was not an
+unreviewed `draft_coverage`/`INFERRED` match, and not a `coverage: False`
+autoscaffold draft) — else `false`. A feature backed only by unreviewed
+autoscaffold drafts must still reach Step 7 as a candidate gap, not read as
+covered. Step 7 uses this per-aspect map for gap detection — do not collapse
+it into a single feature-wide yes/no.
 
 **If `what_l2.path` does not exist or contains no `.md` files:**
 `l2_coverage[aspect.aspect_id] = false` for every aspect. Proceed to Step 5.5.
@@ -599,6 +651,24 @@ Full model: see `PROTOCOL.md` §2.1 ("The third dimension: Constraints").
 
    **If present:** read it fully.
 
+   **Autoscaffold-drafted source — fail-closed classification (same rule as
+   Step 5; `scripts/draft_coverage.py`):**
+   parse COMPILED-GUIDELINES.md's own frontmatter. If it carries `generated_by:
+   ult-autoscaffold-content`, every entry loaded in steps 2–3 below is a draft
+   constraint, not a ground-truth one — apply
+   `draft_coverage.classify_l2_match_with_review(frontmatter, entry_text,
+   is_generated_path)` per `## Global`/scoped entry exactly as Step 5 does per
+   requirement section, and follow the same three outcomes: a `coverage:
+   False` entry (skeleton, or no citation to a non-generated file) is not
+   loaded as a context item at all; a `draft_coverage`/`INFERRED` entry is
+   loaded but flagged `layer: draft_coverage` (never plain `constraints`) and
+   does not stand in for a completed `compiling-project-guidelines` run for
+   any decision gated on that; a reviewed (`status: reviewed` +
+   `reviewed_by`) and cited entry is loaded as an ordinary `confidence:
+   EXTRACTED` constraint. If COMPILED-GUIDELINES.md does not carry
+   `generated_by: ult-autoscaffold-content`, this has no effect — proceed as
+   before.
+
 2. Load the `## Global` section **wholesale** — these apply regardless of feature
    scope. Do not relevance-filter them the way What-L2/L3 items are filtered.
 
@@ -610,13 +680,14 @@ Full model: see `PROTOCOL.md` §2.1 ("The third dimension: Constraints").
 4. Record each loaded entry as a context item:
    ```yaml
    - id: ctx_<NNN>
-     layer: constraints
+     layer: constraints  # draft_coverage instead, per the classification above,
+                          # for an unreviewed autoscaffold-drafted entry
      source: "starter_kit/project_guidelines/COMPILED-GUIDELINES.md (<Global|scope label>)"
      type: constraint
      constraint_class: compliance | convention | scheduling  # as tagged in the source;
                                                                # default convention if untagged
      scope: <Global | path-glob>
-     confidence: EXTRACTED
+     confidence: EXTRACTED  # INFERRED instead for an unreviewed autoscaffold-drafted entry
      summary: >
        <the guidance, faithfully paraphrased>
    ```
@@ -671,6 +742,21 @@ For each requirement that also has a corresponding code implementation:
 
 **Do not flag terminology differences.** Only flag genuine contradictions where both
 cannot simultaneously be true.
+
+**Anti-circularity guard (`draft_coverage.can_corroborate_what_l3`):**
+before treating an L2 match
+as agreeing with (or otherwise corroborating) an L3 finding, check the L2
+source document's frontmatter. If it carries `generated_by:
+ult-autoscaffold-content`, it **can never corroborate** that What-L3 finding —
+`can_corroborate_what_l3(frontmatter)` returns `False` regardless of
+`content_mode`, `status`, or review — because both the draft and the L3
+finding ultimately trace back to the same code graph, so agreement between
+them proves nothing independent. This is unconditional: unlike the
+`draft_coverage`/`INFERRED` cap in Step 5/5.5, a `status: reviewed` +
+`reviewed_by` autoscaffold draft still cannot corroborate What-L3 — review
+raises a cited draft's own confidence, it does not turn a derived document
+into an independent source. Only compare a non-autoscaffold-generated L2
+requirement against What-L3 for this step's genuine-contradiction check.
 
 **2. Constraint conflicts** (`conflict_type: constraint-lateral` or
 `constraint-vertical`)

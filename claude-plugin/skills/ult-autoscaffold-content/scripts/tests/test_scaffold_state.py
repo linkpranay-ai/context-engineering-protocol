@@ -6,9 +6,15 @@ with scaffold_state.py itself. Run with:
     python -m unittest discover -s scripts/tests -v
 """
 
+import argparse
+import contextlib
+import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -275,6 +281,242 @@ class ProbeSizeTests(unittest.TestCase):
             self.assertEqual(result["classification"], "small")
 
 
+class ProbeSizeEvidenceSignalsTests(unittest.TestCase):
+    """The evidence gate: probe-size grows a `signals` dict
+    (formatter/linter config, dev-workflow wrapper scripts, test config,
+    ci, contributing, tool_versions) plus `grounded_viable` (a dict keyed
+    by GROUNDED_VIABLE_KINDS) and `greenfield` (a bool). TASK-0101/0102.
+    Field names/shapes here match the evidence gate's own illustration
+    exactly -- coding_standards/testing_guidelines/requirements_overview
+    each depend only on whether their own signals are present, never a
+    count threshold (unlike classification/count
+    above), so several tests here specifically pin that independence from
+    MIN_FILES_FOR_SIZE_GATE and friends.
+    """
+
+    def test_signals_all_empty_and_greenfield_true_on_source_free_repo(self):
+        # A source-free repo (nothing at all, not even a .git) must return
+        # fully deterministic, non-crashing values -- every signal list
+        # empty, tool_versions an empty dict, greenfield True, every
+        # grounded_viable kind False.
+        with tempfile.TemporaryDirectory() as d:
+            result = ss.probe_size(Path(d))
+            self.assertTrue(result["greenfield"])
+            signals = result["signals"]
+            for key in (
+                "formatter_config", "linter_config", "wrapper_scripts",
+                "test_config", "ci", "contributing",
+            ):
+                self.assertEqual(signals[key], [], key)
+            self.assertEqual(signals["tool_versions"], {})
+            self.assertEqual(
+                result["grounded_viable"],
+                {"coding_standards": False, "testing_guidelines": False,
+                 "requirements_overview": False},
+            )
+
+    def test_existing_fields_unchanged_shape_alongside_new_ones(self):
+        # Backward compatibility: TASK-0102 must not disturb probe_size()'s
+        # pre-existing return shape for callers that only look at these.
+        with tempfile.TemporaryDirectory() as d:
+            result = ss.probe_size(Path(d))
+            self.assertEqual(result["count"], 0)
+            self.assertEqual(result["classification"], "small")
+            self.assertEqual(result["substantive_modules"], [])
+
+    def test_greenfield_false_when_any_real_file_exists_under_a_module_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.py", "print('hi')")
+            result = ss.probe_size(root)
+            self.assertFalse(result["greenfield"])
+            self.assertTrue(result["grounded_viable"]["requirements_overview"])
+
+    def test_requirements_overview_viability_independent_of_size_gate_threshold(self):
+        # A single loose top-level file is real evidence even though it
+        # never clears MIN_FILES_FOR_SIZE_GATE and count/classification
+        # stay at their all-empty defaults -- grounded_viable must not be
+        # gated by that threshold at all (TASK-0102's explicit requirement).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "README.md", "# hello")
+            result = ss.probe_size(root)
+            self.assertEqual(result["count"], 0)
+            self.assertEqual(result["classification"], "small")
+            self.assertTrue(result["grounded_viable"]["requirements_overview"])
+            self.assertFalse(result["greenfield"])
+
+    def test_dotfile_only_repo_still_counts_as_greenfield(self):
+        # A lone tooling dotfile (.clang-format) with no real project
+        # content anywhere is still "greenfield" for requirements_overview
+        # purposes -- it shows up in signals.formatter_config (real
+        # evidence for a must_cite list, and enough on its own to make
+        # coding_standards viable), but does not by itself supply general
+        # project content. Mirrors _prune_ignored()'s existing
+        # dot-directory exclusion for the same underlying reason (tooling
+        # scaffolding isn't project content).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / ".clang-format", "BasedOnStyle: Google")
+            result = ss.probe_size(root)
+            self.assertTrue(result["greenfield"])
+            self.assertFalse(result["grounded_viable"]["requirements_overview"])
+            self.assertTrue(result["grounded_viable"]["coding_standards"])
+            self.assertEqual(result["signals"]["formatter_config"], [".clang-format"])
+
+    def test_formatter_config_detected_and_makes_coding_standards_viable(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.py", "x")
+            _write(root / ".clang-format", "BasedOnStyle: Google")
+            _write(root / ".prettierrc", "{}")
+            result = ss.probe_size(root)
+            self.assertEqual(
+                result["signals"]["formatter_config"], [".clang-format", ".prettierrc"]
+            )
+            self.assertTrue(result["grounded_viable"]["coding_standards"])
+
+    def test_linter_config_detected(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / "CPPLINT.cfg", "set noparent")
+            result = ss.probe_size(root)
+            self.assertEqual(result["signals"]["linter_config"], ["CPPLINT.cfg"])
+            self.assertTrue(result["grounded_viable"]["coding_standards"])
+
+    def test_wrapper_scripts_detected_includes_test_sh_not_test_config(self):
+        # Sec 4.3's own illustration groups "test.sh" under wrapper_scripts
+        # alongside "format.sh", distinct from test_config's build-system
+        # registration markers -- pinned here so a future edit can't
+        # silently move it back.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / "format.sh", "#!/bin/sh\nclang-format -i")
+            _write(root / "test.sh", "#!/bin/sh\nctest")
+            result = ss.probe_size(root)
+            self.assertEqual(result["signals"]["wrapper_scripts"], ["format.sh", "test.sh"])
+            self.assertEqual(result["signals"]["test_config"], [])
+
+    def test_test_config_detected_from_conventional_filenames(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / "pytest.ini", "[pytest]")
+            result = ss.probe_size(root)
+            self.assertEqual(result["signals"]["test_config"], ["pytest.ini"])
+            self.assertTrue(result["grounded_viable"]["testing_guidelines"])
+
+    def test_test_config_detects_cmake_enable_testing_convention(self):
+        # Matches Sec 4.3's own worked-example illustration literally:
+        # test_config for a CMake project surfaces as
+        # "CMakeLists.txt:enable_testing", not a filename.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / "CMakeLists.txt", "project(example_app)\nenable_testing()\n")
+            result = ss.probe_size(root)
+            self.assertEqual(
+                result["signals"]["test_config"], ["CMakeLists.txt:enable_testing"]
+            )
+            self.assertTrue(result["grounded_viable"]["testing_guidelines"])
+
+    def test_cmake_without_enable_testing_yields_no_test_config_signal(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / "CMakeLists.txt", "project(example_app)\n")
+            result = ss.probe_size(root)
+            self.assertEqual(result["signals"]["test_config"], [])
+            self.assertFalse(result["grounded_viable"]["testing_guidelines"])
+
+    def test_ci_signal_detected_from_workflows_dir_and_root_filenames(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / ".github" / "workflows" / "cpp.yml", "name: cpp")
+            _write(root / ".gitlab-ci.yml", "stages: []")
+            result = ss.probe_size(root)
+            # Sorted lexicographically: ".github/..." precedes ".gitlab-ci.yml"
+            # ('h' < 'l' at the first differing character).
+            self.assertEqual(
+                result["signals"]["ci"],
+                [".github/workflows/cpp.yml", ".gitlab-ci.yml"],
+            )
+
+    def test_contributing_signal_detected(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / "CONTRIBUTING.md", "# Contributing\nclang-format >= 8.0.0 required")
+            result = ss.probe_size(root)
+            self.assertEqual(result["signals"]["contributing"], ["CONTRIBUTING.md"])
+
+    def test_tool_versions_cites_locations_mentioning_a_detected_formatter(self):
+        # worked-example-style evidence: .clang-format present, and its name is
+        # mentioned in format.sh, a CI workflow, and CONTRIBUTING.md --
+        # tool_versions should cite every one of those lines, "path:Lline",
+        # not a parsed version number.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / ".clang-format", "BasedOnStyle: Google")
+            _write(root / "format.sh", "#!/bin/sh\nclang-format -i $(find . -name '*.cc')\n")
+            _write(
+                root / ".github" / "workflows" / "cpp.yml",
+                "name: cpp\nrun: clang-format --version\n",
+            )
+            _write(
+                root / "CONTRIBUTING.md",
+                "# Contributing\nRequires clang-format >= 8.0.0\n",
+            )
+            result = ss.probe_size(root)
+            self.assertEqual(
+                result["signals"]["tool_versions"],
+                {
+                    "clang-format": [
+                        "format.sh:L2",
+                        ".github/workflows/cpp.yml:L2",
+                        "CONTRIBUTING.md:L2",
+                    ]
+                },
+            )
+
+    def test_tool_versions_empty_when_no_mapped_formatter_or_linter_present(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / "format.sh", "#!/bin/sh\nclang-format -i\n")
+            result = ss.probe_size(root)
+            # format.sh mentions clang-format, but with no .clang-format
+            # (or other mapped config) present there is no tool to cite
+            # locations for -- tool_versions stays empty, not guessed.
+            self.assertEqual(result["signals"]["tool_versions"], {})
+
+    def test_tool_versions_empty_when_tool_name_mentioned_nowhere(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write(root / "core" / "main.cc", "x")
+            _write(root / ".clang-format", "BasedOnStyle: Google")
+            _write(root / "format.sh", "#!/bin/sh\necho building\n")
+            result = ss.probe_size(root)
+            self.assertEqual(result["signals"]["tool_versions"], {})
+
+    def test_missing_repo_root_returns_deterministic_greenfield_signals(self):
+        # Mirrors _top_level_candidate_dirs()'s own "missing root returns
+        # empty" posture -- probe_size must not raise for a nonexistent
+        # --repo-root, same as the pre-existing count/classification path.
+        result = ss.probe_size("/does/not/exist/anywhere")
+        self.assertTrue(result["greenfield"])
+        self.assertEqual(
+            result["grounded_viable"],
+            {"coding_standards": False, "testing_guidelines": False,
+             "requirements_overview": False},
+        )
+        self.assertEqual(result["signals"]["tool_versions"], {})
+
+
 class GeneratedDetectionTests(unittest.TestCase):
     def test_generated_dir_name_matches(self):
         self.assertTrue(ss.GENERATED_DIR_NAME_RE.match("generated"))
@@ -303,6 +545,80 @@ class GeneratedDetectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             module_path = Path(d) / "empty"
             self.assertFalse(ss._is_generated_module(module_path, []))
+
+
+_CEP_OUTPUT_FRONTMATTER = """---
+generated_by: ult-autoscaffold-content
+generated_at: 2026-01-01
+status: draft
+content_mode: grounded
+doc_kind: context_md
+skill_version: 0.5.0
+---
+
+# Some module
+
+Body text.
+"""
+
+
+class OrphanedCepOutputDetectionTests(unittest.TestCase):
+    """Bug: a directory of this skill's own prior output, generated by a
+    DIFFERENT (or reset, or side/test) state file than the one currently
+    scanning, was silently treated as a brand-new real module -- neither
+    _settled_output_subtrees() (state-based) nor
+    _check_graph_cep_contamination() (installed-footprint-based) covers
+    this, since both require either the current state or the CEP install
+    manifest to already know about the directory. Fixed via a third,
+    state-independent, content-sniffed signal keyed on the `generated_by`
+    frontmatter every content-mode template emits."""
+
+    def test_looks_like_orphaned_cep_output_true_for_own_frontmatter(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "CONTEXT.md"
+            _write(path, _CEP_OUTPUT_FRONTMATTER)
+            self.assertTrue(ss._looks_like_orphaned_cep_output(path))
+
+    def test_looks_like_orphaned_cep_output_false_for_ordinary_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "main.py"
+            _write(path, "def main():\n    pass\n")
+            self.assertFalse(ss._looks_like_orphaned_cep_output(path))
+
+    def test_looks_like_orphaned_cep_output_false_for_other_tools_frontmatter(self):
+        # A different tool's own "generated_by" marker must not false-match
+        # -- this signal is specific to THIS skill's own output, not a
+        # generic "has frontmatter" test.
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "CHANGELOG.md"
+            _write(path, "---\ngenerated_by: some-other-tool\n---\n\nbody\n")
+            self.assertFalse(ss._looks_like_orphaned_cep_output(path))
+
+    def test_looks_like_orphaned_cep_output_false_for_unreadable_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "does-not-exist.md"
+            self.assertFalse(ss._looks_like_orphaned_cep_output(path))
+
+    def test_is_orphaned_cep_output_module_majority(self):
+        with tempfile.TemporaryDirectory() as d:
+            module_path = Path(d) / "org"
+            files = [module_path / "a.md", module_path / "b.md", module_path / "README.md"]
+            _write(files[0], _CEP_OUTPUT_FRONTMATTER)
+            _write(files[1], _CEP_OUTPUT_FRONTMATTER)
+            _write(files[2], "# just a readme\n")
+            self.assertTrue(ss._is_orphaned_cep_output_module(files))
+
+    def test_is_orphaned_cep_output_module_false_below_majority(self):
+        with tempfile.TemporaryDirectory() as d:
+            module_path = Path(d) / "mixed"
+            files = [module_path / "a.md", module_path / "b.py", module_path / "c.py"]
+            _write(files[0], _CEP_OUTPUT_FRONTMATTER)
+            _write(files[1], "x = 1\n")
+            _write(files[2], "y = 2\n")
+            self.assertFalse(ss._is_orphaned_cep_output_module(files))
+
+    def test_is_orphaned_cep_output_module_empty_is_false(self):
+        self.assertFalse(ss._is_orphaned_cep_output_module([]))
 
 
 class GraphInDegreeTests(unittest.TestCase):
@@ -382,6 +698,119 @@ class GraphCrossingEdgesTests(unittest.TestCase):
 
     def test_interface_id_joins_sorted_pair(self):
         self.assertEqual(ss._interface_id("core", "utils"), "core--utils")
+
+
+class NodeLevelCrossingEdgesTests(unittest.TestCase):
+    """_node_level_crossing_edges() -- the node-identity-preserving sibling
+    of _graph_crossing_edges() that _interface_call_sites() walks. Same
+    _fixture_graph() as GraphCrossingEdgesTests, so the module-pair weights
+    asserted there are the edge counts asserted here."""
+
+    def test_endpoint_matching_returns_only_this_pairs_edges(self):
+        # core/utils has 4 qualifying node-level edges per
+        # test_crossing_edges_deduplicated_and_weighted; none of them may be
+        # a core/legacy or same-module edge.
+        edges = ss._node_level_crossing_edges(_fixture_graph(), "core", "utils")
+        self.assertEqual(len(edges), 4)
+        pairs = {(src["id"], dst["id"]) for src, dst in edges}
+        self.assertEqual(
+            pairs,
+            {
+                ("core_main", "utils_helpers_add"),
+                ("core_main_run", "utils_helpers_add"),
+                ("core_main_run", "utils_helpers_mul"),
+                ("core_service", "utils_helpers_add"),
+            },
+        )
+
+    def test_endpoint_matching_excludes_other_pairs(self):
+        # core/legacy has exactly 1 edge; it must never show up when asking
+        # for core/utils, and vice versa.
+        edges = ss._node_level_crossing_edges(_fixture_graph(), "core", "legacy")
+        self.assertEqual(len(edges), 1)
+        src, dst = edges[0]
+        self.assertEqual((src["id"], dst["id"]), ("core_main", "legacy_old"))
+
+    def test_direction_independent_pair_lookup(self):
+        # Asking for ("utils", "core") must return the exact same edges as
+        # ("core", "utils") -- an interface pair has no inherent direction.
+        forward = ss._node_level_crossing_edges(_fixture_graph(), "core", "utils")
+        reverse = ss._node_level_crossing_edges(_fixture_graph(), "utils", "core")
+        forward_pairs = {(s["id"], d["id"]) for s, d in forward}
+        reverse_pairs = {(s["id"], d["id"]) for s, d in reverse}
+        self.assertEqual(forward_pairs, reverse_pairs)
+
+    def test_no_edges_for_unrelated_pair(self):
+        self.assertEqual(ss._node_level_crossing_edges(_fixture_graph(), "core", "orphan"), [])
+
+
+class InterfaceCallSitesTests(unittest.TestCase):
+    """_interface_call_sites() -- closes F18 by deriving "path:Lline"
+    citations from a targeted text search of each crossing edge's own
+    source file, using the already-loaded graph (no re-running graphify).
+    Fixture files/repo are entirely generic/synthetic, never modeled on
+    any specific real repo's actual layout."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def test_finds_textual_call_site_and_cites_the_source_edges_file(self):
+        # core_main_run -> utils_helpers_add is one of the core/utils edges;
+        # the citation must be against core/main.py (the SOURCE node's own
+        # file), at the line where the TARGET's name actually appears.
+        _write(
+            self.repo_root / "core" / "main.py",
+            "def run():\n    utils_helpers_add(1, 2)\n",
+        )
+        _write(self.repo_root / "utils" / "helpers.py", "def add():\n    pass\n")
+        sites = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        self.assertIn("core/main.py:L2", sites)
+
+    def test_stable_ordering_sorted_and_deduplicated(self):
+        _write(
+            self.repo_root / "core" / "main.py",
+            "def run():\n"
+            "    utils_helpers_add(1, 2)\n"
+            "    utils_helpers_mul(3, 4)\n"
+            "    utils_helpers_add(5, 6)\n",  # second mention -- must not duplicate
+        )
+        _write(self.repo_root / "core" / "service.py", "utils_helpers_add()\n")
+        _write(self.repo_root / "utils" / "helpers.py", "pass\n")
+        first = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        second = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        self.assertEqual(first, second)  # deterministic across repeated calls
+        self.assertEqual(first, sorted(set(first)))  # sorted, no duplicates
+        self.assertIn("core/main.py:L2", first)
+        self.assertIn("core/main.py:L4", first)
+
+    def test_endpoint_matching_never_cites_an_unrelated_pairs_file(self):
+        _write(
+            self.repo_root / "core" / "main.py",
+            "def run():\n    legacy_old()\n    utils_helpers_add()\n",
+        )
+        sites = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        # legacy_old is core/legacy's target, not core/utils's -- must not
+        # leak in even though it's textually present in the same file.
+        self.assertTrue(all("legacy" not in s for s in sites))
+
+    def test_absent_site_returns_empty_list_no_crash(self):
+        # Source files exist but never mention the target names at all.
+        _write(self.repo_root / "core" / "main.py", "def run():\n    pass\n")
+        _write(self.repo_root / "utils" / "helpers.py", "def add():\n    pass\n")
+        sites = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        self.assertEqual(sites, [])
+
+    def test_missing_source_file_skipped_without_crash(self):
+        # core/main.py and core/service.py are never written to disk at all.
+        sites = ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "utils")
+        self.assertEqual(sites, [])
+
+    def test_no_edges_for_unrelated_pair_returns_empty_list(self):
+        self.assertEqual(
+            ss._interface_call_sites(self.repo_root, _fixture_graph(), "core", "orphan"), []
+        )
 
 
 class MergeInterfacesTests(unittest.TestCase):
@@ -647,6 +1076,32 @@ class ScanTests(unittest.TestCase):
         _write(root / "legacy" / "old.py", "x")
         _write(root / "orphan" / "thing.py", "x")
         _write(root / "generated" / "stub.py", "x")
+
+    def test_scan_heuristic_mode_recognizes_orphaned_cep_output_from_other_state(self):
+        # Regression for the phantom-module contamination gap: a directory
+        # of this skill's own prior output already sits in repo_root (e.g.
+        # written by an earlier run, or a different/parallel state file),
+        # but the state object passed to THIS scan() call has never heard
+        # of it -- _settled_output_subtrees() is state-based and finds
+        # nothing to exclude. Before the content-sniffed fallback existed,
+        # this landed as an ordinary pending module full of "real" content;
+        # it must now land as tier 0/skipped via the orphaned-output signal
+        # instead, regardless of which state file is doing the scanning.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            self._make_repo(root)
+            _write(root / "docs_out" / "core" / "CONTEXT.md", _CEP_OUTPUT_FRONTMATTER)
+            _write(root / "docs_out" / "CODING-STANDARDS.md", _CEP_OUTPUT_FRONTMATTER)
+
+            fresh_state = ss.empty_state()  # never recorded docs_out/ as output
+            ss.scan(fresh_state, root, "heuristic")
+
+            by_id = {m["id"]: m for m in fresh_state["modules"]}
+            self.assertEqual(by_id["docs_out/"]["tier"], 0)
+            self.assertEqual(by_id["docs_out/"]["status"], "skipped")
+            self.assertIn("orphaned CEP-generated output", by_id["docs_out/"]["skip_reason"])
+            pending_ids = {m["id"] for m in fresh_state["modules"] if m["status"] == "pending"}
+            self.assertNotIn("docs_out/", pending_ids)
 
     def test_scan_graph_mode_assigns_expected_tiers(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1483,6 +1938,54 @@ class InterfaceDocStateTests(unittest.TestCase):
         state = self._state_with_interfaces()
         self.assertEqual(len(ss.list_interfaces(state)), 1)
 
+    def test_list_interfaces_eligible_only_accepts_tier3_leaf_endpoint(self):
+        # Bug: a tier-3 leaf never gets a context_md packet by design
+        # (PACKET_ELIGIBLE_MODULE_TIERS = (1, 2)) and goes straight from
+        # "pending" to "skipped" -- so it can never reach "generated", full
+        # stop. Any interface pair touching it was therefore structurally
+        # unable to ever become eligible. A tier-3 "skipped" endpoint must
+        # now count as settled for eligibility purposes, same as a
+        # "generated" one.
+        state = ss.empty_state()
+        state["modules"] = [
+            {"id": "core/", "tier": 1, "in_degree": 12, "file_count": 4,
+             "basis": "graph:in-degree", "status": "generated",
+             "generated_at": "now", "output_path": "org/core/CONTEXT.md", "skip_reason": None},
+            {"id": "leaf/", "tier": 3, "in_degree": 0, "file_count": 1,
+             "basis": "graph:in-degree", "status": "skipped",
+             "generated_at": None, "output_path": None,
+             "skip_reason": "tier 3 -- no context_md packet planned by design"},
+        ]
+        state["interfaces"] = [
+            {"id": "core--leaf", "module_a": "core", "module_b": "leaf",
+             "relations": ["calls"], "weight": 1, "status": "pending",
+             "output_path": None, "generated_at": None, "defer_reason": None},
+        ]
+        eligible = ss.list_interfaces(state, eligible_only=True)
+        self.assertEqual([i["id"] for i in eligible], ["core--leaf"])
+
+    def test_list_interfaces_eligible_only_still_rejects_non_tier3_skipped_endpoint(self):
+        # The tier-3 widening must stay narrow: a "skipped" endpoint that's
+        # tier 0 (generated/vendor code) or tier None (empty directory) has
+        # no real content and must NOT be treated as a settled interface
+        # endpoint just because its status happens to also be "skipped".
+        state = ss.empty_state()
+        state["modules"] = [
+            {"id": "core/", "tier": 1, "in_degree": 12, "file_count": 4,
+             "basis": "graph:in-degree", "status": "generated",
+             "generated_at": "now", "output_path": "org/core/CONTEXT.md", "skip_reason": None},
+            {"id": "vendor/", "tier": 0, "in_degree": 0, "file_count": 3,
+             "basis": "generated", "status": "skipped",
+             "generated_at": None, "output_path": None,
+             "skip_reason": "generated/vendor code (auto-detected)"},
+        ]
+        state["interfaces"] = [
+            {"id": "core--vendor", "module_a": "core", "module_b": "vendor",
+             "relations": ["calls"], "weight": 1, "status": "pending",
+             "output_path": None, "generated_at": None, "defer_reason": None},
+        ]
+        self.assertEqual(ss.list_interfaces(state, eligible_only=True), [])
+
 
 class RenderIndexTests(unittest.TestCase):
     def test_render_index_groups_by_tier_and_reports_progress(self):
@@ -1506,7 +2009,7 @@ class RenderIndexTests(unittest.TestCase):
         self.assertIn("Tier 1", text)
         self.assertIn("core/", text)
         self.assertIn("docs/core/CONTEXT.md", text)
-        self.assertIn("1 generated, 1 pending, 1 skipped (3 modules total)", text)
+        self.assertIn("1 generated, 1 pending, 1 skipped, 0 failed (3 modules total)", text)
 
     def test_render_index_heuristic_mode_carries_confidence_caveat(self):
         state = ss.empty_state()
@@ -1570,7 +2073,7 @@ class RenderIndexTests(unittest.TestCase):
         text = ss.render_index(state, "demo-repo")
         self.assertIn("`core` <-> `utils`", text)
         self.assertIn("org/interfaces/core-to-utils.md", text)
-        self.assertIn("1 generated, 1 pending, 0 deferred (2 interfaces total)", text)
+        self.assertIn("1 generated, 1 pending, 0 deferred, 0 failed (2 interfaces total)", text)
 
 
 class SummarizeTests(unittest.TestCase):
@@ -1659,6 +2162,1608 @@ class TestPruneIgnoredCasing(unittest.TestCase):
 
     def test_dot_prefixed_dirs_still_pruned_regardless_of_casing(self):
         self.assertEqual(ss._prune_ignored([".git", ".Idea", "src"]), ["src"])
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0103: build_work_packets() / `plan` (Sec 5.2 work-packet schema)      #
+# --------------------------------------------------------------------------- #
+
+def _module(module_id, tier, status="pending"):
+    return {
+        "id": module_id,
+        "tier": tier,
+        "status": status,
+        "basis": "test-fixture",
+        "in_degree": None,
+        "output_path": None,
+        "generated_at": None,
+        "skip_reason": None,
+    }
+
+
+def _repo_docs(coding_standards="pending", testing_guidelines="pending"):
+    docs = ss._ensure_repo_docs({})
+    docs["coding_standards"]["status"] = coding_standards
+    docs["testing_guidelines"]["status"] = testing_guidelines
+    return docs
+
+
+def _interface(module_a, module_b, status="pending"):
+    return {
+        "id": ss._interface_id(module_a, module_b),
+        "module_a": module_a,
+        "module_b": module_b,
+        "relations": ["calls"],
+        "weight": 1,
+        "status": status,
+        "output_path": None,
+        "generated_at": None,
+        "defer_reason": None,
+    }
+
+
+class WorkPacketPlanningTests(unittest.TestCase):
+    """TASK-0103: deterministic packet IDs/content, the P0a fixed
+    effective_mode, output-path uniqueness/containment, must_cite
+    derivation, tier-based soft read budgets, and recorded HEAD commit --
+    against build_work_packets()/`plan` (Sec 5.2)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def _state(self, modules=(), coding_standards="generated",
+               testing_guidelines="generated", interfaces=()):
+        # Repo docs default to already-settled so module-only/interface-only
+        # tests get exactly the packets they ask for -- tests that care
+        # about coding_standards/testing_guidelines planning pass
+        # coding_standards="pending"/testing_guidelines="pending" explicitly.
+        state = ss.empty_state()
+        state["modules"] = list(modules)
+        state["repo_docs"] = _repo_docs(coding_standards, testing_guidelines)
+        state["interfaces"] = list(interfaces)
+        return state
+
+    # -- determinism -------------------------------------------------- #
+
+    def test_same_inputs_produce_identical_packet_list(self):
+        state = self._state(modules=[_module("core/", 1), _module("utils/", 2)])
+        first = ss.build_work_packets(state, self.repo_root, "org")
+        second = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual(first, second)
+
+    def test_packets_sorted_by_packet_id(self):
+        state = self._state(modules=[_module("zeta/", 1), _module("alpha/", 1)])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual([p["packet_id"] for p in packets], sorted(p["packet_id"] for p in packets))
+
+    # -- context_md packet content ------------------------------------- #
+
+    def test_context_md_packet_id_and_output_path(self):
+        state = self._state(modules=[_module("core/", 1)])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual(len(packets), 1)
+        packet = packets[0]
+        self.assertEqual(packet["packet_id"], "how-l2--core--context")
+        self.assertEqual(packet["kind"], "context_md")
+        self.assertEqual(packet["layer"], "how_l2")
+        self.assertEqual(packet["module_id"], "core/")
+        self.assertEqual(packet["tier"], 1)
+        self.assertEqual(packet["output_path"], "org/core/CONTEXT.md")
+        self.assertEqual(packet["template"], "templates/context-md-template.md")
+        self.assertEqual(
+            packet["required_sections"],
+            [
+                "Purpose", "Inputs", "Outputs", "Key abstractions",
+                "Dependencies", "Design invariants", "Gotchas",
+            ],
+        )
+
+    def test_tier_3_modules_are_not_planned(self):
+        # Proposal line 39: "Tier-3 modules were generated. The skill skips
+        # Tier 3 by default." -- stated as the general planning rule.
+        state = self._state(modules=[_module("vendor/", 3)])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual(packets, [])
+
+    def test_only_pending_modules_are_planned(self):
+        state = self._state(modules=[
+            _module("core/", 1, status="pending"),
+            _module("done/", 1, status="generated"),
+            _module("skipped/", 1, status="skipped"),
+        ])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual([p["module_id"] for p in packets], ["core/"])
+
+    # -- P0a fixed effective_mode --------------------------------------- #
+
+    def test_effective_mode_is_fixed_to_grounded_for_every_kind(self):
+        state = self._state(
+            modules=[_module("core/", 1)],
+            interfaces=[_interface("core", "utils")],
+        )
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual(len(packets), 2)
+        for packet in packets:
+            self.assertEqual(packet["effective_mode"], "grounded")
+            self.assertIsNone(packet["mode_reason"])
+
+    # -- repo docs (coding_standards / testing_guidelines) --------------- #
+
+    def test_repo_doc_packets_use_repo_level_output_paths_and_budget(self):
+        _write(self.repo_root / ".clang-format", "x")
+        _write(self.repo_root / ".flake8", "x")
+        state = self._state(coding_standards="pending", testing_guidelines="pending")
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        by_kind = {p["kind"]: p for p in packets}
+        self.assertEqual(set(by_kind), {"coding_standards", "testing_guidelines"})
+        cs = by_kind["coding_standards"]
+        self.assertEqual(cs["packet_id"], "how-l2--coding-standards")
+        self.assertEqual(cs["output_path"], "org/CODING-STANDARDS.md")
+        self.assertEqual(cs["module_id"], None)
+        self.assertEqual(cs["tier"], None)
+        self.assertEqual(cs["read_budget"], ss.READ_BUDGET_REPO_DOC)
+        self.assertIn(".clang-format", cs["must_cite"])
+        tg = by_kind["testing_guidelines"]
+        self.assertEqual(tg["output_path"], "org/TESTING-GUIDELINES.md")
+        self.assertEqual(tg["read_budget"], ss.READ_BUDGET_REPO_DOC)
+
+    def test_repo_doc_must_cite_includes_ci_config(self):
+        # Sec 5.2's worked example lists .github/workflows/cpp.yml
+        # (a CI file) alongside .clang-format/CPPLINT.cfg/format.sh in
+        # CODING-STANDARDS.md's must_cite -- ci signals must be included.
+        _write(self.repo_root / ".github" / "workflows" / "cpp.yml", "x")
+        state = self._state(coding_standards="pending", testing_guidelines="pending")
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        cs = next(p for p in packets if p["kind"] == "coding_standards")
+        self.assertTrue(
+            any(".github/workflows/cpp.yml" in c.replace("\\", "/") for c in cs["must_cite"])
+        )
+
+    def test_settled_repo_docs_are_not_replanned(self):
+        state = self._state(coding_standards="generated", testing_guidelines="deferred")
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual(packets, [])
+
+    # -- interfaces -------------------------------------------------- #
+
+    def test_interface_packet_output_path_and_budget(self):
+        state = self._state(interfaces=[_interface("core", "utils")])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual(len(packets), 1)
+        packet = packets[0]
+        self.assertEqual(packet["kind"], "interface_boundary")
+        self.assertEqual(packet["output_path"], "org/interfaces/core-to-utils.md")
+        self.assertEqual(packet["read_budget"], ss.READ_BUDGET_INTERFACE)
+
+    def test_only_pending_interfaces_are_planned(self):
+        state = self._state(interfaces=[
+            _interface("core", "utils", status="pending"),
+            _interface("core", "legacy", status="generated"),
+            _interface("utils", "legacy", status="deferred"),
+        ])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual(len(packets), 1)
+        self.assertEqual(packets[0]["output_path"], "org/interfaces/core-to-utils.md")
+
+    # -- must_cite / evidence_hints from graph.json ----------------------- #
+
+    def test_context_md_evidence_hints_and_must_cite_from_graph(self):
+        graph_path = self.repo_root / "graph.json"
+        _write(graph_path, json.dumps(_fixture_graph()))
+        state = self._state(modules=[_module("core/", 1), _module("utils/", 1)])
+        packets = ss.build_work_packets(
+            state, self.repo_root, "org", graph_path=graph_path,
+        )
+        by_module = {p["module_id"]: p for p in packets}
+
+        core = by_module["core/"]
+        self.assertEqual(core["evidence_hints"]["depends_on"], ["legacy/", "utils/"])
+        self.assertEqual(core["evidence_hints"]["depended_on_by"], [])
+        self.assertEqual(core["evidence_hints"]["top_symbols_by_in_degree"], [])
+        self.assertEqual(core["evidence_hints"]["call_sites"], [])
+        self.assertEqual(core["must_cite"], [])
+
+        utils = by_module["utils/"]
+        self.assertEqual(utils["evidence_hints"]["depends_on"], [])
+        self.assertEqual(utils["evidence_hints"]["depended_on_by"], ["core/"])
+        self.assertEqual(
+            utils["evidence_hints"]["top_symbols_by_in_degree"],
+            ["utils_helpers_add", "utils_helpers_mul"],
+        )
+        self.assertEqual(utils["must_cite"], ["utils/helpers.py"])
+
+    def test_context_md_evidence_hints_empty_without_graph_path(self):
+        state = self._state(modules=[_module("core/", 1)])
+        packets = ss.build_work_packets(state, self.repo_root, "org", graph_path=None)
+        self.assertEqual(packets[0]["evidence_hints"], ss._EMPTY_EVIDENCE_HINTS)
+        self.assertEqual(packets[0]["must_cite"], [])
+
+    # -- tier-based soft read budgets -------------------------------------- #
+
+    def test_read_budget_by_tier(self):
+        state = self._state(modules=[_module("core/", 1), _module("utils/", 2)])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        by_module = {p["module_id"]: p for p in packets}
+        self.assertEqual(by_module["core/"]["read_budget"], ss.READ_BUDGET_BY_TIER[1])
+        self.assertEqual(by_module["utils/"]["read_budget"], ss.READ_BUDGET_BY_TIER[2])
+        self.assertEqual(ss.READ_BUDGET_BY_TIER[1], 40)
+        self.assertEqual(ss.READ_BUDGET_BY_TIER[2], 20)
+
+    # -- output-path uniqueness / containment ------------------------------ #
+
+    def test_duplicate_output_path_raises_value_error(self):
+        # Two module ids that collapse to the same output_path once
+        # slashes are normalized -- must be refused, not silently planned.
+        state = self._state(modules=[_module("core/", 1), _module("core//", 1)])
+        with self.assertRaises(ValueError):
+            ss.build_work_packets(state, self.repo_root, "org")
+
+    def test_output_path_escaping_how_l2_path_raises_value_error(self):
+        state = self._state(modules=[_module("../evil/", 1)])
+        with self.assertRaises(ValueError):
+            ss.build_work_packets(state, self.repo_root, "org")
+
+    def test_path_is_contained_helper(self):
+        self.assertTrue(ss._path_is_contained("org/core/CONTEXT.md", "org"))
+        self.assertTrue(ss._path_is_contained("org", "org"))
+        self.assertFalse(ss._path_is_contained("orgy/core/CONTEXT.md", "org"))
+        self.assertFalse(ss._path_is_contained("evil/CONTEXT.md", "org"))
+
+    # -- recorded HEAD commit -------------------------------------------- #
+
+    def test_head_commit_recorded_when_repo_root_is_a_git_repo(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=t@example.com", "-c", "user.name=t",
+             "commit", "--allow-empty", "-q", "-m", "init"],
+            cwd=self.repo_root, check=True,
+        )
+        expected = subprocess.run(
+            ["git", "-C", str(self.repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        state = self._state(modules=[_module("core/", 1)])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertEqual(packets[0]["head_commit"], expected)
+        self.assertTrue(expected)
+
+    def test_head_commit_none_outside_a_git_repo(self):
+        state = self._state(modules=[_module("core/", 1)])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        self.assertIsNone(packets[0]["head_commit"])
+
+    # -- validation_floor wiring ------------------------------------------ #
+
+    def test_validation_floor_keyed_by_kind_and_tier(self):
+        state = self._state(modules=[_module("core/", 1), _module("utils/", 2)])
+        packets = ss.build_work_packets(state, self.repo_root, "org")
+        by_module = {p["module_id"]: p for p in packets}
+        self.assertEqual(
+            by_module["core/"]["validation_floor"],
+            ss.VALIDATION_FLOORS[("context_md", 1)],
+        )
+        self.assertEqual(
+            by_module["utils/"]["validation_floor"],
+            ss.VALIDATION_FLOORS[("context_md", 2)],
+        )
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0105: ss.validate() (Sec 6's P0a validator table)                     #
+#                                                                             #
+# Written and run BEFORE ss.validate exists -- confirmed red (AttributeError #
+# on every test) per the test-first discipline, then TASK-0106 implements   #
+# the smallest thing that turns these green. Deliberately excludes the two  #
+# checks the plan defers: external-block validation (P2) and skeleton       #
+# byte-identity (P1) -- per the plan's own already-recorded scoping note.    #
+# --------------------------------------------------------------------------- #
+
+def _prose(file_path):
+    """One citation-bearing sentence, long enough that 7-8 of them clear
+    every VALIDATION_FLOORS min_body_bytes entry with margin, short enough
+    that tests stay readable."""
+    return (
+        "This section reflects real, currently-observed behavior in the "
+        "code, described in enough detail for a new contributor to act on "
+        "without re-reading the source themselves. [src: {}#L1-L2]"
+    ).format(file_path)
+
+
+def _full_sections(required_sections, citable_files):
+    """One evidenced paragraph per required heading, citations rotated
+    across `citable_files` so every file gets cited at least once whenever
+    there are at least as many headings as files -- the shape every
+    failure test starts from and mutates exactly one heading of, so a
+    test's only failure is the one it's isolating."""
+    files = list(citable_files)
+    return {
+        heading: _prose(files[i % len(files)])
+        for i, heading in enumerate(required_sections)
+    }
+
+
+def _make_doc(packet, sections, frontmatter_overrides=None):
+    """Render a full, syntactically-valid document for `packet`: six-field
+    frontmatter (any field can be dropped by passing it as None in
+    `frontmatter_overrides`, or overridden to a bad value) followed by one
+    "## <heading>" block per packet['required_sections'], body text taken
+    from `sections[heading]` verbatim."""
+    frontmatter = {
+        "generated_by": "ult-autoscaffold-content",
+        "generated_at": "2026-09-28",
+        "status": "draft",
+        "content_mode": packet["effective_mode"],
+        "doc_kind": packet["kind"],
+        "skill_version": "2.0.0-dev",
+    }
+    if frontmatter_overrides:
+        for key, value in frontmatter_overrides.items():
+            if value is None:
+                frontmatter.pop(key, None)
+            else:
+                frontmatter[key] = value
+    lines = ["---"]
+    for key, value in frontmatter.items():
+        lines.append("{}: {}".format(key, value))
+    lines.append("---")
+    lines.append("")
+    for heading in packet["required_sections"]:
+        lines.append("## {}".format(heading))
+        lines.append("")
+        lines.append(sections[heading])
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+class GeneratedValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.citable_files = ["src/a.py", "src/b.py", "src/c.py"]
+        for f in self.citable_files:
+            _write(self.repo_root / f, "line1\nline2\nline3\n")
+        self.packet = {
+            "packet_id": "how-l2--core--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "core/",
+            "tier": 2,
+            "output_path": "org/core/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "effective_mode": "grounded",
+            "mode_reason": None,
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": ["src/a.py"],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+        self.baseline_sections = _full_sections(
+            self.packet["required_sections"], self.citable_files
+        )
+
+    def _write_doc(self, text, path=None):
+        path = path or self.packet["output_path"]
+        _write(self.repo_root / path, text)
+        return path
+
+    # -- baseline: a genuinely correct doc must validate clean ------------ #
+
+    def test_valid_grounded_document_passes(self):
+        path = self._write_doc(_make_doc(self.packet, self.baseline_sections))
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertEqual(result["failures"], [])
+        self.assertTrue(result["valid"])
+
+    # -- existence / output_path ------------------------------------------ #
+
+    def test_missing_file_fails(self):
+        result = ss.validate(self.repo_root, self.packet["output_path"], self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("exist" in f.lower() for f in result["failures"]))
+
+    def test_wrong_output_path_fails(self):
+        self._write_doc(_make_doc(self.packet, self.baseline_sections))
+        result = ss.validate(self.repo_root, "org/core/WRONG.md", self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("output_path" in f for f in result["failures"]))
+
+    # -- frontmatter -------------------------------------------------------- #
+
+    def test_missing_content_mode_frontmatter_fails(self):
+        doc = _make_doc(self.packet, self.baseline_sections,
+                         frontmatter_overrides={"content_mode": None})
+        path = self._write_doc(doc)
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("content_mode" in f for f in result["failures"]))
+
+    def test_missing_skill_version_frontmatter_fails(self):
+        doc = _make_doc(self.packet, self.baseline_sections,
+                         frontmatter_overrides={"skill_version": None})
+        path = self._write_doc(doc)
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("skill_version" in f for f in result["failures"]))
+
+    def test_status_not_draft_fails(self):
+        doc = _make_doc(self.packet, self.baseline_sections,
+                         frontmatter_overrides={"status": "final"})
+        path = self._write_doc(doc)
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("status" in f for f in result["failures"]))
+
+    def test_content_mode_mismatch_with_packet_effective_mode_fails(self):
+        doc = _make_doc(self.packet, self.baseline_sections,
+                         frontmatter_overrides={"content_mode": "skeleton"})
+        path = self._write_doc(doc)
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("content_mode" in f for f in result["failures"]))
+
+    # -- sections ------------------------------------------------------------ #
+
+    def test_missing_required_section_fails(self):
+        doc = _make_doc(self.packet, self.baseline_sections)
+        doc = doc.replace("## Gotchas\n", "## Renamed\n")
+        path = self._write_doc(doc)
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("Gotchas" in f for f in result["failures"]))
+
+    def test_placeholder_section_body_fails(self):
+        sections = dict(self.baseline_sections)
+        sections["Gotchas"] = "TBD -- fill in later."
+        path = self._write_doc(_make_doc(self.packet, sections))
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("Gotchas" in f for f in result["failures"]))
+
+    def test_empty_section_body_fails(self):
+        sections = dict(self.baseline_sections)
+        sections["Gotchas"] = ""
+        path = self._write_doc(_make_doc(self.packet, sections))
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("Gotchas" in f for f in result["failures"]))
+
+    # -- must-cite ------------------------------------------------------------ #
+
+    def test_missing_must_cite_path_fails(self):
+        # Every heading cites only b.py/c.py -- packet["must_cite"] names
+        # a.py, which never appears in a [src:] citation anywhere.
+        sections = _full_sections(self.packet["required_sections"],
+                                   ["src/b.py", "src/c.py"])
+        path = self._write_doc(_make_doc(self.packet, sections))
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("must_cite" in f or "src/a.py" in f for f in result["failures"]))
+
+    def test_cmake_enable_testing_literal_marker_can_be_cited_and_pass(self):
+        # _probe_cmake_test_registration's test_config signal for a CMake
+        # project is the literal string "CMakeLists.txt:enable_testing"
+        # (Sec 4.3's own worked-example illustration), not a real
+        # filesystem path -- it feeds must_cite for testing_guidelines
+        # packets verbatim (build_work_packets: sorted(set(signals
+        # ["test_config"]))). Sec 6's "Must-cite" row requires this exact
+        # string appear in a [src:] citation; its "Citation resolution"
+        # row then requires every [src:] path to exist on disk. Taken
+        # together as written, no CMake-based repo could ever satisfy
+        # both rows for this one marker -- a real CMake-based repo's CMakeLists.txt
+        # reproduces this for real. The fix scopes citation-resolution's
+        # existence/line-range check to real paths only, leaving the
+        # literal marker's presence requirement (must_cite) unchanged.
+        _write(self.repo_root / "CMakeLists.txt", "project(x)\nenable_testing()\n")
+        packet = dict(self.packet)
+        packet.update({
+            "kind": "testing_guidelines",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/TESTING-GUIDELINES.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["testing_guidelines"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["testing_guidelines"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["testing_guidelines"],
+            "must_cite": ["CMakeLists.txt:enable_testing"],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("testing_guidelines", None)]),
+            "read_budget": ss.READ_BUDGET_REPO_DOC,
+        })
+        sections = _full_sections(packet["required_sections"], self.citable_files)
+        # Exactly one heading carries the literal marker citation; the
+        # rest keep citing real files so the floor is met honestly.
+        first_heading = packet["required_sections"][0]
+        sections[first_heading] = (
+            "CTest is registered via enable_testing() in the top-level "
+            "build file [src: CMakeLists.txt:enable_testing#L2-L2] "
+            "[src: CMakeLists.txt#L2-L2]."
+        )
+        path = self._write_doc(_make_doc(packet, sections), path=packet["output_path"])
+        result = ss.validate(self.repo_root, path, packet)
+        self.assertEqual(result["failures"], [])
+        self.assertTrue(result["valid"])
+
+    # -- citation resolution --------------------------------------------------- #
+
+    def test_citation_to_nonexistent_file_fails(self):
+        sections = dict(self.baseline_sections)
+        sections["Purpose"] = "See the ghost module. [src: src/ghost.py#L1]"
+        path = self._write_doc(_make_doc(self.packet, sections))
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("ghost.py" in f for f in result["failures"]))
+
+    def test_citation_line_range_out_of_bounds_fails(self):
+        sections = dict(self.baseline_sections)
+        sections["Purpose"] = "Out of range on purpose. [src: src/a.py#L1-L99]"
+        path = self._write_doc(_make_doc(self.packet, sections))
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("a.py" in f and "99" in f for f in result["failures"]))
+
+    # -- gap honesty (false absence claims) ------------------------------------ #
+
+    def test_false_absence_claim_fails(self):
+        # src/a.py genuinely exists -- claiming it's absent must fail.
+        sections = dict(self.baseline_sections)
+        sections["Purpose"] = "Not evidenced. Searched: src/a.py (absent)."
+        path = self._write_doc(_make_doc(self.packet, sections))
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("a.py" in f for f in result["failures"]))
+
+    def test_genuine_absence_claim_passes_gap_honesty(self):
+        sections = dict(self.baseline_sections)
+        sections["Purpose"] = "Not evidenced. Searched: src/does-not-exist.py (absent)."
+        path = self._write_doc(_make_doc(self.packet, sections))
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(any("does-not-exist.py" in f for f in result["failures"]))
+
+    # -- floors ---------------------------------------------------------------- #
+
+    def test_body_below_min_body_bytes_floor_fails(self):
+        packet = dict(self.packet)
+        packet["validation_floor"] = {"min_distinct_cited_files": 1, "min_body_bytes": 100000}
+        path = self._write_doc(_make_doc(packet, self.baseline_sections))
+        result = ss.validate(self.repo_root, path, packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("body" in f.lower() and "byte" in f.lower() for f in result["failures"]))
+
+    def test_below_min_distinct_cited_files_floor_fails(self):
+        packet = dict(self.packet)
+        packet["validation_floor"] = {"min_distinct_cited_files": 10, "min_body_bytes": 1}
+        path = self._write_doc(_make_doc(packet, self.baseline_sections))
+        result = ss.validate(self.repo_root, path, packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("cited file" in f.lower() for f in result["failures"]))
+
+    # -- conflicts (coding_standards only) -------------------------------------- #
+
+    def _coding_standards_packet(self):
+        # Four distinct signal classes, all synthetic/generic (never modeled
+        # on a specific real repo's actual layout): formatter_config
+        # (.clang-format), linter_config (CPPLINT.cfg), wrapper_scripts
+        # (format.sh), ci (cpp.yml). Only clang-format is mentioned from two
+        # distinct sources (format.sh + cpp.yml) -- cpplint's config exists
+        # but its name appears nowhere else, so it must NOT itself trigger a
+        # conflict requirement (see the precision test below).
+        # Every file here needs >= 2 lines: _prose() below always cites
+        # "#L1-L2", so a 1-line file would itself fail citation-range
+        # validation independently of anything this fixture is testing.
+        tool_files = [
+            ".clang-format", "CPPLINT.cfg", "format.sh", ".github/workflows/cpp.yml",
+        ]
+        _write(self.repo_root / ".clang-format", "BasedOnStyle: Google\nColumnLimit: 100\n")
+        _write(self.repo_root / "CPPLINT.cfg", "linelength=100\nfilter=-whitespace\n")
+        _write(self.repo_root / "format.sh", "#!/bin/sh\nclang-format --version\n")
+        _write(self.repo_root / ".github" / "workflows" / "cpp.yml",
+               "jobs:\n  fmt:\n    run: clang-format --version\n")
+        packet = dict(self.packet)
+        packet.update({
+            "kind": "coding_standards", "module_id": None, "tier": None,
+            "output_path": "org/CODING-STANDARDS.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["coding_standards"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["coding_standards"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["coding_standards"],
+            "must_cite": [".clang-format", "CPPLINT.cfg"],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("coding_standards", None)]),
+            "read_budget": ss.READ_BUDGET_REPO_DOC,
+        })
+        return packet, tool_files
+
+    def test_coding_standards_tool_version_disagreement_requires_conflict_line(self):
+        packet, tool_files = self._coding_standards_packet()
+        sections = _full_sections(packet["required_sections"], tool_files)
+        path = self._write_doc(_make_doc(packet, sections), path=packet["output_path"])
+        result = ss.validate(self.repo_root, path, packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("conflict" in f.lower() for f in result["failures"]))
+
+    def test_coding_standards_conflict_line_present_satisfies_check(self):
+        packet, tool_files = self._coding_standards_packet()
+        sections = _full_sections(packet["required_sections"], tool_files)
+        sections["Formatting"] += (
+            "\nConflicting evidence: format.sh and cpp.yml both pin "
+            "clang-format independently [src: format.sh#L2] "
+            "[src: .github/workflows/cpp.yml#L3]."
+        )
+        path = self._write_doc(_make_doc(packet, sections), path=packet["output_path"])
+        result = ss.validate(self.repo_root, path, packet)
+        self.assertFalse(any("conflict" in f.lower() for f in result["failures"]))
+
+    def test_coding_standards_single_source_tool_does_not_require_its_own_conflict_line(self):
+        # cpplint's config is present and cited (must_cite), but "cpplint"
+        # is never mentioned in any wrapper_scripts/ci/contributing file --
+        # only clang-format has two-source citation. Adding the clang-format
+        # conflict line must satisfy the check for BOTH tools; cpplint must
+        # never have generated a failure of its own in the first place, and
+        # this document must otherwise validate completely cleanly.
+        packet, tool_files = self._coding_standards_packet()
+        sections = _full_sections(packet["required_sections"], tool_files)
+        sections["Formatting"] += (
+            "\nConflicting evidence: format.sh and cpp.yml both pin "
+            "clang-format independently [src: format.sh#L2] "
+            "[src: .github/workflows/cpp.yml#L3]."
+        )
+        path = self._write_doc(_make_doc(packet, sections), path=packet["output_path"])
+        result = ss.validate(self.repo_root, path, packet)
+        self.assertEqual(result["failures"], [])
+        self.assertTrue(result["valid"])
+
+    # -- thin boilerplate doc must fail end to end -------------------------------- #
+
+    def test_thin_boilerplate_standards_doc_fails(self):
+        # Real incident class (Sec 1.1): a repo doc marked generated with a
+        # single boilerplate sentence and zero citations -- exactly what
+        # Sec 6 exists to catch before it reaches `mark-*`.
+        packet, _tool_files = self._coding_standards_packet()
+        thin_doc = (
+            "---\n"
+            "generated_by: ult-autoscaffold-content\n"
+            "generated_at: 2026-01-01\n"
+            "status: draft\n"
+            "content_mode: grounded\n"
+            "doc_kind: coding_standards\n"
+            "skill_version: 2.0.0-dev\n"
+            "---\n\n"
+            "This module follows standard coding conventions.\n"
+        )
+        path = self._write_doc(thin_doc)
+        result = ss.validate(self.repo_root, path, packet)
+        self.assertFalse(result["valid"])
+        self.assertGreaterEqual(len(result["failures"]), 3)
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0107: mark_generated / mark_repo_doc_generated / mark_interface_generated #
+# wired to ss.validate() -- blocks invalid output outright, persists a       #
+# "passed" validation record + content hash on a clean pass, accepts a      #
+# failure only with a non-empty --accept-validation-failure reason (as      #
+# "bypassed"), and the bypass surfaces in render_index as                   #
+# "VALIDATION-BYPASSED: <reason>". The orchestrator's mark-* CLI wiring     #
+# already exists (TASK-0106); these tests are the dedicated coverage of    #
+# that wiring's own behavior, not just of validate() in isolation.         #
+# --------------------------------------------------------------------------- #
+
+class MarkGeneratedValidationWiringTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.citable_files = ["src/a.py", "src/b.py", "src/c.py"]
+        for f in self.citable_files:
+            _write(self.repo_root / f, "line1\nline2\nline3\n")
+        self.module_packet = {
+            "packet_id": "how-l2--core--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "core/",
+            "tier": 2,
+            "output_path": "org/core/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "effective_mode": "grounded",
+            "mode_reason": None,
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": ["src/a.py"],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+        self.good_sections = _full_sections(
+            self.module_packet["required_sections"], self.citable_files
+        )
+
+    def _module_state(self):
+        return {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+
+    def _write_at(self, path, text):
+        _write(self.repo_root / path, text)
+        return path
+
+    # -- mark_generated (module) ------------------------------------------ #
+
+    def test_mark_generated_blocks_invalid_output_without_bypass(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        with self.assertRaises(ValueError):
+            ss.mark_generated(
+                state, "core/", self.module_packet["output_path"],
+                packet=self.module_packet, repo_root=self.repo_root,
+            )
+        # The blocked attempt must not have moved the module out of pending.
+        self.assertEqual(ss._find_module(state, "core/")["status"], "pending")
+
+    def test_mark_generated_rejects_empty_string_bypass_reason(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        with self.assertRaises(ValueError):
+            ss.mark_generated(
+                state, "core/", self.module_packet["output_path"],
+                packet=self.module_packet, repo_root=self.repo_root,
+                accept_validation_failure="",
+            )
+        self.assertEqual(ss._find_module(state, "core/")["status"], "pending")
+
+    def test_mark_generated_persists_passed_validation_and_hash_on_success(self):
+        state = self._module_state()
+        doc = _make_doc(self.module_packet, self.good_sections)
+        self._write_at(self.module_packet["output_path"], doc)
+        module = ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root,
+        )
+        self.assertEqual(module["status"], "generated")
+        self.assertEqual(module["validation"], {"status": "passed", "reasons": []})
+        self.assertEqual(module["packet_id"], self.module_packet["packet_id"])
+        self.assertIsNotNone(module["output_sha256"])
+        self.assertIsNone(module["previous_sha256"])
+
+    def test_mark_generated_accepts_bypass_with_nonempty_reason_and_records_it(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        module = ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root,
+            accept_validation_failure="legacy-module Tier-3 exception, PM approved",
+        )
+        self.assertEqual(module["status"], "generated")
+        self.assertEqual(module["validation"]["status"], "bypassed")
+        self.assertEqual(
+            module["validation"]["bypass_reason"], "legacy-module Tier-3 exception, PM approved"
+        )
+        self.assertTrue(module["validation"]["reasons"])
+
+    def test_rendered_index_flags_bypassed_module(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root,
+            accept_validation_failure="approved exception",
+        )
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("VALIDATION-BYPASSED: approved exception", text)
+
+    def test_rendered_index_has_no_bypass_note_on_clean_pass(self):
+        state = self._module_state()
+        doc = _make_doc(self.module_packet, self.good_sections)
+        self._write_at(self.module_packet["output_path"], doc)
+        ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root,
+        )
+        text = ss.render_index(state, "demo-repo")
+        self.assertNotIn("VALIDATION-BYPASSED", text)
+
+    # -- mark_repo_doc_generated -------------------------------------------- #
+
+    def _repo_doc_packet(self):
+        packet = dict(self.module_packet)
+        packet.update({
+            "packet_id": "repo--coding-standards",
+            "kind": "coding_standards",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/CODING-STANDARDS.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["coding_standards"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["coding_standards"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["coding_standards"],
+            "must_cite": [],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("coding_standards", None)]),
+            "read_budget": ss.READ_BUDGET_REPO_DOC,
+        })
+        return packet
+
+    def test_mark_repo_doc_generated_blocks_invalid_output_without_bypass(self):
+        state = {"modules": [], "repo_docs": _repo_docs(), "interfaces": []}
+        packet = self._repo_doc_packet()
+        self._write_at(packet["output_path"], "not a valid doc at all\n")
+        with self.assertRaises(ValueError):
+            ss.mark_repo_doc_generated(
+                state, "coding_standards", packet["output_path"],
+                packet=packet, repo_root=self.repo_root,
+            )
+        self.assertEqual(ss._find_repo_doc(state, "coding_standards")["status"], "pending")
+
+    def test_mark_repo_doc_generated_persists_passed_validation_on_success(self):
+        state = {"modules": [], "repo_docs": _repo_docs(), "interfaces": []}
+        packet = self._repo_doc_packet()
+        sections = _full_sections(packet["required_sections"], self.citable_files)
+        self._write_at(packet["output_path"], _make_doc(packet, sections))
+        doc = ss.mark_repo_doc_generated(
+            state, "coding_standards", packet["output_path"],
+            packet=packet, repo_root=self.repo_root,
+        )
+        self.assertEqual(doc["status"], "generated")
+        self.assertEqual(doc["validation"], {"status": "passed", "reasons": []})
+        self.assertIsNotNone(doc["output_sha256"])
+
+    def test_mark_repo_doc_generated_bypass_flagged_in_index(self):
+        state = {"modules": [], "repo_docs": _repo_docs(), "interfaces": []}
+        packet = self._repo_doc_packet()
+        self._write_at(packet["output_path"], "not a valid doc at all\n")
+        ss.mark_repo_doc_generated(
+            state, "coding_standards", packet["output_path"],
+            packet=packet, repo_root=self.repo_root,
+            accept_validation_failure="approved exception",
+        )
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("VALIDATION-BYPASSED: approved exception", text)
+
+    # -- mark_interface_generated -------------------------------------------- #
+
+    def _interface_packet(self):
+        packet = dict(self.module_packet)
+        packet.update({
+            "packet_id": "interface--core--utils",
+            "kind": "interface_boundary",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/interfaces/core-to-utils.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["interface_boundary"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["interface_boundary"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["interface_boundary"],
+            "must_cite": [],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("interface_boundary", None)]),
+            "read_budget": ss.READ_BUDGET_INTERFACE,
+        })
+        return packet
+
+    def test_mark_interface_generated_blocks_invalid_output_without_bypass(self):
+        interface_id = ss._interface_id("core/", "utils/")
+        state = {
+            "modules": [], "repo_docs": _repo_docs(),
+            "interfaces": [_interface("core/", "utils/")],
+        }
+        packet = self._interface_packet()
+        self._write_at(packet["output_path"], "not a valid doc at all\n")
+        with self.assertRaises(ValueError):
+            ss.mark_interface_generated(
+                state, interface_id, packet["output_path"],
+                packet=packet, repo_root=self.repo_root,
+            )
+        self.assertEqual(ss._find_interface(state, interface_id)["status"], "pending")
+
+    def test_mark_interface_generated_persists_passed_validation_on_success(self):
+        interface_id = ss._interface_id("core/", "utils/")
+        state = {
+            "modules": [], "repo_docs": _repo_docs(),
+            "interfaces": [_interface("core/", "utils/")],
+        }
+        packet = self._interface_packet()
+        sections = _full_sections(packet["required_sections"], self.citable_files)
+        self._write_at(packet["output_path"], _make_doc(packet, sections))
+        interface = ss.mark_interface_generated(
+            state, interface_id, packet["output_path"],
+            packet=packet, repo_root=self.repo_root,
+        )
+        self.assertEqual(interface["status"], "generated")
+        self.assertEqual(interface["validation"], {"status": "passed", "reasons": []})
+        self.assertIsNotNone(interface["output_sha256"])
+
+    def test_mark_interface_generated_bypass_flagged_in_index(self):
+        interface_id = ss._interface_id("core/", "utils/")
+        state = {
+            "modules": [], "repo_docs": _repo_docs(),
+            "interfaces": [_interface("core/", "utils/")],
+        }
+        packet = self._interface_packet()
+        self._write_at(packet["output_path"], "not a valid doc at all\n")
+        ss.mark_interface_generated(
+            state, interface_id, packet["output_path"],
+            packet=packet, repo_root=self.repo_root,
+            accept_validation_failure="approved exception",
+        )
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("VALIDATION-BYPASSED: approved exception", text)
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0108: `final=True` -- the second, terminal half of Sec 5.4's retry     #
+# contract. The default (final=False, exercised above by                     #
+# MarkGeneratedValidationWiringTests) is the *first* attempt: validation     #
+# failure with no bypass raises and persists nothing, leaving the record     #
+# pending for a retry. `final=True` is what the orchestrator passes on the   #
+# retry itself: a second failure with no bypass must NOT raise -- it must    #
+# be persisted as `status: "failed"` (never silently promoted to            #
+# "generated"), while a bypass reason still wins over `final` either way.   #
+# --------------------------------------------------------------------------- #
+
+class FinalFailureStatusTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.citable_files = ["src/a.py", "src/b.py", "src/c.py"]
+        for f in self.citable_files:
+            _write(self.repo_root / f, "line1\nline2\nline3\n")
+        self.module_packet = {
+            "packet_id": "how-l2--core--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "core/",
+            "tier": 2,
+            "output_path": "org/core/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "effective_mode": "grounded",
+            "mode_reason": None,
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": ["src/a.py"],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+
+    def _module_state(self):
+        return {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+
+    def _write_at(self, path, text):
+        _write(self.repo_root / path, text)
+        return path
+
+    def test_mark_generated_final_true_persists_failed_status_without_raising(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        module = ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root, final=True,
+        )
+        self.assertEqual(module["status"], "failed")
+        self.assertEqual(module["validation"]["status"], "failed")
+        self.assertTrue(module["validation"]["reasons"])
+        self.assertEqual(module["packet_id"], self.module_packet["packet_id"])
+
+    def test_mark_generated_final_true_leaves_content_hash_fields_untouched(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        module = ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root, final=True,
+        )
+        # Rejected content was never accepted -- no hash of it is recorded.
+        self.assertIsNone(module.get("output_sha256"))
+        self.assertIsNone(module.get("previous_sha256"))
+
+    def test_mark_generated_final_true_blocks_further_attempts(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root, final=True,
+        )
+        with self.assertRaises(ValueError):
+            ss.mark_generated(
+                state, "core/", self.module_packet["output_path"],
+                packet=self.module_packet, repo_root=self.repo_root,
+            )
+
+    def test_mark_generated_bypass_reason_wins_over_final(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        module = ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root, final=True,
+            accept_validation_failure="approved despite retry exhaustion",
+        )
+        self.assertEqual(module["status"], "generated")
+        self.assertEqual(module["validation"]["status"], "bypassed")
+
+    def test_mark_generated_final_false_still_raises_and_persists_nothing(self):
+        # The default (non-final) path is unchanged by adding `final` --
+        # a first failed attempt still blocks outright, leaving the module
+        # eligible for a retry rather than being marked "failed" outright.
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        with self.assertRaises(ValueError):
+            ss.mark_generated(
+                state, "core/", self.module_packet["output_path"],
+                packet=self.module_packet, repo_root=self.repo_root,
+            )
+        self.assertEqual(ss._find_module(state, "core/")["status"], "pending")
+
+    def test_rendered_index_flags_failed_module(self):
+        state = self._module_state()
+        self._write_at(self.module_packet["output_path"], "not a valid doc at all\n")
+        ss.mark_generated(
+            state, "core/", self.module_packet["output_path"],
+            packet=self.module_packet, repo_root=self.repo_root, final=True,
+        )
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("VALIDATION-FAILED", text)
+
+    def _repo_doc_packet(self):
+        packet = dict(self.module_packet)
+        packet.update({
+            "packet_id": "repo--coding-standards",
+            "kind": "coding_standards",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/CODING-STANDARDS.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["coding_standards"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["coding_standards"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["coding_standards"],
+            "must_cite": [],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("coding_standards", None)]),
+            "read_budget": ss.READ_BUDGET_REPO_DOC,
+        })
+        return packet
+
+    def test_mark_repo_doc_generated_final_true_persists_failed_status(self):
+        state = {"modules": [], "repo_docs": _repo_docs(), "interfaces": []}
+        packet = self._repo_doc_packet()
+        self._write_at(packet["output_path"], "not a valid doc at all\n")
+        doc = ss.mark_repo_doc_generated(
+            state, "coding_standards", packet["output_path"],
+            packet=packet, repo_root=self.repo_root, final=True,
+        )
+        self.assertEqual(doc["status"], "failed")
+        self.assertEqual(doc["validation"]["status"], "failed")
+
+    def _interface_packet(self):
+        packet = dict(self.module_packet)
+        packet.update({
+            "packet_id": "interface--core--utils",
+            "kind": "interface_boundary",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/interfaces/core-to-utils.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["interface_boundary"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["interface_boundary"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["interface_boundary"],
+            "must_cite": [],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("interface_boundary", None)]),
+            "read_budget": ss.READ_BUDGET_INTERFACE,
+        })
+        return packet
+
+    def test_mark_interface_generated_final_true_persists_failed_status(self):
+        interface_id = ss._interface_id("core/", "utils/")
+        state = {
+            "modules": [], "repo_docs": _repo_docs(),
+            "interfaces": [_interface("core/", "utils/")],
+        }
+        packet = self._interface_packet()
+        self._write_at(packet["output_path"], "not a valid doc at all\n")
+        interface = ss.mark_interface_generated(
+            state, interface_id, packet["output_path"],
+            packet=packet, repo_root=self.repo_root, final=True,
+        )
+        self.assertEqual(interface["status"], "failed")
+        self.assertEqual(interface["validation"]["status"], "failed")
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0108: _normalized_body_hash -- Sec 9.3/9.4's normalized               #
+# LF/trailing-whitespace/body-only hashing, exercised directly rather than   #
+# only incidentally through mark_generated's success-path tests above.      #
+# --------------------------------------------------------------------------- #
+
+class NormalizedBodyHashTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def _doc(self, body, generated_at="2026-01-01"):
+        return (
+            "---\n"
+            "generated_by: ult-autoscaffold-content\n"
+            "generated_at: {}\n"
+            "status: draft\n"
+            "content_mode: grounded\n"
+            "doc_kind: context_md\n"
+            "skill_version: 2.0.0-dev\n"
+            "---\n"
+            "{}"
+        ).format(generated_at, body)
+
+    def test_hash_ignores_frontmatter_differences(self):
+        a = self.repo_root / "a.md"
+        b = self.repo_root / "b.md"
+        _write(a, self._doc("## Purpose\n\nSame body.\n", generated_at="2026-01-01"))
+        _write(b, self._doc("## Purpose\n\nSame body.\n", generated_at="2099-12-31"))
+        self.assertEqual(ss._normalized_body_hash(a), ss._normalized_body_hash(b))
+
+    def test_hash_normalizes_crlf_to_lf(self):
+        # write_bytes, not _write/write_text: on Windows, text-mode write
+        # would itself translate "\n" -> "\r\n" and corrupt the CRLF fixture
+        # (double-translating the "\n" inside the "\r\n" we just inserted).
+        # Writing exact bytes is the only way to get a genuine CRLF file on
+        # disk regardless of platform.
+        a = self.repo_root / "a.md"
+        b = self.repo_root / "b.md"
+        body_lf = "## Purpose\n\nSame body.\n"
+        body_crlf = body_lf.replace("\n", "\r\n")
+        a.write_bytes(self._doc(body_lf).encode("utf-8"))
+        b.write_bytes(self._doc(body_crlf).encode("utf-8"))
+        self.assertEqual(ss._normalized_body_hash(a), ss._normalized_body_hash(b))
+
+    def test_hash_strips_trailing_whitespace_per_line(self):
+        a = self.repo_root / "a.md"
+        b = self.repo_root / "b.md"
+        _write(a, self._doc("## Purpose\n\nSame body.\n"))
+        _write(b, self._doc("## Purpose   \n\nSame body.\t\n"))
+        self.assertEqual(ss._normalized_body_hash(a), ss._normalized_body_hash(b))
+
+    def test_hash_differs_for_different_body_content(self):
+        a = self.repo_root / "a.md"
+        b = self.repo_root / "b.md"
+        _write(a, self._doc("## Purpose\n\nOne body.\n"))
+        _write(b, self._doc("## Purpose\n\nA different body entirely.\n"))
+        self.assertNotEqual(ss._normalized_body_hash(a), ss._normalized_body_hash(b))
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0108: stale packet HEAD -- proposal risk table line 490: "Each packet #
+# records the HEAD commit. `mark-*` warns if HEAD has changed since the     #
+# packet was created." Advisory only: validate()'s "valid"/"failures" must  #
+# be unaffected either way -- only a new "warnings" key carries this.       #
+# --------------------------------------------------------------------------- #
+
+class StalePacketHeadWarningTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.citable_files = ["src/a.py", "src/b.py", "src/c.py"]
+        for f in self.citable_files:
+            _write(self.repo_root / f, "line1\nline2\nline3\n")
+        subprocess.run(["git", "init", "-q"], cwd=self.repo_root, check=True)
+        subprocess.run(
+            ["git", "add", "-A"], cwd=self.repo_root, check=True,
+        )
+        subprocess.run(
+            ["git", "-c", "user.email=t@example.com", "-c", "user.name=t",
+             "commit", "-q", "-m", "init"],
+            cwd=self.repo_root, check=True,
+        )
+        self.current_head = subprocess.run(
+            ["git", "-C", str(self.repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        self.packet = {
+            "packet_id": "how-l2--core--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "core/",
+            "tier": 2,
+            "output_path": "org/core/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "effective_mode": "grounded",
+            "mode_reason": None,
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": ["src/a.py"],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": self.current_head,
+        }
+        sections = _full_sections(self.packet["required_sections"], self.citable_files)
+        _write(self.repo_root / self.packet["output_path"], _make_doc(self.packet, sections))
+
+    def test_no_warning_when_head_commit_matches_current_head(self):
+        result = ss.validate(self.repo_root, self.packet["output_path"], self.packet)
+        self.assertTrue(result["valid"])
+        self.assertEqual(result.get("warnings", []), [])
+
+    def test_warns_when_packet_head_commit_differs_from_current_head(self):
+        packet = dict(self.packet)
+        packet["head_commit"] = "0" * 40
+        result = ss.validate(self.repo_root, packet["output_path"], packet)
+        self.assertTrue(any("HEAD" in w for w in result["warnings"]))
+
+    def test_warning_does_not_affect_validity_or_failures(self):
+        packet = dict(self.packet)
+        packet["head_commit"] = "0" * 40
+        result = ss.validate(self.repo_root, packet["output_path"], packet)
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["failures"], [])
+
+    def test_no_warning_when_packet_head_commit_is_none(self):
+        packet = dict(self.packet)
+        packet["head_commit"] = None
+        result = ss.validate(self.repo_root, packet["output_path"], packet)
+        self.assertEqual(result.get("warnings", []), [])
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0108/0109: state_lock() -- Sec 9.3's file lock, proposal line 252:    #
+# "A file lock (`TRIAGE-STATE.json.lock`, created with `O_EXCL` and cleaned  #
+# up if stale) protects the whole-file rewrite in case an orchestrator ever #
+# violates the single-writer rule." Defense in depth, not a substitute for  #
+# the orchestrator-is-sole-writer discipline documented elsewhere.          #
+# --------------------------------------------------------------------------- #
+
+class StateLockTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state_path = Path(self.tmp.name) / "TRIAGE-STATE.json"
+
+    def test_lock_path_naming_convention(self):
+        self.assertEqual(
+            ss._lock_path_for(self.state_path),
+            Path(str(self.state_path) + ".lock"),
+        )
+
+    def test_acquire_release_cycle_leaves_no_lock_file_behind(self):
+        with ss.state_lock(self.state_path):
+            self.assertTrue(ss._lock_path_for(self.state_path).exists())
+        self.assertFalse(ss._lock_path_for(self.state_path).exists())
+
+    def test_concurrent_acquire_raises_state_lock_error(self):
+        with ss.state_lock(self.state_path):
+            with self.assertRaises(ss.StateLockError):
+                with ss.state_lock(self.state_path):
+                    pass
+        self.assertFalse(ss._lock_path_for(self.state_path).exists())
+
+    def test_fresh_lock_is_not_treated_as_stale(self):
+        with self.assertRaises(ss.StateLockError):
+            with ss.state_lock(self.state_path, stale_after_seconds=3600):
+                with ss.state_lock(self.state_path, stale_after_seconds=3600):
+                    pass
+
+    def test_stale_lock_is_cleaned_up_and_fresh_acquire_succeeds(self):
+        lock_path = ss._lock_path_for(self.state_path)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text("", encoding="utf-8")
+        stale_time = time.time() - 3600
+        os.utime(lock_path, (stale_time, stale_time))
+        with ss.state_lock(self.state_path, stale_after_seconds=120):
+            pass  # must not raise -- the stale lock is cleaned up first.
+        self.assertFalse(lock_path.exists())
+
+    def test_lock_released_even_if_body_raises(self):
+        with self.assertRaises(RuntimeError):
+            with ss.state_lock(self.state_path):
+                raise RuntimeError("boom")
+        self.assertFalse(ss._lock_path_for(self.state_path).exists())
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0108: backward-compatible schema-1 backfill -- a state file written   #
+# before v2's per-record fields existed must still load and render cleanly. #
+# --------------------------------------------------------------------------- #
+
+class SchemaBackfillTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state_path = Path(self.tmp.name) / "TRIAGE-STATE.json"
+
+    def _write_legacy_state(self):
+        legacy = {
+            "schema_version": 1,
+            "repo_scan": {"graph_source": None, "graph_path": None, "scanned_at": None},
+            "modules": [
+                {
+                    "id": "core/",
+                    "tier": 2,
+                    "in_degree": None,
+                    "file_count": 3,
+                    "basis": "heuristic",
+                    "status": "generated",
+                    "generated_at": "2026-01-01T00:00:00+00:00",
+                    "output_path": "org/core/CONTEXT.md",
+                    "skip_reason": None,
+                    # No packet_id / output_sha256 / validation / previous_sha256 --
+                    # this is exactly what a pre-v2 record on disk looks like.
+                }
+            ],
+            "interfaces": [],
+            "repo_docs": {
+                "coding_standards": {"status": "pending", "output_path": None,
+                                      "generated_at": None, "skip_reason": None},
+                "testing_guidelines": {"status": "pending", "output_path": None,
+                                        "generated_at": None, "skip_reason": None},
+            },
+            "index": {"output_path": None, "rendered_at": None},
+        }
+        _write(self.state_path, json.dumps(legacy, indent=2))
+        return legacy
+
+    def test_load_state_does_not_raise_on_legacy_record_missing_v2_fields(self):
+        self._write_legacy_state()
+        state = ss.load_state(self.state_path)
+        module = ss._find_module(state, "core/")
+        self.assertEqual(module["status"], "generated")
+        self.assertNotIn("packet_id", module)
+
+    def test_render_index_tolerates_legacy_record_missing_validation(self):
+        self._write_legacy_state()
+        state = ss.load_state(self.state_path)
+        text = ss.render_index(state, "demo-repo")
+        self.assertIn("core/", text)
+        self.assertNotIn("VALIDATION-BYPASSED", text)
+        self.assertNotIn("VALIDATION-FAILED", text)
+
+    def test_load_state_still_backfills_top_level_schema_keys(self):
+        _write(self.state_path, json.dumps({"modules": []}, indent=2))
+        state = ss.load_state(self.state_path)
+        self.assertEqual(state["schema_version"], ss.SCHEMA_VERSION)
+        self.assertIn("repo_docs", state)
+        self.assertIn("index", state)
+        self.assertIn("interfaces", state)
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0110/0111: render-index --out must match the *resolved*               #
+# ult-repo-layout slot for `autoscaffold_content_index`, so CEP-INDEX.md     #
+# never drifts to a second location ult-repo-layout and other skills don't  #
+# know to look at. `_resolve_content_index_slot_path` is a deliberately      #
+# minimal, scoped duplicate of validate_layout.py's own resolution order:   #
+# marker (`.layout-slots.yaml`) if present, else the workspace_root-relative#
+# default, else the hardcoded pre-D21 default.                              #
+# --------------------------------------------------------------------------- #
+
+class ResolveContentIndexSlotPathTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def test_no_marker_no_config_resolves_to_pre_d21_default(self):
+        resolved = ss._resolve_content_index_slot_path(self.repo_root)
+        self.assertEqual(
+            resolved.as_posix(), "starter_kit/autoscaffold-content/CEP-INDEX.md"
+        )
+
+    def test_no_marker_with_workspace_root_resolves_relative_to_it(self):
+        _write(
+            self.repo_root / "context-config.yaml",
+            "layout:\n  workspace_root: myrepo\n",
+        )
+        resolved = ss._resolve_content_index_slot_path(self.repo_root)
+        self.assertEqual(
+            resolved.as_posix(), "myrepo/cache/autoscaffold-content/CEP-INDEX.md"
+        )
+
+    def test_workspace_root_of_dot_is_malformed_falls_back_to_pre_d21_default(self):
+        _write(self.repo_root / "context-config.yaml", "layout:\n  workspace_root: .\n")
+        resolved = ss._resolve_content_index_slot_path(self.repo_root)
+        self.assertEqual(
+            resolved.as_posix(), "starter_kit/autoscaffold-content/CEP-INDEX.md"
+        )
+
+    def test_marker_overrides_default(self):
+        _write(
+            self.repo_root / "docs" / "index" / ".layout-slots.yaml",
+            "slots:\n  - slot: autoscaffold_content_index\n"
+            "    kind: file\n    file: ROUTER.md\n",
+        )
+        resolved = ss._resolve_content_index_slot_path(self.repo_root)
+        self.assertEqual(resolved.as_posix(), "docs/index/ROUTER.md")
+
+    def test_marker_wins_even_when_workspace_root_is_also_set(self):
+        _write(
+            self.repo_root / "context-config.yaml",
+            "layout:\n  workspace_root: myrepo\n",
+        )
+        _write(
+            self.repo_root / "docs" / "index" / ".layout-slots.yaml",
+            "slots:\n  - slot: autoscaffold_content_index\n"
+            "    kind: file\n    file: ROUTER.md\n",
+        )
+        resolved = ss._resolve_content_index_slot_path(self.repo_root)
+        self.assertEqual(resolved.as_posix(), "docs/index/ROUTER.md")
+
+    def test_marker_for_a_different_slot_is_ignored(self):
+        _write(
+            self.repo_root / "docs" / ".layout-slots.yaml",
+            "slots:\n  - slot: some_other_slot\n    kind: file\n    file: OTHER.md\n",
+        )
+        resolved = ss._resolve_content_index_slot_path(self.repo_root)
+        self.assertEqual(
+            resolved.as_posix(), "starter_kit/autoscaffold-content/CEP-INDEX.md"
+        )
+
+    def test_multiple_markers_for_the_slot_raise_content_index_slot_error(self):
+        _write(
+            self.repo_root / "a" / ".layout-slots.yaml",
+            "slots:\n  - slot: autoscaffold_content_index\n"
+            "    kind: file\n    file: ROUTER.md\n",
+        )
+        _write(
+            self.repo_root / "b" / ".layout-slots.yaml",
+            "slots:\n  - slot: autoscaffold_content_index\n"
+            "    kind: file\n    file: ROUTER.md\n",
+        )
+        with self.assertRaises(ss.ContentIndexSlotError):
+            ss._resolve_content_index_slot_path(self.repo_root)
+
+    def test_marker_under_git_dir_is_ignored(self):
+        _write(
+            self.repo_root / ".git" / "weird" / ".layout-slots.yaml",
+            "slots:\n  - slot: autoscaffold_content_index\n"
+            "    kind: file\n    file: ROUTER.md\n",
+        )
+        resolved = ss._resolve_content_index_slot_path(self.repo_root)
+        self.assertEqual(
+            resolved.as_posix(), "starter_kit/autoscaffold-content/CEP-INDEX.md"
+        )
+
+
+class RenderIndexOutSlotEnforcementTests(unittest.TestCase):
+    """`_cmd_render_index`'s --out must be refused unless it resolves to the
+    same path as `_resolve_content_index_slot_path` -- otherwise CEP-INDEX.md
+    could silently be written somewhere ult-repo-layout never resolves to."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        _write(self.state_path, json.dumps({"modules": []}, indent=2))
+
+    def _run(self, out_rel, repo_root=None):
+        args = argparse.Namespace(
+            state=self.state_path,
+            repo_name="demo-repo",
+            out=str(out_rel),
+            repo_root=str(repo_root if repo_root is not None else self.repo_root),
+        )
+        return ss._cmd_render_index(args)
+
+    def test_out_matching_resolved_default_succeeds(self):
+        rc = self._run(self.repo_root / "starter_kit/autoscaffold-content/CEP-INDEX.md")
+        self.assertEqual(rc, 0)
+        self.assertTrue(
+            (self.repo_root / "starter_kit/autoscaffold-content/CEP-INDEX.md").exists()
+        )
+
+    def test_out_not_matching_resolved_default_is_refused(self):
+        rc = self._run(self.repo_root / "somewhere/else/CEP-INDEX.md")
+        self.assertEqual(rc, 1)
+        self.assertFalse((self.repo_root / "somewhere/else/CEP-INDEX.md").exists())
+
+    def test_out_missing_repo_root_is_refused(self):
+        args = argparse.Namespace(
+            state=self.state_path,
+            repo_name="demo-repo",
+            out=str(self.repo_root / "starter_kit/autoscaffold-content/CEP-INDEX.md"),
+            repo_root=None,
+        )
+        rc = ss._cmd_render_index(args)
+        self.assertEqual(rc, 1)
+
+    def test_out_matching_marker_resolved_path_succeeds(self):
+        _write(
+            self.repo_root / "docs" / "index" / ".layout-slots.yaml",
+            "slots:\n  - slot: autoscaffold_content_index\n"
+            "    kind: file\n    file: ROUTER.md\n",
+        )
+        rc = self._run(self.repo_root / "docs/index/ROUTER.md")
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.repo_root / "docs/index/ROUTER.md").exists())
+
+    def test_stdout_only_call_without_out_does_not_require_repo_root(self):
+        # Preserves the pre-existing no --out / stdout-only behavior for
+        # every caller that never passes --repo-root (e.g. existing SKILL.md
+        # invocations that only print to stdout).
+        args = argparse.Namespace(
+            state=self.state_path, repo_name="demo-repo", out=None, repo_root=None,
+        )
+        rc = ss._cmd_render_index(args)
+        self.assertEqual(rc, 0)
+
+    def test_ambiguous_markers_refuse_rather_than_pick_one(self):
+        _write(
+            self.repo_root / "a" / ".layout-slots.yaml",
+            "slots:\n  - slot: autoscaffold_content_index\n"
+            "    kind: file\n    file: ROUTER.md\n",
+        )
+        _write(
+            self.repo_root / "b" / ".layout-slots.yaml",
+            "slots:\n  - slot: autoscaffold_content_index\n"
+            "    kind: file\n    file: ROUTER.md\n",
+        )
+        rc = self._run(self.repo_root / "a/ROUTER.md")
+        self.assertEqual(rc, 1)
+
+
+class ListInterfacesWithSitesCLITests(unittest.TestCase):
+    """`list-interfaces --with-sites` -- the CLI surface over
+    _interface_call_sites() (TASK-0205). Exercises _cmd_list_interfaces()
+    and the main() argparse wiring directly, matching this suite's existing
+    argparse.Namespace() convention for CLI-entry-point tests."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        self.graph_path = self.repo_root / "graph.json"
+        _write(self.graph_path, json.dumps(_fixture_graph()))
+        _write(
+            self.repo_root / "core" / "main.py",
+            "def run():\n    utils_helpers_add(1, 2)\n",
+        )
+        state = {
+            "modules": [], "repo_docs": {},
+            "interfaces": [{
+                "id": "core--utils", "module_a": "core", "module_b": "utils",
+                "relations": ["calls", "imports", "imports_from"], "weight": 4,
+                "status": "pending", "output_path": None,
+                "generated_at": None, "defer_reason": None,
+            }],
+        }
+        _write(self.state_path, json.dumps(state))
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            state=str(self.state_path), eligible_only=False,
+            with_sites=False, repo_root=None, graph_path=None,
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_list_interfaces(args)
+        return rc, buf.getvalue()
+
+    def test_with_sites_adds_call_sites_key_from_the_loaded_graph(self):
+        rc, out = self._run(
+            with_sites=True, repo_root=str(self.repo_root), graph_path=str(self.graph_path),
+        )
+        self.assertEqual(rc, 0)
+        entries = json.loads(out)
+        self.assertEqual(len(entries), 1)
+        self.assertIn("core/main.py:L2", entries[0]["call_sites"])
+
+    def test_without_with_sites_no_call_sites_key_at_all(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        entries = json.loads(out)
+        self.assertNotIn("call_sites", entries[0])
+
+    def test_with_sites_without_repo_root_refuses(self):
+        rc, out = self._run(with_sites=True, graph_path=str(self.graph_path))
+        self.assertEqual(rc, 1)
+
+    def test_with_sites_without_graph_path_refuses(self):
+        rc, out = self._run(with_sites=True, repo_root=str(self.repo_root))
+        self.assertEqual(rc, 1)
+
+    def test_with_sites_missing_graph_file_reports_error_not_crash(self):
+        rc, out = self._run(
+            with_sites=True, repo_root=str(self.repo_root),
+            graph_path=str(self.repo_root / "missing-graph.json"),
+        )
+        self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":

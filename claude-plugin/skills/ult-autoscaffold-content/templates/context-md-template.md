@@ -2,16 +2,27 @@
 generated_by: ult-autoscaffold-content
 generated_at: <YYYY-MM-DD>
 status: draft
+content_mode: <content-mode>
+doc_kind: context_md
+skill_version: <skill-version>
 ---
 
 <!-- Generated starting point — genuine draft for a human to extend, never
      a claim of completeness. Section depth for this module is governed by
      its tier — see references/module-context-depth-by-tier.md for which
      sections apply; delete every section that doesn't, replacing it with
-     a single "TBD — not covered at this tier's depth" line. Where a kept
-     section's content genuinely isn't observable, write
-     "TBD — <what's missing and why>" instead of a plausible-sounding
-     guess. -->
+     a single "TBD — not covered at this tier's depth" line.
+
+     Evidence: see references/evidence-probes.md#context_md for what to
+     look for per section below (prioritize the work packet's own
+     must_cite/evidence_hints first, then that checklist).
+
+     Every claim needs one of exactly two things, never a plausible-sounding
+     guess in between:
+       - a citation, inline: [src: path#Lx-Ly]
+       - or, if genuinely not observable after looking, the literal gap
+         line: "Not evidenced. Searched: <signal 1>, <signal 2> (absent)."
+     A wrong answer stated confidently is worse than an honest gap. -->
 
 # <module-name> — Module Context
 
@@ -66,7 +77,7 @@ TBD — fill in
 
 <!-- What this module depends on and (when graph-mode is active) what
      depends on it, per scaffold_state.py's recorded in_degree/basis for
-     this module. -->
+     this module (evidence_hints.depends_on / depended_on_by). -->
 
 | Depends on | What it provides |
 |---|---|
