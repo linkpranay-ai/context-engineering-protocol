@@ -4107,5 +4107,418 @@ class ContentModeEvidenceGateTests(unittest.TestCase):
         self.assertIsNone(result["mode_reason"])
 
 
+class EmitSkeletonTests(unittest.TestCase):
+    """TASK-0304 (AutoScaffold_Mode_Plan.md Phase 3 / P1). `emit_skeleton()`
+    renders proposal Sec 4.1's `skeleton` contract deterministically, with
+    no LLM and no repo_root/filesystem input beyond this skill's own
+    templates/: every required_sections heading, its guidance comment
+    verbatim, and one visible "_Not written yet -- see guidance in
+    source._" line replacing the template's own TBD placeholder body. Only
+    `generated_at`/`skill_version` are allowed to vary between calls."""
+
+    def _context_packet(self, module_id="utils/", **overrides):
+        packet = {
+            "packet_id": "how-l2--utils--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": module_id,
+            "tier": 2,
+            "output_path": "org/utils/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": [],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+        packet.update(overrides)
+        return packet
+
+    def _interface_packet(self, **overrides):
+        packet = {
+            "packet_id": "how-l2--app-to-utils--interface",
+            "layer": "how_l2",
+            "kind": "interface_boundary",
+            "module_id": "app--utils",
+            "tier": None,
+            "output_path": "org/interfaces/app-to-utils.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["interface_boundary"],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["interface_boundary"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["interface_boundary"],
+            "must_cite": [],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("interface_boundary", None)]),
+            "read_budget": ss.READ_BUDGET_INTERFACE,
+            "head_commit": None,
+        }
+        packet.update(overrides)
+        return packet
+
+    def _repo_doc_packet(self, kind="coding_standards", **overrides):
+        packet = {
+            "packet_id": "how-l2--coding-standards",
+            "layer": "how_l2",
+            "kind": kind,
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/CODING-STANDARDS.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND[kind],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND[kind]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND[kind],
+            "must_cite": [],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[(kind, None)]),
+            "read_budget": ss.READ_BUDGET_REPO_DOC,
+            "head_commit": None,
+        }
+        packet.update(overrides)
+        return packet
+
+    # -- determinism ---------------------------------------------------- #
+
+    def test_same_inputs_produce_byte_identical_output(self):
+        packet = self._context_packet()
+        first = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                  skill_version="0.5.0")
+        second = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                   skill_version="0.5.0")
+        self.assertEqual(first, second)
+
+    def test_only_generated_at_line_differs_across_calls(self):
+        packet = self._context_packet()
+        first = ss.emit_skeleton(packet, generated_at="2026-01-01T00:00:00Z",
+                                  skill_version="0.5.0")
+        second = ss.emit_skeleton(packet, generated_at="2026-12-31T00:00:00Z",
+                                   skill_version="0.5.0")
+        first_lines = first.split("\n")
+        second_lines = second.split("\n")
+        self.assertEqual(len(first_lines), len(second_lines))
+        diffs = [
+            i for i, (a, b) in enumerate(zip(first_lines, second_lines)) if a != b
+        ]
+        self.assertEqual(len(diffs), 1)
+        self.assertTrue(first_lines[diffs[0]].startswith("generated_at:"))
+
+    def test_omitted_generated_at_defaults_to_now_and_is_present(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertTrue(frontmatter.get("generated_at"))
+
+    def test_omitted_skill_version_defaults_to_skill_md_version(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        # SKILL.md's own frontmatter, read fresh -- never hardcoded, so this
+        # only asserts it's non-empty and not the literal placeholder token.
+        self.assertTrue(frontmatter.get("skill_version"))
+        self.assertNotEqual(frontmatter.get("skill_version"), "<skill-version>")
+
+    # -- frontmatter content ---------------------------------------------- #
+
+    def test_frontmatter_fields_match_packet(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["generated_by"], "ult-autoscaffold-content")
+        self.assertEqual(frontmatter["status"], "draft")
+        self.assertEqual(frontmatter["content_mode"], "skeleton")
+        self.assertEqual(frontmatter["doc_kind"], "context_md")
+        self.assertEqual(frontmatter["skill_version"], "0.5.0")
+
+    def test_interface_frontmatter_carries_both_module_names(self):
+        packet = self._interface_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["module_a"], "app")
+        self.assertEqual(frontmatter["module_b"], "utils")
+
+    # -- sections ----------------------------------------------------------- #
+
+    def test_every_required_section_present_with_not_written_yet_line(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        _frontmatter, body = ss._parse_frontmatter(text)
+        sections = ss._extract_sections(body)
+        for heading in packet["required_sections"]:
+            self.assertIn(heading, sections)
+            self.assertIn(
+                "_Not written yet — see guidance in source._", sections[heading]
+            )
+
+    def test_guidance_comment_preserved_verbatim_in_a_section(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        self.assertIn("Two", text)  # Purpose section's guidance comment text
+        self.assertIn("<!--", text)
+        self.assertIn("-->", text)
+
+    def test_conditional_non_required_section_is_omitted(self):
+        # "State machine (if applicable)" is deliberately NOT in
+        # REQUIRED_SECTIONS_BY_KIND["context_md"] -- skeleton mode has no
+        # evidence to decide applicability, so it must not appear at all.
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        self.assertNotIn("State machine", text)
+
+    def test_no_tbd_fill_in_placeholder_survives_in_section_bodies(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        _frontmatter, body = ss._parse_frontmatter(text)
+        sections = ss._extract_sections(body)
+        for heading in packet["required_sections"]:
+            self.assertNotIn("TBD — fill in", sections[heading])
+
+    def test_no_stray_template_placeholder_tokens_remain(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        for token in ("<content-mode>", "<skill-version>", "<YYYY-MM-DD>",
+                      "<module-name>", "<module-path>"):
+            self.assertNotIn(token, text)
+
+    # -- mechanical facts only, no evidence claims -------------------------- #
+
+    def test_context_md_header_carries_module_path_and_name(self):
+        packet = self._context_packet(module_id="src/core/")
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        self.assertIn("# core — Module Context", text)
+        self.assertIn("**Source path:** `src/core`", text)
+
+    def test_interface_header_carries_both_module_names(self):
+        packet = self._interface_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        self.assertIn("# Interface: `app` ↔ `utils`", text)
+
+    def test_repo_doc_packet_has_no_module_placeholders_to_substitute(self):
+        # coding_standards/testing_guidelines templates carry no module
+        # fields at all -- emit_skeleton must not choke on module_id=None.
+        packet = self._repo_doc_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["doc_kind"], "coding_standards")
+
+    def test_raises_if_template_is_missing_a_required_section(self):
+        packet = self._context_packet(required_sections=["Purpose", "Not-A-Real-Section"])
+        with self.assertRaises(ValueError):
+            ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                              skill_version="0.5.0")
+
+
+class SkeletonValidationTests(unittest.TestCase):
+    """TASK-0304 / proposal Sec 6's "Skeleton" validation row: for
+    `content_mode: skeleton`, `validate()` requires byte identity with
+    `emit_skeleton()`'s own output (generated_at pinned to the file's own
+    value) instead of running the evidence-shaped checks (Sections/
+    Must-cite/Citation resolution/Gap honesty/Floor/Conflicts), which a
+    mechanically-generated skeleton document can never satisfy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.packet = {
+            "packet_id": "how-l2--utils--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "utils/",
+            "tier": 2,
+            "output_path": "org/utils/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            # Deliberately non-empty, unlike a real greenfield packet --
+            # proves the skeleton path does NOT run the must_cite check
+            # (which a no-LLM skeleton could never satisfy).
+            "must_cite": ["src/nonexistent.py"],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+
+    def _write_skeleton(self, generated_at="2026-09-30T00:00:00Z", mutate=None):
+        text = ss.emit_skeleton(self.packet, generated_at=generated_at,
+                                 skill_version="0.5.0")
+        if mutate:
+            text = mutate(text)
+        _write(self.repo_root / self.packet["output_path"], text)
+        return self.packet["output_path"]
+
+    def test_exact_emit_skeleton_output_passes(self):
+        path = self._write_skeleton()
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertEqual(result["failures"], [])
+        self.assertTrue(result["valid"])
+
+    def test_passes_regardless_of_which_generated_at_was_used(self):
+        # generated_at is the one field allowed to vary -- validate() must
+        # re-derive the expected text using the file's OWN generated_at,
+        # not "now".
+        path = self._write_skeleton(generated_at="2020-01-01T00:00:00Z")
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertTrue(result["valid"])
+
+    def test_edited_section_body_fails(self):
+        path = self._write_skeleton(
+            mutate=lambda t: t.replace(
+                "_Not written yet — see guidance in source._",
+                "This module does something.", 1,
+            )
+        )
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("skeleton" in f.lower() for f in result["failures"]))
+
+    def test_dropped_section_fails(self):
+        path = self._write_skeleton(
+            mutate=lambda t: t.replace("## Gotchas", "## Not Gotchas", 1)
+        )
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+
+    def test_mismatched_content_mode_frontmatter_still_caught(self):
+        # The earlier, always-run content_mode frontmatter-vs-packet check
+        # still applies before the skeleton branch's byte-identity check.
+        path = self._write_skeleton(
+            mutate=lambda t: t.replace("content_mode: skeleton", "content_mode: grounded", 1)
+        )
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("content_mode" in f for f in result["failures"]))
+
+    def test_skeleton_mode_does_not_run_must_cite_check(self):
+        # self.packet["must_cite"] names a file that doesn't exist on disk
+        # and is never cited -- a grounded-mode validate() would fail this;
+        # skeleton mode must not even look at it.
+        path = self._write_skeleton()
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertTrue(result["valid"])
+
+    def test_crlf_line_endings_do_not_cause_a_false_mismatch(self):
+        # Written via write_bytes (not the shared _write helper) so the
+        # CRLF bytes land on disk exactly as constructed -- Path.write_text
+        # applies its own platform newline translation on Windows, which
+        # would double an already-CRLF "\r\n" into "\r\r\n" and defeat the
+        # point of this test.
+        text = ss.emit_skeleton(self.packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        crlf_text = text.replace("\n", "\r\n")
+        full_path = self.repo_root / self.packet["output_path"]
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(crlf_text.encode("utf-8"))
+        result = ss.validate(self.repo_root, self.packet["output_path"], self.packet)
+        self.assertTrue(result["valid"])
+
+    def test_stale_head_warning_still_applies_to_skeleton_packets(self):
+        packet = dict(self.packet, head_commit="0" * 40)
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        _write(self.repo_root / packet["output_path"], text)
+        subprocess.run(
+            ["git", "init", "-q"], cwd=str(self.repo_root), check=True,
+        )
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit",
+             "--allow-empty", "-q", "-m", "init"],
+            cwd=str(self.repo_root), check=True,
+        )
+        result = ss.validate(self.repo_root, packet["output_path"], packet)
+        self.assertTrue(result["valid"])
+        self.assertTrue(any("HEAD" in w for w in result["warnings"]))
+
+
+class EmitSkeletonCLITests(unittest.TestCase):
+    """`emit-skeleton` -- the CLI surface over emit_skeleton(), matching
+    this suite's existing argparse.Namespace() convention for CLI-entry-
+    point tests (see ListInterfacesWithSitesCLITests)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.packet = {
+            "packet_id": "how-l2--utils--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "utils/",
+            "tier": 2,
+            "output_path": "org/utils/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": [],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+        self.packet_path = self.repo_root / "packet.json"
+        _write(self.packet_path, json.dumps(self.packet))
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            packet=str(self.packet_path), out=None,
+            generated_at="2026-09-30T00:00:00Z", skill_version="0.5.0",
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_emit_skeleton(args)
+        return rc, buf.getvalue()
+
+    def test_prints_skeleton_to_stdout_by_default(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        frontmatter, _ = ss._parse_frontmatter(out)
+        self.assertEqual(frontmatter["content_mode"], "skeleton")
+
+    def test_out_writes_to_file_instead_of_stdout(self):
+        out_path = self.repo_root / "CONTEXT.md"
+        rc, _stdout = self._run(out=str(out_path))
+        self.assertEqual(rc, 0)
+        text = out_path.read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["doc_kind"], "context_md")
+
+    def test_cli_output_matches_emit_skeleton_function_output(self):
+        rc, out = self._run()
+        direct = ss.emit_skeleton(self.packet, generated_at="2026-09-30T00:00:00Z",
+                                   skill_version="0.5.0")
+        self.assertEqual(out, direct)
+
+
 if __name__ == "__main__":
     unittest.main()

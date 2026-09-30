@@ -2409,6 +2409,144 @@ def _extract_sections(body):
     return sections
 
 
+# TASK-0304 (P1): Sec 4.1's `skeleton` contract -- a deterministic,
+# no-LLM rendering of a kind's own template, with every required_sections
+# heading and its guidance comment kept verbatim and only one visible
+# placeholder line substituted per section. No claim about the repo
+# beyond the mechanical facts the packet itself already states (module
+# path/name, or the two module names of an interface_boundary packet).
+_SKELETON_NOT_WRITTEN_LINE = "_Not written yet — see guidance in source._"
+_LEADING_COMMENT_RE = re.compile(r"\A(<!--.*?-->)", re.DOTALL)
+
+
+def _skill_root():
+    """Directory one level above this file (scripts/) -- this skill's own
+    installation root, where templates/ and SKILL.md live. Used only to
+    read this skill's own template files; everything about the *target*
+    repo comes from `packet`, never from here."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _read_skill_version():
+    """This skill's own `version:` frontmatter field from SKILL.md, read
+    fresh every call rather than hardcoded, so emit_skeleton()'s default
+    never drifts from a bumped SKILL.md version the way a copy-pasted
+    constant would. Falls back to "unknown" if SKILL.md is missing or has
+    no version key -- never raises."""
+    skill_md = _skill_root() / "SKILL.md"
+    if not skill_md.is_file():
+        return "unknown"
+    frontmatter, _body = _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+    return frontmatter.get("version") or "unknown"
+
+
+def _split_interface_module_id(module_id):
+    """Inverse of build_work_packets()'s "{module_a}--{module_b}" join for
+    an interface_boundary packet's module_id -- left-split on the first
+    "--", the same "module names never contain --" assumption that join
+    itself already makes silently. There is no separate module_a/module_b
+    field on the packet, only this combined id."""
+    module_a, _sep, module_b = module_id.partition("--")
+    return module_a, module_b
+
+
+def emit_skeleton(packet, *, generated_at=None, skill_version=None):
+    """Sec 4.1's `skeleton` contract, produced deterministically with no
+    LLM: this skill's own template for `packet["kind"]`, every
+    required_sections heading kept together with its own guidance comment
+    verbatim (sections outside required_sections, e.g. context_md's
+    conditional "State machine (if applicable)", are omitted entirely --
+    skeleton mode has no evidence to decide whether a conditional section
+    even applies), each section's placeholder body replaced by one visible
+    "_Not written yet -- see guidance in source._" line, and only
+    mechanical facts already present on `packet` substituted into the
+    header (module path/name, or both module names for an
+    interface_boundary packet). Raises ValueError if the template is
+    missing a heading `packet["required_sections"]` names -- a template/
+    packet mismatch bug, not a runtime data problem."""
+    if generated_at is None:
+        generated_at = _now_iso()
+    if skill_version is None:
+        skill_version = _read_skill_version()
+
+    template_path = _skill_root() / packet["template"]
+    text = template_path.read_text(encoding="utf-8")
+
+    replacements = {
+        "<YYYY-MM-DD>": generated_at,
+        "<content-mode>": "skeleton",
+        "<skill-version>": skill_version,
+    }
+    if packet["kind"] == "interface_boundary":
+        module_a, module_b = _split_interface_module_id(packet["module_id"])
+        replacements["<module-a>"] = module_a
+        replacements["<module-b>"] = module_b
+    elif packet.get("module_id"):
+        module_path = packet["module_id"].rstrip("/")
+        replacements["<module-path>"] = module_path
+        replacements["<module-name>"] = module_path.rsplit("/", 1)[-1]
+    for token, value in replacements.items():
+        text = text.replace(token, value)
+
+    frontmatter, body = _parse_frontmatter(text)
+    frontmatter_block = "\n".join(
+        ["---"] + ["{}: {}".format(k, v) for k, v in frontmatter.items()] + ["---"]
+    )
+
+    body_lines = body.split("\n")
+    first_heading_idx = len(body_lines)
+    for i, line in enumerate(body_lines):
+        if _HEADING_RE.match(line):
+            first_heading_idx = i
+            break
+    header_block = "\n".join(body_lines[:first_heading_idx]).strip("\n")
+
+    sections = _extract_sections(body)
+    required = packet["required_sections"]
+    missing = [h for h in required if h not in sections]
+    if missing:
+        raise ValueError(
+            "template {} is missing required section(s) {!r} named by "
+            "REQUIRED_SECTIONS_BY_KIND[{!r}]".format(
+                packet["template"], missing, packet["kind"]
+            )
+        )
+
+    blocks = [header_block]
+    for heading, raw in sections.items():
+        if heading not in required:
+            continue
+        comment_match = _LEADING_COMMENT_RE.match(raw)
+        section_lines = ["## " + heading]
+        if comment_match:
+            section_lines.append("")
+            section_lines.append(comment_match.group(1))
+        section_lines.append("")
+        section_lines.append(_SKELETON_NOT_WRITTEN_LINE)
+        blocks.append("\n".join(section_lines))
+
+    body_text = "\n\n".join(blocks).rstrip("\n") + "\n"
+    return frontmatter_block + "\n\n" + body_text
+
+
+def _stale_head_warnings(repo_root, packet):
+    """Sec 6 risk-table's advisory-only "packet HEAD differs from repo
+    HEAD" warning (proposal: "Packets go stale mid-run (the code changes)
+    | Each packet records the HEAD commit. mark-* warns if HEAD has
+    changed since the packet was created."), shared by both validate()'s
+    normal path and its skeleton-mode early return."""
+    warnings = []
+    packet_head = packet.get("head_commit")
+    if packet_head:
+        current_head = _git_head_commit(repo_root)
+        if current_head and current_head != packet_head:
+            warnings.append(
+                "packet HEAD '{}' differs from current HEAD '{}' -- repo "
+                "changed since this packet was created".format(packet_head, current_head)
+            )
+    return warnings
+
+
 def validate(repo_root, path, packet):
     """Sec 6's P0a validator table, run against the file at `repo_root /
     path` for the given work packet. Returns
@@ -2454,6 +2592,42 @@ def validate(repo_root, path, packet):
                 doc_kind, packet["kind"]
             )
         )
+
+    # TASK-0304 (P1): Sec 6's "Skeleton" row -- for content_mode: skeleton,
+    # byte identity with emit_skeleton()'s own output (generated_at pinned
+    # to this file's own value, the one field the contract allows to vary)
+    # is the sole content-correctness gate. The evidence-shaped checks
+    # below (Sections/Must-cite/Citation resolution/Gap honesty/Floor/
+    # Conflicts) are built around citations and gap lines a mechanically-
+    # generated skeleton document can never contain -- applying them here
+    # would fail every skeleton document unconditionally, so they don't
+    # run for this mode. Existence and the frontmatter checks above still
+    # run first, for better diagnostics on a badly mangled file.
+    if packet["content_mode"] == "skeleton":
+        try:
+            expected = emit_skeleton(packet, generated_at=frontmatter.get("generated_at"))
+        except (OSError, ValueError) as e:
+            failures.append("could not compute expected skeleton output: {}".format(e))
+            expected = None
+        if expected is not None:
+            # \r\n -> \n only (cross-platform line-ending tolerance,
+            # matching this codebase's existing posture elsewhere) --
+            # deliberately NOT also stripping trailing whitespace per line
+            # the way _normalized_body_hash() does, since exact content
+            # fidelity is the actual point of a byte-identity check.
+            actual_norm = text.replace("\r\n", "\n")
+            expected_norm = expected.replace("\r\n", "\n")
+            if actual_norm != expected_norm:
+                failures.append(
+                    "content_mode is 'skeleton' but the file is not "
+                    "byte-identical to the deterministic emit-skeleton "
+                    "output for this packet (excluding generated_at)"
+                )
+        return {
+            "valid": len(failures) == 0,
+            "failures": failures,
+            "warnings": _stale_head_warnings(repo_root, packet),
+        }
 
     sections = _extract_sections(body)
     for heading in packet["required_sections"]:
@@ -2545,23 +2719,11 @@ def validate(repo_root, path, packet):
                     "evidence:' line found".format(tool, sorted(distinct_sources))
                 )
 
-    # Stale-packet-HEAD warning (proposal risk table: "Packets go stale
-    # mid-run (the code changes) | Each packet records the HEAD commit.
-    # mark-* warns if HEAD has changed since the packet was created.").
-    # Advisory only -- never affects `valid`/`failures` -- since the code
-    # moving on between packet creation and worker completion is expected
-    # in a long-running wave, not necessarily a real staleness problem.
-    warnings = []
-    packet_head = packet.get("head_commit")
-    if packet_head:
-        current_head = _git_head_commit(repo_root)
-        if current_head and current_head != packet_head:
-            warnings.append(
-                "packet HEAD '{}' differs from current HEAD '{}' -- repo "
-                "changed since this packet was created".format(packet_head, current_head)
-            )
-
-    return {"valid": len(failures) == 0, "failures": failures, "warnings": warnings}
+    return {
+        "valid": len(failures) == 0,
+        "failures": failures,
+        "warnings": _stale_head_warnings(repo_root, packet),
+    }
 
 
 def _normalized_body_hash(full_path):
@@ -3336,6 +3498,24 @@ def _cmd_validate(args):
     return 0 if result["valid"] else 1
 
 
+def _cmd_emit_skeleton(args):
+    """TASK-0304: deterministically render the content_mode: skeleton
+    document for a packet -- no LLM, no repo_root, no state. Prints to
+    stdout by default; --out writes it (atomically) instead."""
+    packet = _load_packet_arg(args.packet)
+    text = emit_skeleton(
+        packet, generated_at=args.generated_at, skill_version=args.skill_version,
+    )
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        aaw.write_text_atomic(out_path, text)
+        print("wrote {}".format(args.out))
+    else:
+        print(text, end="")
+    return 0
+
+
 def _print_validation_warnings(record):
     # Mirrors _cmd_scan's "print non-fatal warnings immediately, not just
     # persisted" posture, for the stale-packet-HEAD warning (validate()'s
@@ -3583,6 +3763,23 @@ def main(argv=None):
     p_validate.add_argument("--repo-root", required=True)
     p_validate.add_argument("--packet", required=True, help="Path to the packet JSON file.")
     p_validate.set_defaults(func=_cmd_validate)
+
+    p_skel = sub.add_parser(
+        "emit-skeleton",
+        help="Deterministically render the content_mode: skeleton document "
+             "for a packet (Sec 4.1), no LLM.",
+    )
+    p_skel.add_argument("--packet", required=True, help="Path to packet JSON file.")
+    p_skel.add_argument(
+        "--out", default=None, help="Write rendered skeleton here instead of stdout."
+    )
+    p_skel.add_argument(
+        "--generated-at", default=None, help="Override the frontmatter generated_at value."
+    )
+    p_skel.add_argument(
+        "--skill-version", default=None, help="Override the frontmatter skill_version value."
+    )
+    p_skel.set_defaults(func=_cmd_emit_skeleton)
 
     p_gen = sub.add_parser("mark-generated", help="Mark one module generated.")
     p_gen.add_argument("state")
