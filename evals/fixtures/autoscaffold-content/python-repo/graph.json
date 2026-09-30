@@ -1,0 +1,28 @@
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "nodes": [
+    {"id": "app_Runner_class", "name": "Runner", "label": "Runner",
+     "file_type": "code", "source_file": "app/main.py",
+     "source_location": "L5", "_origin": "ast"},
+    {"id": "app_Runner_execute", "name": "execute", "label": "Runner.execute",
+     "file_type": "code", "source_file": "app/main.py",
+     "source_location": "L8", "_origin": "ast"},
+    {"id": "utils_Helper_class", "name": "Helper", "label": "Helper",
+     "file_type": "code", "source_file": "utils/helpers.py",
+     "source_location": "L4", "_origin": "ast"},
+    {"id": "utils_Helper_run", "name": "run", "label": "Helper.run",
+     "file_type": "code", "source_file": "utils/helpers.py",
+     "source_location": "L7", "_origin": "ast"}
+  ],
+  "links": [
+    {"source": "app_Runner_execute", "target": "utils_Helper_class",
+     "relation": "imports_from", "context": "from utils.helpers import Helper",
+     "confidence": "EXTRACTED", "source_file": "app/main.py",
+     "source_location": "L2", "weight": 1.0},
+    {"source": "app_Runner_execute", "target": "utils_Helper_run",
+     "relation": "calls", "context": "helper.run(item)",
+     "confidence": "EXTRACTED", "source_file": "app/main.py",
+     "source_location": "L10", "weight": 1.0}
+  ]
+}

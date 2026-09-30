@@ -1,0 +1,209 @@
+"""Consumer-side fail-closed handling of ult-autoscaffold-content drafts.
+
+Implements the ult-context-generate consumer contract for autoscaffolded
+drafts (What-L2 query / constraints compilation / Step 6 contradiction
+detection), plus the cep:ext provenance-marker grammar for
+`content_mode: augmented` drafts. Referenced from SKILL.md Steps 5, 5.5, and
+6.
+
+Behavioral rules (lettered here for cross-reference):
+
+  (a) content_mode: skeleton, or a matched section with no [src: ...]
+      citation to a non-generated file, on a document whose frontmatter has
+      generated_by: ult-autoscaffold-content -- counts as NO coverage.
+  (b) other autoscaffold-content drafts (non-skeleton, with at least one
+      citation to a non-generated file) count as draft_coverage /
+      confidence: INFERRED; this can never clear a Step 7 gap or D8, on
+      both the What-L2 (Step 5) path and the constraints (Step 5.5) path.
+  (c) cep:ext blocks (Sec 7 marker grammar) are excluded by default. When
+      include_external_suggestions: true (context-config.yaml, under the
+      autoscaffold_content: namespace), they become layer: llm-generated,
+      confidence: SUGGESTED, feeding the existing reviewer block.
+  (d) Step 6 anti-circularity: a generated_by: ult-autoscaffold-content
+      document can never corroborate What-L3 evidence -- both ultimately
+      trace to the same code graph.
+  (e) status: reviewed + reviewed_by in frontmatter lifts the INFERRED cap
+      from (b), but only for repo-cited content (content that already has
+      a valid non-generated citation). cep:ext / external content is never
+      lifted by review (proposal Q8: "external blocks stay external").
+
+Pure functions only: no filesystem I/O. Callers inject a repo-root-relative
+`is_generated_path(path) -> bool` callback (matching the resolved
+autoscaffold-content output slot) so this module and its tests need no
+disk access.
+"""
+
+import re
+
+AUTOSCAFFOLD_GENERATED_BY = "ult-autoscaffold-content"
+
+# Mirrors ult-autoscaffold-content/scripts/scaffold_state.py's _CITATION_RE.
+# Duplicated rather than imported: this codebase's skills are each
+# independently installable, so no skill cross-imports another skill's
+# scripts (see ult-repo-layout's own duplicated layout-slot helpers for the
+# same precedent).
+_CITATION_RE = re.compile(r"\[src:\s*([^\]#]+?)#L(\d+)(?:-L(\d+))?\]")
+
+# Proposal Sec 7: a cep:ext block is delimited by an HTML-comment marker
+# pair. The heading line is fixed spec text but is not required to locate
+# the block itself -- the marker comments are authoritative.
+_CEP_EXT_RE = re.compile(
+    r"<!--\s*cep:ext\s+id=(?P<id>\S+)\s+source=(?P<source>\S+)\s+"
+    r"confidence=(?P<confidence>\S+)\s*-->\n"
+    r"(?P<body>.*?)"
+    r"<!--\s*/cep:ext\s*-->\n?",
+    re.DOTALL,
+)
+
+
+def is_autoscaffold_generated(frontmatter):
+    """True if `frontmatter` (a parsed dict) marks its document as produced
+    by ult-autoscaffold-content."""
+    return frontmatter.get("generated_by") == AUTOSCAFFOLD_GENERATED_BY
+
+
+def citations_in(text):
+    """Return every [src: path#Lx] / [src: path#Lx-Ly] citation in `text`
+    as (path, line_start, line_end) tuples (line_end == line_start for a
+    single-line citation)."""
+    citations = []
+    for match in _CITATION_RE.finditer(text):
+        path, start, end = match.group(1), match.group(2), match.group(3)
+        start_i = int(start)
+        end_i = int(end) if end else start_i
+        citations.append((path, start_i, end_i))
+    return citations
+
+
+def has_non_generated_citation(text, is_generated_path):
+    """True if `text` contains at least one citation whose path is NOT
+    itself autoscaffold-generated output, per the injected
+    `is_generated_path` predicate."""
+    return any(not is_generated_path(path) for path, _, _ in citations_in(text))
+
+
+def classify_l2_match(frontmatter, section_text, is_generated_path):
+    """Classify one matched section against What-L2 (Step 5) or the
+    constraints path (Step 5.5), per proposal Sec 8 rules (a)/(b).
+
+    Returns one of:
+      {"coverage": False, "reason": "not-autoscaffold"}
+      {"coverage": False, "reason": "skeleton"}
+      {"coverage": False, "reason": "no-non-generated-citation"}
+      {"coverage": True, "layer": "draft_coverage", "confidence": "INFERRED",
+       "clears_gap": False}
+    """
+    if not is_autoscaffold_generated(frontmatter):
+        return {"coverage": False, "reason": "not-autoscaffold"}
+    if frontmatter.get("content_mode") == "skeleton":
+        return {"coverage": False, "reason": "skeleton"}
+    if not has_non_generated_citation(section_text, is_generated_path):
+        return {"coverage": False, "reason": "no-non-generated-citation"}
+    return {
+        "coverage": True,
+        "layer": "draft_coverage",
+        "confidence": "INFERRED",
+        "clears_gap": False,
+    }
+
+
+def can_corroborate_what_l3(frontmatter):
+    """Step 6 (D7) anti-circularity, proposal Sec 8 rule (d): a document
+    generated by ult-autoscaffold-content can never corroborate What-L3
+    evidence, since both ultimately trace to the same code graph. This is
+    unaffected by review status (see lifts_inferred_cap) -- review lifts
+    the confidence cap on cited draft content, it does not turn a derived
+    document into an independent source."""
+    return not is_autoscaffold_generated(frontmatter)
+
+
+def find_cep_ext_blocks(text):
+    """Parse every cep:ext block (proposal Sec 7 marker grammar) out of
+    `text`. Returns a list of {"id", "source", "confidence", "body", "span"}
+    dicts in document order. `span` is the (start, end) character offset of
+    the full marker pair, for use by strip_cep_ext_blocks."""
+    blocks = []
+    for match in _CEP_EXT_RE.finditer(text):
+        blocks.append(
+            {
+                "id": match.group("id"),
+                "source": match.group("source"),
+                "confidence": match.group("confidence"),
+                "body": match.group("body").strip(),
+                "span": match.span(),
+            }
+        )
+    return blocks
+
+
+def classify_cep_ext_blocks(text, include_external_suggestions):
+    """Classify every cep:ext block in `text`, per proposal Sec 8 rule (c).
+
+    Excluded by default (include_external_suggestions is False or absent):
+    each block is returned with included=False and no layer/confidence, so
+    callers can still enumerate what was dropped.
+
+    Opted in (include_external_suggestions is True): each block is
+    returned with included=True, layer="llm-generated",
+    confidence="SUGGESTED" -- always SUGGESTED regardless of the marker's
+    own confidence= attribute, since that attribute is provenance metadata
+    describing how the model produced the suggestion, not a trust level
+    this consumer should inherit unmodified.
+    """
+    classified = []
+    for block in find_cep_ext_blocks(text):
+        if include_external_suggestions:
+            classified.append(
+                {
+                    **block,
+                    "included": True,
+                    "layer": "llm-generated",
+                    "confidence": "SUGGESTED",
+                }
+            )
+        else:
+            classified.append(
+                {
+                    **block,
+                    "included": False,
+                    "layer": None,
+                    "confidence": None,
+                }
+            )
+    return classified
+
+
+def strip_cep_ext_blocks(text):
+    """Remove every cep:ext block (markers and body) from `text` entirely.
+    Used when include_external_suggestions is false so downstream context
+    assembly never sees the excluded external content."""
+    return _CEP_EXT_RE.sub("", text)
+
+
+def lifts_inferred_cap(frontmatter):
+    """Proposal Sec 7 / Q8, rule (e): status: reviewed plus a reviewed_by
+    value in frontmatter lifts the INFERRED cap on repo-cited draft
+    content. Both fields must be present; reviewed_by alone or status
+    alone is not enough."""
+    return frontmatter.get("status") == "reviewed" and bool(frontmatter.get("reviewed_by"))
+
+
+def classify_l2_match_with_review(frontmatter, section_text, is_generated_path):
+    """classify_l2_match, with rule (e)'s review uplift applied on top:
+    a draft_coverage/INFERRED result is promoted to a normal, gap-clearing
+    EXTRACTED match when the document has been reviewed (lifts_inferred_cap)
+    -- since the uplift applies only to already repo-cited content, a
+    skeleton or uncited match is returned unchanged (there is nothing
+    cited to lift)."""
+    base = classify_l2_match(frontmatter, section_text, is_generated_path)
+    if not base.get("coverage"):
+        return base
+    if not lifts_inferred_cap(frontmatter):
+        return base
+    return {
+        "coverage": True,
+        "layer": base["layer"],
+        "confidence": "EXTRACTED",
+        "clears_gap": True,
+        "reviewed": True,
+    }

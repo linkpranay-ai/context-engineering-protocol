@@ -21,6 +21,13 @@
       "input": "Quick question — what does the get_db function in this file actually do?",
       "not_expected_skill": "context-generate",
       "notes": "A simple lookup — exactly the case the skill's own 'Do NOT use for simple lookups' clause exists to redirect away from the full context-assembly pipeline."
+    },
+    {
+      "id": "ult-context-generate-04",
+      "type": "positive",
+      "input": "This module already has an autoscaffolded CONTEXT.md draft from ult-autoscaffold-content — assemble the real, source-attributed context package for the auth-token feature before we generate anything from it.",
+      "expected_skill": "context-generate",
+      "notes": "Routing must still fire when the project already contains generated_by: ult-autoscaffold-content drafts. This skill is the enforcement point for the fail-closed rule implemented in scripts/draft_coverage.py and documented in SKILL.md Steps 5/5.5/6: a skeleton or uncited autoscaffold draft is no coverage, a cited-but-unreviewed draft is draft_coverage/INFERRED and cannot clear a Step 7/D8 gap or corroborate What-L3 in Step 6, and cep:ext external-suggestion blocks are excluded unless include_external_suggestions is set — this case exists so a future change to the trigger phrasing doesn't quietly stop routing autoscaffolded projects through the real fail-closed pipeline."
     }
   ]
 }

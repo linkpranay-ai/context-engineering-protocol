@@ -118,8 +118,9 @@ root; run `scaffold_state.py show <state.json>` if it exists).
 - **State file exists:** this repo already has a Phase B run in progress or
   finished. Report current progress plainly (N generated / M pending / K
   skipped, per tier, and which graph mode was used) and ask the user
-  whether to **continue** (skip straight to Step 5b for the still-pending
-  modules) or **start over** (re-run `scan --rescan` and re-offer the tier
+  whether to **continue** (skip straight to Step 5a to re-plan packets for
+  the still-pending modules) or **start over** (re-run `scan --rescan` and
+  re-offer the tier
   table). Never silently restart — a silent restart would look like
   progress was lost — and never silently continue either, since the user
   may have meant to target a different, smaller subset this time.
@@ -228,7 +229,7 @@ uses).
        or a hand-picked subset. This is a "how much work right now" call,
        not a layout-config decision — one question, answered once per run,
        not a PENDING-field-editing artifact.
-    4. Proceed to Step 5b for the chosen modules.
+    4. Proceed to Step 5a to plan work packets for the chosen modules.
   - **Between the two thresholds (the ambiguous band)** → the one case
     with no safe default. State the count and ask the user directly which
     path to take — a wrong guess in either direction either undersells a
@@ -294,35 +295,105 @@ answer stated confidently is worse than an honest gap, for exactly the
 reason `compiling-project-guidelines` gives for its own scope-awareness
 principle.
 
-## Step 5b — Per-module generation (large repos only)
+## Step 5a — Plan work packets (orchestrator/worker model, large repos only)
 
-For each module the user chose to cover in Step 4, one at a time:
+Phase B's per-module, repo-doc, and interface-boundary generation runs
+through an **orchestrator/worker split**: this skill (running as the
+orchestrator) never writes generated prose itself in this path — it plans
+work packets, dispatches one worker per packet, validates each worker's
+output, and is the *only* thing that ever writes `TRIAGE-STATE.json`. A
+worker writes only its own packet's `output_path` and nothing else — never
+state, never `CEP-INDEX.md`. This split exists so a worker's mistake (bad
+citation, thin content, wrong section) is caught by `validate` before it
+ever reaches `generated` status, and so a repo's checkpoint always reflects
+exactly what the orchestrator itself recorded.
 
-1. Open `templates/context-md-template.md` and fill it in, scoped to what's
-   observable about *this module specifically* — its own files, its own
-   entry points, and (when graph-mode is active) what it depends on and
-   what depends on it, per `scaffold_state.py`'s recorded `in_degree` and
-   `basis`. Same honesty standard as Step 5: a "TBD" line beats a
-   confident guess. Section depth varies by tier — read
-   `references/module-context-depth-by-tier.md` for which sections to
-   keep before writing; delete the rest from the template rather than
-   leaving them half-filled.
-2. Immediately call `scaffold_state.py mark-generated <state.json>
-   <module-id> --output <path>`, then `scaffold_state.py render-index
-   <state.json> --repo-name <name> --out <CEP-INDEX.md path>` so the
-   checkpoint and router file both stay current mid-run — if the run is
-   interrupted after this point, nothing generated so far is lost or
-   miscounted.
-3. Continue to the next chosen module. If the user asked for "Tier 1 only"
-   or a hand-picked subset, stop after the last one in that set rather than
-   continuing into modules they didn't ask for this run.
+1. Run `scaffold_state.py plan <state.json> --repo-root <root>
+   --how-l2-path <path> [--graph-path <path>] [--out-dir <dir>]`. This
+   builds one work-packet JSON (default under
+   `cache/autoscaffold-content/packets/`) for every still-`pending` item
+   that's currently packet-eligible:
+   - a `context_md` packet for each pending **Tier 1 or Tier 2** module the
+     user chose to cover in Step 4,
+   - a `coding_standards`/`testing_guidelines` packet for each pending
+     repo-wide doc the user opts into at Step 5c,
+   - an `interface_boundary` packet for each pending interface pair (graph
+     mode only) — eligibility for *dispatch* is checked separately in
+     Step 5d, not here.
+2. **Disclosed scope boundary:** `plan` never produces a packet for a
+   **Tier 3 (leaf)** module — `context_md` packets exist only for Tier 1/2
+   in this release. If the user's Step 4 answer included Tier 3 modules
+   (e.g. "all pending"), say so plainly before dispatching anything: Tier 3
+   modules chosen this run get `scaffold_state.py mark-skipped <state.json>
+   <module-id> --reason "Tier 3 not packet-eligible in this release"`
+   rather than being silently dropped or force-fit into the packet
+   pipeline. Report this in Step 7 and again at the phase boundary — it's a
+   real gap in current scope, not a rounding error to gloss over.
+3. Each packet fully specifies what its worker is allowed to depend on:
+   `output_path` (the only path the worker may write), `template`,
+   `required_sections`, `must_cite`, `evidence_hints`, `read_budget`, and
+   `validation_floor`. `effective_mode` is fixed to `"grounded"` for every
+   packet this release — mode selection (skeleton/grounded/augmented) is
+   future work, not something to improvise here.
+
+## Step 5b — Per-module generation (large repos only, packet-driven)
+
+For each `context_md` packet from Step 5a covering a module the user chose
+to cover in Step 4:
+
+1. **Dispatch a worker** for that packet — one subagent per packet, given
+   only the packet JSON, `templates/context-md-template.md`, and
+   `references/module-context-depth-by-tier.md` (which sections to keep for
+   this tier; delete the rest from the template rather than leaving them
+   half-filled). The worker writes the filled template to the packet's
+   `output_path` and reports back that it's done — it never calls any
+   `scaffold_state.py mark-*`/`render-index`/`validate` subcommand and
+   never touches `TRIAGE-STATE.json`; those stay orchestrator-only. Same
+   honesty standard as Step 5: a "TBD" line beats a confident guess, and
+   every required section needs either a real `[src: path#Lx]` citation or
+   a recognized gap-line.
+   - **Concurrency:** on a host that supports dispatching multiple workers
+     at once, run up to 4 packets in parallel (`max_parallel_workers`, a
+     current fixed default — not yet a `context-config.yaml` key). On a
+     host without concurrent subagent dispatch, fall back to one worker at
+     a time, sequentially. State plainly which mode actually ran ("N
+     workers dispatched in parallel" / "sequential dispatch — host has no
+     concurrent-agent support") — same "always state which mode"
+     convention as Step 3.5's graph-mode line.
+2. **Validate and mark, as the orchestrator, once the worker reports its
+   file written:** call `scaffold_state.py mark-generated <state.json>
+   <module-id> --output <path> --repo-root <root> --packet <packet.json>`
+   (this runs the same checks `validate` does — required sections cited,
+   `must_cite` paths actually cited, frontmatter complete and consistent,
+   validation-floor byte/citation counts met — before persisting
+   `status: "generated"`). On success, immediately follow with
+   `scaffold_state.py render-index <state.json> --repo-name <name> --out
+   <CEP-INDEX.md path> --repo-root <root>` so the checkpoint and router
+   file both stay current mid-run — if the run is interrupted after this
+   point, nothing generated so far is lost or miscounted.
+3. **On validation failure:** the orchestrator gets **one retry**
+   (`worker_retries`, a current fixed default of 1 — not yet a
+   `context-config.yaml` key): re-dispatch a fresh worker for the *same*
+   packet (do not hand the failing draft back to the same worker instance;
+   start clean). Re-run `mark-generated` against the retry's output.
+   - If the retry also fails, call the same command again with `--final`
+     so the failure is persisted as `status: "failed"` — never silently
+     promoted to `generated`. Report failed modules by name and reason.
+   - Only bypass a failure (persist `status: "bypassed"`) by adding
+     `--accept-validation-failure "<reason>"` to the `mark-generated` call,
+     and only when a human present in this conversation explicitly says to
+     accept that specific draft despite the failure — never bypass on your
+     own judgment.
+4. Continue to the next chosen module/packet. If the user asked for "Tier 1
+   only" or a hand-picked subset, stop after the last one in that set
+   rather than continuing into modules they didn't ask for this run.
 
 A module the user explicitly declines (not chosen this run, or actively
 deprioritized) gets `scaffold_state.py mark-skipped <state.json>
 <module-id> --reason <text>` instead of silently staying `pending` forever
 with no record of why it was passed over.
 
-## Step 5c — Repo-wide convention docs (existence-gated)
+## Step 5c — Repo-wide convention docs (existence-gated, packet-driven)
 
 Runs once per repo, independent of Phase A/B and independent of tiering —
 offer it any time How-L2 is in scope and hasn't already been covered.
@@ -333,37 +404,54 @@ whether it already exists at `<how_l2_path>/<filename>`:
 - **Already exists:** skip it silently — this step never partially fills or
   reconciles against an existing doc, same non-destructive rule Step 4
   applies to the overview case.
-- **Doesn't exist:** ask the user once whether to generate it. If yes, read
+- **Doesn't exist:** ask the user once whether to generate it. If yes,
+  Step 5a already planned a `coding_standards`/`testing_guidelines` packet
+  for it — dispatch a worker with that packet plus
   `references/generate-coding-standards.md` or
-  `references/generate-testing-guidelines.md` (matching the kind) and
-  follow it — each reads real project config to ground the doc in what's
-  actually present, then fills `templates/coding-standards-template.md` or
-  `templates/testing-guidelines-template.md`. Call
+  `references/generate-testing-guidelines.md` (matching the kind), which
+  each ground the doc in real project config the worker should read before
+  filling `templates/coding-standards-template.md` or
+  `templates/testing-guidelines-template.md`. The worker writes only the
+  packet's `output_path`. Once it reports done, the orchestrator calls
   `scaffold_state.py mark-repo-doc-generated <state.json> <kind> --output
-  <path>` immediately after writing. If the user declines, call
-  `scaffold_state.py mark-repo-doc-skipped <state.json> <kind> --reason
-  <text>` instead of leaving it silently unrecorded.
+  <path> --repo-root <root> --packet <packet.json>` — same
+  validate/retry/bypass contract as Step 5b (one retry on failure, then
+  `--final` to persist `status: "failed"`, or an explicit
+  `--accept-validation-failure "<reason>"` only on the user's word). If the
+  user declines, call `scaffold_state.py mark-repo-doc-skipped
+  <state.json> <kind> --reason <text>` instead of leaving it silently
+  unrecorded.
 
-## Step 5d — Interface-boundary docs (graph-mode, large repos only)
+## Step 5d — Interface-boundary docs (graph-mode, large repos only, second wave)
 
 Only reachable when Step 3.5 landed on graphify mode and this is a Phase B
 (large-repo) run — see Step 3.5's gating note. Skip this step entirely
 otherwise; there's no crossing-edge data to generate from in heuristic mode
 or in the small/single-overview case.
 
-1. Run `scaffold_state.py list-interfaces <state.json> --eligible-only` —
-   pairs whose both endpoint modules are already `generated` this run
-   (Step 5b must reach both endpoints before their interface doc is
-   eligible; that's what `--eligible-only` filters for).
-2. For each eligible pair the user chooses to cover, read
-   `references/generate-interface-docs.md` and follow it — it fills
-   `templates/interface-boundary-template.md`, grounded only in the
-   graph-observed `relations`/`weight` for that pair (see that reference
-   file for exactly what stays `TBD` and why). Call
-   `scaffold_state.py mark-interface-generated <state.json> <interface-id>
-   --output <path>` immediately after writing.
-3. For a pending pair not yet eligible (an endpoint not generated this
-   run) or one the user declines, call `scaffold_state.py
+This step is a deliberate **second wave**, dependent on Step 5b's first
+wave finishing: an `interface_boundary` packet is only worth dispatching
+once both of its endpoint modules are already `generated`, and that can
+only be known after Step 5b has run.
+
+1. Once Step 5b's chosen modules are done (generated, failed, or skipped),
+   run `scaffold_state.py list-interfaces <state.json> --eligible-only` —
+   pairs whose both endpoint modules are now `generated` (Step 5b must
+   reach both endpoints before their interface doc is eligible; that's
+   what `--eligible-only` filters for). Step 5a already built an
+   `interface_boundary` packet for every pending pair, eligible or not —
+   this is the point where eligibility is actually checked before
+   dispatch.
+2. For each eligible pair the user chooses to cover, dispatch a worker with
+   that pair's packet plus `references/generate-interface-docs.md`, which
+   grounds the doc only in the graph-observed `relations`/`weight` for that
+   pair (see that reference file for exactly what stays `TBD` and why).
+   The worker writes only the packet's `output_path`. Once it reports done,
+   the orchestrator calls `scaffold_state.py mark-interface-generated
+   <state.json> <interface-id> --output <path> --repo-root <root> --packet
+   <packet.json>` — same validate/retry/bypass contract as Step 5b.
+3. For a pending pair not yet eligible (an endpoint not generated or
+   failed this run) or one the user declines, call `scaffold_state.py
    mark-interface-deferred <state.json> <interface-id> --reason <text>`
    (e.g. "endpoint utils/ not generated this run") instead of leaving it
    silently `pending` with no record of why.
@@ -393,19 +481,35 @@ the wizard tab and click "Check now" to confirm the box picked it up.
 - Domain pack status, per Step 4.5: used `<path>`, not configured, or
   configured but missing — same "state which mode you used" convention as
   the graph-mode line above.
-- The tier summary (module counts per tier) and how many were generated
-  this run vs. skipped vs. still pending.
+- Dispatch mode used for worker packets (Step 5b): parallel (how many
+  workers at once, up to the current fixed default of 4) or sequential
+  (host has no concurrent-agent support) — same "always state which mode"
+  convention as the graph-mode line above.
+- The tier summary (module counts per tier) and, for each Tier 1/2 module
+  the user chose this run: **generated**, **failed** (validation failed
+  even after the one retry, and no bypass reason was given), **bypassed**
+  (validation failed but was explicitly accepted with a stated reason), or
+  **skipped**/still **pending**. Report failed modules by name and their
+  recorded failure reasons, not just a count.
+- If the user's chosen scope included any **Tier 3** modules: state plainly
+  that Tier 3 modules have no `context_md` packet in this release
+  (`plan` only builds packets for Tier 1/2) and were `mark-skipped` with
+  that reason rather than silently dropped — this is a disclosed scope
+  gap, not a bug to explain away.
 - Repo-wide docs status (Step 5c): which of `CODING-STANDARDS.md`/
-  `TESTING-GUIDELINES.md` were generated this run, already existed and were
-  left alone, or were skipped by the user.
-- Interface-boundary doc status (Step 5d, graph-mode runs only): how many
-  pairs were generated this run vs. deferred, per
-  `scaffold_state.py list-interfaces`.
+  `TESTING-GUIDELINES.md` were generated this run (or failed/bypassed, same
+  categories as above), already existed and were left alone, or were
+  skipped by the user.
+- Interface-boundary doc status (Step 5d, graph-mode runs only, second
+  wave): how many pairs were generated this run vs. deferred (not yet
+  eligible, or declined), per `scaffold_state.py list-interfaces`.
 - The path to `CEP-INDEX.md` (the router file) and to `TRIAGE-STATE.json`
   (the checkpoint) — `layout-slots-registry.yaml`'s
   `autoscaffold_content_index`/`autoscaffold_content_state` slots.
 - How to resume later: re-run this skill against the same target: Step 2.5
-  finds the existing state file and picks up where this run left off.
+  finds the existing state file, and Step 5a re-plans packets for whatever
+  is still pending (including any `failed` items the user wants retried
+  from scratch).
 
 ## What this skill deliberately does not do
 

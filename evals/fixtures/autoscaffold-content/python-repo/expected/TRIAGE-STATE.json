@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "repo_scan": {
+    "graph_source": "graphify",
+    "graph_path": "C:/Users/pmishra/OneDrive - RadiSys Corporation/Desktop/Liberary/Experiment_Threat_Modeling/context-engineering-oss/evals/fixtures/autoscaffold-content/python-repo/graph.json",
+    "scanned_at": "2026-09-29T10:05:01Z",
+    "graph_module_overlap_warning": null,
+    "graph_cep_contamination_warning": null
+  },
+  "modules": [
+    {
+      "id": "app/",
+      "tier": 3,
+      "in_degree": 0,
+      "file_count": 2,
+      "basis": "graph:in-degree",
+      "status": "pending",
+      "generated_at": null,
+      "output_path": null,
+      "skip_reason": null
+    },
+    {
+      "id": "utils/",
+      "tier": 2,
+      "in_degree": 1,
+      "file_count": 2,
+      "basis": "graph:in-degree",
+      "status": "pending",
+      "generated_at": null,
+      "output_path": null,
+      "skip_reason": null
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "app--utils",
+      "module_a": "app",
+      "module_b": "utils",
+      "relations": [
+        "calls",
+        "imports_from"
+      ],
+      "weight": 2,
+      "status": "pending",
+      "output_path": null,
+      "generated_at": null,
+      "defer_reason": null
+    }
+  ],
+  "repo_docs": {
+    "coding_standards": {
+      "status": "pending",
+      "output_path": null,
+      "generated_at": null,
+      "skip_reason": null
+    },
+    "testing_guidelines": {
+      "status": "pending",
+      "output_path": null,
+      "generated_at": null,
+      "skip_reason": null
+    }
+  },
+  "index": {
+    "output_path": null,
+    "rendered_at": null
+  }
+}

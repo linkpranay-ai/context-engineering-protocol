@@ -2,16 +2,30 @@
 generated_by: ult-autoscaffold-content
 generated_at: <YYYY-MM-DD>
 status: draft
+content_mode: <content-mode>
+doc_kind: requirements_overview
+skill_version: <skill-version>
 ---
 
 <!-- Generated starting point — genuine draft for a human to extend, never
      a claim of completeness. Base every claim on what you can actually
      observe — package manifests, entry points, directory names, existing
      (even if sparse) docs, commit history if useful. Never invent
-     requirements the codebase doesn't evidence; where you genuinely don't
-     know, write "TBD — <what's missing and why>" instead of guessing
-     plausibly. A wrong answer stated confidently is worse than an honest
-     gap. -->
+     requirements the codebase doesn't evidence.
+
+     Evidence: see references/evidence-probes.md#requirements_overview for
+     what to look for per section below. This kind defaults to `skeleton`
+     mode (a "grounded" requirements doc tends to just restate what a
+     What-L3 graph already evidences back at itself) — the citation/gap
+     rules below still apply in full whenever `grounded` is explicitly
+     requested anyway.
+
+     Every claim needs one of exactly two things, never a plausible-sounding
+     guess in between:
+       - a citation, inline: [src: path#Lx-Ly]
+       - or, if genuinely not observable after looking, the literal gap
+         line: "Not evidenced. Searched: <signal 1>, <signal 2> (absent)."
+     A wrong answer stated confidently is worse than an honest gap. -->
 
 # <Project name> — Requirements Overview
 

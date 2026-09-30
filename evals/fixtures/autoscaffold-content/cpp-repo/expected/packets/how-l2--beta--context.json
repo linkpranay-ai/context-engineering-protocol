@@ -1,0 +1,42 @@
+{
+  "domain_pack": null,
+  "effective_mode": "grounded",
+  "evidence_hints": {
+    "call_sites": [],
+    "depended_on_by": [
+      "alpha/"
+    ],
+    "depends_on": [],
+    "top_symbols_by_in_degree": [
+      "Helper",
+      "run"
+    ]
+  },
+  "head_commit": "2c32fa95d988e52e6a2874802262e8ed7bfc9d07",
+  "kind": "context_md",
+  "layer": "how_l2",
+  "mode_reason": null,
+  "module_id": "beta/",
+  "must_cite": [
+    "beta/Helper.h"
+  ],
+  "output_path": "docs/how/repo/beta/CONTEXT.md",
+  "packet_id": "how-l2--beta--context",
+  "probe_checklist_ref": "references/module-context-depth-by-tier.md",
+  "read_budget": 20,
+  "required_sections": [
+    "Purpose",
+    "Inputs",
+    "Outputs",
+    "Key abstractions",
+    "Dependencies",
+    "Design invariants",
+    "Gotchas"
+  ],
+  "template": "templates/context-md-template.md",
+  "tier": 2,
+  "validation_floor": {
+    "min_body_bytes": 800,
+    "min_distinct_cited_files": 3
+  }
+}

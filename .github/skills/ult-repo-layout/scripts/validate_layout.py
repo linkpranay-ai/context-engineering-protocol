@@ -879,22 +879,43 @@ def check_git_history(repo_root, config):
 # layout-slots-registry.yaml consistency check (D21 §16.8, Phase 3e)
 # ---------------------------------------------------------------------------
 
+# TASK-0110: the four (registry field -> SLOT_REGISTRY key) pairs
+# layout-slots-registry.yaml's own header comment documents as mirroring
+# SLOT_REGISTRY "exactly". default_bucket/config_key/consumers are that same
+# comment's documented registry-only columns SLOT_REGISTRY doesn't separately
+# carry, so they are deliberately excluded here - widening this tuple to
+# cover them would be inventing a stricter contract than the file itself
+# claims.
+_REGISTRY_FIELD_TO_SLOT_REGISTRY_KEY = (
+    ("kind", "kind"),
+    ("pre_d21_default", "default"),
+    ("workspace_root_leaf", "workspace_root_leaf"),
+    ("producer", "owning_skill"),
+)
+
+
 def check_registry_consistency(repo_root):
     """D21 §16.8: if `layout-slots-registry.yaml` exists at `repo_root` (the
     library-level superset registry - never copied into consuming projects),
     its `slots:` entries with `project_layout_slot: true` must exactly match
-    SLOT_REGISTRY's keys (this script's source of truth). FAIL on drift in
-    either direction. Returns [] (no-op) if the file is absent - true for
-    every consuming project and every test fixture in this suite."""
+    SLOT_REGISTRY's keys (this script's source of truth), AND (TASK-0110) for
+    every slot present in both, the four fields the registry's own header
+    comment documents as mirroring SLOT_REGISTRY "exactly"
+    (kind/pre_d21_default/workspace_root_leaf/producer) must actually match
+    it field-for-field - two files can agree on which slots exist while
+    disagreeing on where one of them resolves to, and nothing else catches
+    that. FAIL on any drift. Returns [] (no-op) if the file is absent - true
+    for every consuming project and every test fixture in this suite."""
     registry = load_yaml_file(Path(repo_root) / "layout-slots-registry.yaml")
     if registry is None:
         return []
 
-    registry_ids = {
-        entry.get("id")
+    registry_entries = {
+        entry.get("id"): entry
         for entry in (registry.get("slots") or [])
         if isinstance(entry, dict) and entry.get("project_layout_slot") is True
     }
+    registry_ids = set(registry_entries.keys())
     code_ids = set(SLOT_REGISTRY.keys())
 
     problems = []
@@ -910,6 +931,20 @@ def check_registry_consistency(repo_root):
             f"project_layout_slot: true, but SLOT_REGISTRY has no entry for "
             f"it (registry/code drift, §16.8)."
         )
+
+    for slot_id in sorted(registry_ids & code_ids):
+        entry = registry_entries[slot_id]
+        spec = SLOT_REGISTRY[slot_id]
+        for registry_field, code_key in _REGISTRY_FIELD_TO_SLOT_REGISTRY_KEY:
+            registry_value = entry.get(registry_field)
+            code_value = spec.get(code_key)
+            if registry_value != code_value:
+                problems.append(
+                    f"slot '{slot_id}' field drift (§16.8): "
+                    f"layout-slots-registry.yaml's '{registry_field}' is "
+                    f"{registry_value!r}, but SLOT_REGISTRY's '{code_key}' is "
+                    f"{code_value!r} - these must mirror each other exactly."
+                )
     return problems
 
 

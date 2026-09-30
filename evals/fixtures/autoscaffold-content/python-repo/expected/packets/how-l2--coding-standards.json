@@ -1,0 +1,39 @@
+{
+  "domain_pack": null,
+  "effective_mode": "grounded",
+  "evidence_hints": {
+    "call_sites": [],
+    "depended_on_by": [],
+    "depends_on": [],
+    "top_symbols_by_in_degree": []
+  },
+  "head_commit": "2c32fa95d988e52e6a2874802262e8ed7bfc9d07",
+  "kind": "coding_standards",
+  "layer": "how_l2",
+  "mode_reason": null,
+  "module_id": null,
+  "must_cite": [
+    ".github/workflows/ci.yml",
+    ".style.yapf",
+    "lint.sh",
+    "ruff.toml"
+  ],
+  "output_path": "docs/how/repo/CODING-STANDARDS.md",
+  "packet_id": "how-l2--coding-standards",
+  "probe_checklist_ref": "references/generate-coding-standards.md",
+  "read_budget": 30,
+  "required_sections": [
+    "Detected tooling",
+    "Formatting",
+    "Naming conventions",
+    "Error handling",
+    "Logging",
+    "Review expectations"
+  ],
+  "template": "templates/coding-standards-template.md",
+  "tier": null,
+  "validation_floor": {
+    "min_body_bytes": 800,
+    "min_distinct_cited_files": 3
+  }
+}

@@ -1,0 +1,12 @@
+name: ci
+on: [push]
+jobs:
+  lint-check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: yapf --version
+      - run: ruff --version
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pytest
