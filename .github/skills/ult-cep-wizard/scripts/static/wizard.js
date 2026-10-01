@@ -89,6 +89,19 @@
 // the delegated click listener on #docs-overlay-body below. A link that doesn't
 // resolve to a doc this install has (e.g. references/reproducibility-guide.md) is left
 // as a real GitHub link that opens in a new tab instead, so it never dead-ends the SPA.
+//
+// P1 W1 (Proposal Sec 9.4/10) extends renderStubCards() with three things, all
+// still driven entirely by what one GET /api/status response already carries (no
+// new endpoint): a radio-group mode selector (StubCard.content_modes/
+// default_mode) that greys out unavailable modes with their reason and updates
+// the copied prompt live to say "Content mode: <m>"; the "Upgrade drafts" card
+// kind (StubCard.card_kind/draft_files) for a resolved path that's already full
+// of untouched ult-autoscaffold-content drafts - a case the old empty-only
+// scaffold card never covered at all; and a copyable
+// `autoscaffold_content.content_mode: <m>` snippet in place of the dropped W2
+// write-path ("wizard proposes, CLI commits" stays intact). Every stub-card also
+// gets its own "Check now" button, a card-level loadStatus() call - fulfilling
+// the promise already made in SKILL.md/wizard_stub_content.py's docstrings.
 
 (function () {
   "use strict";
@@ -258,18 +271,93 @@
   }
 
   // Guide-only "copy this prompt for your coding agent" cards
-  // (wizard_stub_content.what_how_card/guidelines_card/tripwire_card, D24 §18.14
-  // section C) - /api/status now appends a "stub_cards" list alongside the four
-  // boxes; this is the only place that ever reads it. Each of the four box
-  // articles carries an empty `.stub-card` slot in index.html - hidden whenever
-  // there's no card for that box_title this time (e.g. once the box is actually
-  // populated, or - Trip-wire only - once it has real ledger entries).
+  // (wizard_stub_content.what_how_card/upgrade_card/guidelines_card/tripwire_card,
+  // D24 §18.14 section C, extended P1 W1 - Proposal Sec 9.4/10) - /api/status
+  // appends a "stub_cards" list alongside the four boxes; this is the only place
+  // that ever reads it. Each of the four box articles carries an empty
+  // `.stub-card` slot in index.html - hidden whenever there's no card for that
+  // box_title this time (e.g. once the box is actually populated, or - Trip-wire
+  // only - once it has real ledger entries).
+  //
+  // What/How can each send one of two card_kinds for the same box_title -
+  // "scaffold" (what_how_card, the box is empty) or "upgrade" (upgrade_card, every
+  // file under the box is an untouched autoscaffold-content draft) - but never
+  // both at once (StubCard's own docstring: wizard_stub_content.py's two builders
+  // are mutually exclusive on the same resolved paths), so keying byTitle on
+  // box_title alone below still yields exactly one card per box, same as before.
   var STUB_CARD_BOX_IDS = {
     What: "box-what",
     How: "box-how",
     Guidelines: "box-guidelines",
     "Trip-wire": "box-tripwire",
   };
+
+  // W2 is dropped (Proposal Sec 10) in favour of this copyable snippet - the
+  // wizard only ever shows text to paste into context-config.yaml by hand
+  // ("wizard proposes, CLI commits"), never writes it itself.
+  var CONTENT_MODE_SNIPPET_PREFIX = "autoscaffold_content.content_mode: ";
+
+  function buildCopyButton(label, getText) {
+    var button = el("button", { type: "button", class: "secondary", text: label });
+    button.addEventListener("click", function () {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(getText());
+      }
+    });
+    return button;
+  }
+
+  // "W1: 'Check now'." (Proposal Sec 10) - a card-level refresh that just calls
+  // the same loadStatus() every initial page load already uses, fulfilling the
+  // promise SKILL.md/wizard_stub_content.py's own docstrings make about a
+  // "Check now" click re-reading the expected path.
+  function buildCheckNowButton() {
+    var button = el("button", {
+      type: "button",
+      class: "secondary stub-card-check-now",
+      text: "Check now",
+    });
+    button.addEventListener("click", function () {
+      loadStatus();
+    });
+    return button;
+  }
+
+  // content_modes is only ever non-empty for a What/How card (scaffold or
+  // upgrade kind) - Guidelines/Trip-wire cards keep it [] and never reach this.
+  // `onChange(modeId)` fires only for a user pick of an *available* option; the
+  // caller's own `card.default_mode` is what renderStubCards uses for the
+  // initial selection, matching what the copied prompt/snippet start out showing.
+  function buildModeSelector(card, groupName, onChange) {
+    var wrap = el("div", { class: "stub-card-modes" });
+    (card.content_modes || []).forEach(function (opt) {
+      var optionId = groupName + "-" + opt.id;
+      var label = el("label", {
+        class: "stub-card-mode-option" + (opt.available ? "" : " unavailable"),
+        for: optionId,
+      });
+      var radio = el("input", {
+        type: "radio",
+        name: groupName,
+        id: optionId,
+        value: opt.id,
+      });
+      radio.disabled = !opt.available;
+      radio.checked = opt.id === card.default_mode;
+      radio.addEventListener("change", function () {
+        if (radio.checked) {
+          onChange(opt.id);
+        }
+      });
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(" " + opt.label));
+      if (!opt.available && opt.reason) {
+        label.appendChild(el("span", { class: "stub-card-mode-reason", text: " (" + opt.reason + ")" }));
+      }
+      wrap.appendChild(label);
+    });
+    return wrap;
+  }
 
   function renderStubCards(stubCards) {
     var byTitle = {};
@@ -292,19 +380,73 @@
         return;
       }
       slot.style.display = "";
+      var hasModes = Boolean(card.content_modes && card.content_modes.length);
+      var isUpgrade = card.card_kind === "upgrade";
+      slot.classList.toggle("stub-card-upgrade", isUpgrade);
+
       slot.appendChild(el("p", { class: "stub-card-desc", text: card.expect_description }));
       slot.appendChild(el("p", { class: "stub-card-path", text: "Expected: " + card.expected_path }));
+
+      if (isUpgrade && card.draft_files && card.draft_files.length) {
+        slot.appendChild(
+          el("p", {
+            class: "stub-card-draft-files-label",
+            text: card.draft_files.length + " draft file(s) found:",
+          })
+        );
+        var draftList = el("ul", { class: "stub-card-draft-files" });
+        card.draft_files.forEach(function (f) {
+          draftList.appendChild(el("li", { text: f }));
+        });
+        slot.appendChild(draftList);
+      }
+
+      // Declared before buildModeSelector() so its onChange closure can reach
+      // them; populated below once both elements exist.
       var pre = document.createElement("pre");
       pre.className = "stub-card-prompt";
-      pre.textContent = card.prompt_text;
+      var modeSnippet = null;
+
+      function promptTextFor(modeId) {
+        return hasModes ? card.prompt_text + "\n\nContent mode: " + modeId : card.prompt_text;
+      }
+
+      if (hasModes) {
+        slot.appendChild(
+          buildModeSelector(card, title + "-mode", function (modeId) {
+            pre.textContent = promptTextFor(modeId);
+            if (modeSnippet) {
+              modeSnippet.textContent = CONTENT_MODE_SNIPPET_PREFIX + modeId;
+            }
+          })
+        );
+      }
+
+      pre.textContent = promptTextFor(card.default_mode);
       slot.appendChild(pre);
-      var copyButton = el("button", { type: "button", class: "secondary", text: "Copy prompt" });
-      copyButton.addEventListener("click", function () {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(card.prompt_text);
-        }
-      });
-      slot.appendChild(copyButton);
+
+      if (hasModes) {
+        modeSnippet = document.createElement("pre");
+        modeSnippet.className = "stub-card-mode-snippet";
+        modeSnippet.textContent = CONTENT_MODE_SNIPPET_PREFIX + card.default_mode;
+        slot.appendChild(modeSnippet);
+      }
+
+      var actions = el("div", { class: "stub-card-actions" });
+      actions.appendChild(
+        buildCopyButton("Copy prompt", function () {
+          return pre.textContent;
+        })
+      );
+      if (hasModes) {
+        actions.appendChild(
+          buildCopyButton("Copy content-mode line", function () {
+            return modeSnippet.textContent;
+          })
+        );
+      }
+      actions.appendChild(buildCheckNowButton());
+      slot.appendChild(actions);
     });
   }
 

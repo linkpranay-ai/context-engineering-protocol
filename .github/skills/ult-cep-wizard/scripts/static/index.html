@@ -408,7 +408,10 @@
           </div>
           <!-- Guide-only "copy this prompt for your agent" card (wizard_stub_content),
                filled in by renderStubCards() only when /api/status sends one for this
-               box - e.g. the resolved path exists but is still empty. -->
+               box - either a "scaffold" card (the resolved path exists but is still
+               empty) or, P1 W1 (Proposal Sec 9.4/10), an "upgrade" card (every file
+               under the resolved path is an untouched ult-autoscaffold-content draft).
+               Never both at once for the same box - see renderStubCards's own comment. -->
           <div class="stub-card" style="display: none;"></div>
         </article>
 
@@ -425,6 +428,7 @@
             <p class="layer-hint" data-layer="L1"></p>
             <ul class="box-paths" data-layer="L1"></ul>
           </div>
+          <!-- Same scaffold/upgrade card as box-what above. -->
           <div class="stub-card" style="display: none;"></div>
         </article>
 

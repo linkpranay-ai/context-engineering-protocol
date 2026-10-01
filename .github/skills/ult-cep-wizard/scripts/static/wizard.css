@@ -987,6 +987,80 @@ button.secondary:hover {
   overflow-wrap: anywhere;
 }
 
+/* P1 W1 (Proposal Sec 9.4/10) - the "Upgrade drafts" card kind gets a distinct
+   border colour so it reads differently at a glance from an ordinary empty-box
+   scaffold card, even though both share the rest of .stub-card's look. */
+.stub-card.stub-card-upgrade {
+  border-style: solid;
+  border-color: var(--orange);
+}
+
+.stub-card-draft-files-label {
+  margin: 0 0 0.3rem 0;
+  color: var(--muted);
+}
+
+.stub-card-draft-files {
+  margin: 0 0 0.6rem 0;
+  padding-left: 1.1rem;
+  max-height: 8rem;
+  overflow-y: auto;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+/* W1 mode selector (content_modes/default_mode) - a plain radio group, one
+   option per mode ult-autoscaffold-content could resolve this box to.
+   Unavailable options (e.g. no grounded-mode evidence yet, or a greenfield
+   repo) stay visible but disabled, with the reason shown inline rather than
+   hidden - Proposal Sec 10: "greys out modes that aren't available and shows
+   the reason." */
+.stub-card-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0 0 0.6rem 0;
+}
+
+.stub-card-mode-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.stub-card-mode-option.unavailable {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.stub-card-mode-reason {
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* W2 is dropped (Proposal Sec 10) - this replaces it: a small copyable
+   `autoscaffold_content.content_mode: <m>` line for context-config.yaml,
+   updating live with the mode selector above. Deliberately styled smaller
+   than .stub-card-prompt - it's one line, not a multi-line instruction. */
+.stub-card-mode-snippet {
+  margin: 0 0 0.5rem 0;
+  padding: 0.4rem 0.55rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.stub-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 /* Journey 3 (consumer/retrofit) Phase A - #retrofit-overlay reuses the
    .docs-overlay/.docs-overlay-bar/.docs-overlay-body container classes
    wholesale (see index.html's comment on that div), so only its own inner
