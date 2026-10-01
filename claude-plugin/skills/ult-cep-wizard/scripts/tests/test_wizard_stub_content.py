@@ -8,9 +8,28 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import wizard_stub_content as wsc  # noqa: E402
+
+_DRAFT_FRONTMATTER = """---
+generated_by: ult-autoscaffold-content
+generated_at: 2026-09-01T00:00:00Z
+status: draft
+content_mode_requested: skeleton
+content_mode: skeleton
+mode_reason: default
+doc_kind: requirements_overview
+skill_version: 1
+---
+
+# Requirements Overview
+
+TBD.
+"""
+
+_FINAL_FRONTMATTER = _DRAFT_FRONTMATTER.replace("status: draft", "status: final")
 
 
 class TestWhatHowCard(unittest.TestCase):
@@ -107,6 +126,91 @@ class TestWhatHowCard(unittest.TestCase):
         card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
         self.assertIn("coding-standards", card.prompt_text)
         self.assertIn("testing-guidelines", card.prompt_text)
+
+
+class TestWhatHowCardContentModes(unittest.TestCase):
+    """W1 mode selector (Proposal Sec 10/12, TASK-0401): `content_modes` /
+    `default_mode` on every What/How `StubCard`, gated by the `evidence`
+    param a caller optionally passes (wizard_server.py's lazy probe result,
+    TASK-0403) - never computed by this module itself."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_default_evidence_is_unknown_and_every_pre_existing_caller_still_works(self):
+        # No existing caller/test passes `evidence` - the default must keep
+        # every pre-existing assertion in TestWhatHowCard passing unchanged
+        # while still populating content_modes/default_mode on the card.
+        card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
+        self.assertIsNotNone(card.content_modes)
+        self.assertEqual(card.default_mode, "skeleton")
+
+    def test_skeleton_always_available(self):
+        card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
+        skeleton = next(m for m in card.content_modes if m["id"] == "skeleton")
+        self.assertTrue(skeleton["available"])
+        self.assertIsNone(skeleton["reason"])
+
+    def test_what_box_never_offers_augmented(self):
+        card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
+        ids = [m["id"] for m in card.content_modes]
+        self.assertNotIn("augmented", ids)
+
+    def test_how_box_offers_augmented(self):
+        card = wsc.what_how_card("How", self.root, ["org/"])
+        ids = [m["id"] for m in card.content_modes]
+        self.assertIn("augmented", ids)
+
+    def test_unknown_evidence_marks_grounded_unavailable_with_reason(self):
+        card = wsc.what_how_card(
+            "How", self.root, ["org/"], evidence="unknown",
+        )
+        grounded = next(m for m in card.content_modes if m["id"] == "grounded")
+        self.assertFalse(grounded["available"])
+        self.assertIn("unknown", grounded["reason"])
+        self.assertEqual(card.default_mode, "skeleton")
+
+    def test_greenfield_evidence_marks_grounded_unavailable_with_reason(self):
+        card = wsc.what_how_card(
+            "How", self.root, ["org/"],
+            evidence={"greenfield": True, "grounded_viable": {}},
+        )
+        grounded = next(m for m in card.content_modes if m["id"] == "grounded")
+        self.assertFalse(grounded["available"])
+        self.assertIn("greenfield", grounded["reason"])
+        self.assertEqual(card.default_mode, "skeleton")
+
+    def test_real_grounded_evidence_makes_how_default_to_grounded(self):
+        card = wsc.what_how_card(
+            "How", self.root, ["org/"],
+            evidence={
+                "greenfield": False,
+                "grounded_viable": {"coding_standards": True, "testing_guidelines": False},
+            },
+        )
+        grounded = next(m for m in card.content_modes if m["id"] == "grounded")
+        augmented = next(m for m in card.content_modes if m["id"] == "augmented")
+        self.assertTrue(grounded["available"])
+        self.assertTrue(augmented["available"])
+        self.assertEqual(card.default_mode, "grounded")
+
+    def test_no_viable_signal_keeps_what_default_at_skeleton(self):
+        card = wsc.what_how_card(
+            "What", self.root, ["docs/requirements/"],
+            evidence={"greenfield": False, "grounded_viable": {"requirements_overview": False}},
+        )
+        grounded = next(m for m in card.content_modes if m["id"] == "grounded")
+        self.assertFalse(grounded["available"])
+        self.assertEqual(card.default_mode, "skeleton")
+
+    def test_scaffold_card_kind_is_the_default(self):
+        card = wsc.what_how_card("What", self.root, ["docs/requirements/"])
+        self.assertEqual(card.card_kind, "scaffold")
+        self.assertEqual(card.draft_files, [])
 
 
 class TestGuidelinesCard(unittest.TestCase):
@@ -221,6 +325,96 @@ class TestTripwireCard(unittest.TestCase):
         self.assertIsNone(card)
 
 
+class TestUpgradeCard(unittest.TestCase):
+    """P1 'Upgrade drafts' card (Proposal Sec 9.4/10, TASK-0401): appears only
+    when every file under the resolved What/How path is an untouched
+    autoscaffold-content draft, so the wizard can offer a one-click
+    regenerate-at-higher-mode handoff without ever risking a human edit."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.layer_dir = self.root / "docs" / "requirements"
+        self.layer_dir.mkdir(parents=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _write(self, name, text):
+        (self.layer_dir / name).write_text(text, encoding="utf-8")
+
+    def test_no_resolved_paths_returns_none(self):
+        self.assertIsNone(wsc.upgrade_card("What", self.root, []))
+
+    def test_empty_directory_returns_none(self):
+        self.assertIsNone(
+            wsc.upgrade_card("What", self.root, ["docs/requirements/"])
+        )
+
+    def test_all_drafts_yields_a_card_listing_them(self):
+        self._write("REQUIREMENTS-OVERVIEW.md", _DRAFT_FRONTMATTER)
+        card = wsc.upgrade_card("What", self.root, ["docs/requirements/"])
+        self.assertIsNotNone(card)
+        self.assertEqual(card.box_title, "What")
+        self.assertEqual(card.card_kind, "upgrade")
+        self.assertEqual(
+            card.draft_files,
+            ["docs/requirements/REQUIREMENTS-OVERVIEW.md"],
+        )
+
+    def test_a_finalized_file_suppresses_the_card(self):
+        self._write("REQUIREMENTS-OVERVIEW.md", _DRAFT_FRONTMATTER)
+        self._write("NOTES.md", _FINAL_FRONTMATTER)
+        self.assertIsNone(
+            wsc.upgrade_card("What", self.root, ["docs/requirements/"])
+        )
+
+    def test_a_file_with_no_frontmatter_suppresses_the_card(self):
+        self._write("REQUIREMENTS-OVERVIEW.md", _DRAFT_FRONTMATTER)
+        self._write("README.md", "# Hand-written notes\n")
+        self.assertIsNone(
+            wsc.upgrade_card("What", self.root, ["docs/requirements/"])
+        )
+
+    def test_a_file_not_generated_by_this_skill_suppresses_the_card(self):
+        self._write("REQUIREMENTS-OVERVIEW.md", _DRAFT_FRONTMATTER)
+        other_tool_draft = _DRAFT_FRONTMATTER.replace(
+            "generated_by: ult-autoscaffold-content",
+            "generated_by: some-other-skill",
+        )
+        self._write("OTHER.md", other_tool_draft)
+        self.assertIsNone(
+            wsc.upgrade_card("What", self.root, ["docs/requirements/"])
+        )
+
+    def test_layer_decisions_pending_suppresses_the_card(self):
+        self._write("REQUIREMENTS-OVERVIEW.md", _DRAFT_FRONTMATTER)
+        self.assertIsNone(
+            wsc.upgrade_card(
+                "What", self.root, ["docs/requirements/"],
+                layer_decisions_pending=True,
+            )
+        )
+
+    def test_truncated_listing_suppresses_the_card_conservatively(self):
+        self._write("REQUIREMENTS-OVERVIEW.md", _DRAFT_FRONTMATTER)
+        truncated = wsc.wbf.FileListing(
+            files=["REQUIREMENTS-OVERVIEW.md"], total_count=9999, truncated=True,
+        )
+        with patch.object(wsc.wbf, "list_files", return_value=truncated):
+            self.assertIsNone(
+                wsc.upgrade_card("What", self.root, ["docs/requirements/"])
+            )
+
+    def test_card_carries_content_modes_like_what_how_card(self):
+        self._write("REQUIREMENTS-OVERVIEW.md", _DRAFT_FRONTMATTER)
+        card = wsc.upgrade_card("What", self.root, ["docs/requirements/"])
+        ids = [m["id"] for m in card.content_modes]
+        self.assertIn("skeleton", ids)
+        self.assertNotIn("augmented", ids)
+        self.assertEqual(card.default_mode, "skeleton")
+
+
 class TestZeroOnDiskMutation(unittest.TestCase):
     """Direct assertion that this module never writes anything - not just an
     absence of write calls in the source, but a checked before/after snapshot of the
@@ -234,6 +428,11 @@ class TestZeroOnDiskMutation(unittest.TestCase):
         populated = self.root / "org"
         populated.mkdir()
         (populated / "conventions.md").write_text("content\n", encoding="utf-8")
+        drafts = self.root / "drafts"
+        drafts.mkdir()
+        (drafts / "REQUIREMENTS-OVERVIEW.md").write_text(
+            _DRAFT_FRONTMATTER, encoding="utf-8"
+        )
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -259,6 +458,9 @@ class TestZeroOnDiskMutation(unittest.TestCase):
             self.root, available=True, initialized=True, entries=3,
             ledger_path="cache/decision-ledger/DECISION-LEDGER.json",
         )
+        wsc.upgrade_card("What", self.root, ["drafts/"])  # all drafts -> card
+        wsc.upgrade_card("How", self.root, ["org/"])  # not a draft -> no card
+        wsc.upgrade_card("What", self.root, ["docs/requirements/"])  # empty -> no card
 
         after = self._snapshot()
         self.assertEqual(before, after)
