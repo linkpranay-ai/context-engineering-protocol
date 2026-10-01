@@ -1,6 +1,7 @@
 {
+  "content_mode": "grounded",
+  "content_mode_requested": "grounded",
   "domain_pack": null,
-  "effective_mode": "grounded",
   "evidence_hints": {
     "call_sites": [],
     "depended_on_by": [],

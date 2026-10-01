@@ -221,3 +221,43 @@ autoscaffold_content:
   # your own vertical's terminology/references/module patterns, then point
   # this key at your copy.
   # domain_pack_path: <path to your domain-pack.yaml, e.g. org/domain-pack.yaml>
+
+  # Content-mode ceiling for generated drafts. Per-(layer, kind) caps
+  # still apply on top of whatever's chosen here -- in this release only
+  # How-L2 coding_standards/testing_guidelines can ever reach augmented;
+  # every other kind (including everything under What-L2) stays at
+  # grounded no matter what this says. A repo with no grounded-mode
+  # evidence for a kind (or no real content at all yet) collapses that
+  # kind to skeleton regardless of this setting, and states why.
+  #   skeleton  - structure + guidance only, deterministic, no repo claims
+  #   grounded  - as complete as repo evidence allows, every claim cited
+  #               (default -- absent means grounded, so nothing changes
+  #               for existing users)
+  #   augmented - grounded + clearly marked external knowledge, where the
+  #               cap above allows it
+  # content_mode: grounded
+  # Optional per-kind override (same three values; still capped as
+  # above). A kind not listed here falls through to content_mode.
+  # content_mode_overrides:
+  #   coding_standards: augmented
+  #   testing_guidelines: augmented
+  # Web lookup inside augmented mode (D18-style opt-in, default off).
+  # Reserved for a later increment: augmented mode does not perform web
+  # lookups yet even when this is set true.
+  # allow_web: false
+
+  # Orchestrator/worker dispatch tuning for the per-module/per-doc
+  # generation step. No script parses this file -- the skill reads it
+  # directly, same as domain_pack_path above. Absent means the skill's
+  # own current fixed defaults apply (4 workers, 1 retry), so nothing
+  # changes for existing users.
+  # max_parallel_workers: 4
+  # worker_retries: 1   # accepted range: 0-2
+
+  # Whether a downstream consumer (ult-context-generate, compiled
+  # guidelines) treats an augmented-mode draft's marked external content
+  # as a suggestion, versus excluding it by default -- the same
+  # include_external_suggestions convention used elsewhere in this
+  # framework. Reserved: augmented mode's external-content marker format
+  # isn't implemented in this release, so this key has no effect yet.
+  # include_external_suggestions: false

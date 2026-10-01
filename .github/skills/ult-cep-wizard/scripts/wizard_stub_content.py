@@ -56,17 +56,158 @@ scalars rather than importing `wizard_tripwire.TripwireSummary`, keeping this
 module decoupled from that one's read path (same reasoning wizard_containment.py/
 wizard_tripwire.py's own docstrings give for duplicating standalone helpers rather
 than sharing a type across module boundaries).
+
+P1 adds a second, narrower generative affordance (Proposal Sec 9.4/10/12): a W1
+mode selector on every What/How card (`content_modes`/`default_mode` - which of
+`ult-autoscaffold-content`'s skeleton/grounded/augmented content modes are
+currently viable, per that skill's own `scaffold_state.MODE_CAP_BY_LAYER_KIND`
+ceiling), and a distinct "Upgrade drafts" card (`upgrade_card()`) for the
+opposite case `what_how_card()` doesn't cover at all: a path that already has
+content, every byte of which is still an untouched autoscaffold-content draft.
+Both stay inside this module's pure-preview/zero-write contract - `evidence` is
+a plain, caller-supplied dict (or the string `"unknown"`), never computed here;
+wizard_server.py's own lazy, cached probe (TASK-0403) is the only thing that
+ever calls into `ult-autoscaffold-content`'s `scaffold_state.probe_size()`.
+Likewise, draft detection reads each candidate file's YAML frontmatter with a
+small local parser (`_frontmatter_fields()`) deliberately duplicated from
+`scaffold_state._parse_frontmatter()` rather than imported - same "two
+genuinely standalone readers of the same shape, not one shared dependency"
+reasoning this module already gives above for `tripwire_card()`'s scalars.
 """
 
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wizard_box_files as wbf  # noqa: E402
+
+# How many files upgrade_card() will enumerate under a resolved path before
+# giving up and suppressing the card (see upgrade_card's own docstring on why
+# truncation means "can't prove every file is a draft" rather than "assume
+# the rest are"). Higher than wizard_box_files.MAX_FILES_PER_PATH's UI-display
+# default of 40 - this isn't rendering a list to a human, it's deciding
+# whether an unconditional claim ("every file here is a draft") is provable,
+# so it should tolerate a real small-to-medium repo's module count before
+# conservatively bailing.
+_UPGRADE_SCAN_LIMIT = 500
+
+# The content modes `ult-autoscaffold-content` can resolve a layer to
+# (scaffold_state.CONTENT_MODES), duplicated here as display labels rather
+# than imported - this module never imports that skill's code (see module
+# docstring), only ever receives its evidence as a plain dict from a caller.
+_MODE_LABELS = {
+    "skeleton": "Skeleton (fast, no LLM)",
+    "grounded": "Grounded",
+    "augmented": "Augmented",
+}
+
+# Per scaffold_state.MODE_CAP_BY_LAYER_KIND, every What-L2 (layer, kind) pair
+# caps at "grounded" - "augmented" is never offered for What, not just marked
+# unavailable (Proposal Sec 10: "For What-L2 ... augmented isn't shown").
+# How-L2 can reach "augmented" for coding_standards/testing_guidelines, so its
+# selector always offers all three; evidence-availability (below) decides
+# which of grounded/augmented are actually selectable for a given repo.
+_MODE_IDS_BY_BOX = {
+    "What": ("skeleton", "grounded"),
+    "How": ("skeleton", "grounded", "augmented"),
+}
+
+
+def _grounded_evidence_availability(box_title: str, evidence) -> Tuple[bool, Optional[str]]:
+    """Whether `grounded`/`augmented` content modes are usable for this box,
+    per the `evidence` a caller optionally passes (wizard_server.py's lazy,
+    cached `scaffold_state.probe_size()` result - TASK-0403; this module
+    never computes it itself). `evidence` is one of:
+
+    - `"unknown"` (the default - no caller, or the probe hasn't completed /
+      timed out): unavailable, reason says so plainly.
+    - a dict shaped like `probe_size()`'s return value (`greenfield: bool`,
+      `grounded_viable: {kind: bool}`): unavailable with a specific reason
+      for a greenfield repo or one with no viable grounded-mode evidence yet
+      for this box's relevant kind(s); available otherwise.
+
+    Both `grounded` and `augmented` share this same signal for a given box -
+    reaching `augmented` already presupposes a usable grounded base, so a
+    second, separate availability check for `augmented` would just repeat
+    this one. Documented simplification, not an oversight."""
+    if evidence == "unknown" or not isinstance(evidence, dict):
+        return False, "unknown: evidence probe unavailable or timed out"
+    if evidence.get("greenfield"):
+        return False, "repo is greenfield - not enough commit history/signals yet"
+    grounded_viable = evidence.get("grounded_viable") or {}
+    if box_title == "What":
+        viable = bool(grounded_viable.get("requirements_overview"))
+    else:
+        viable = bool(
+            grounded_viable.get("coding_standards")
+            or grounded_viable.get("testing_guidelines")
+        )
+    if not viable:
+        return False, "no grounded-mode evidence found for this layer yet"
+    return True, None
+
+
+def _mode_options(box_title: str, evidence) -> List[dict]:
+    """Builds the `content_modes` list for a What/How card. `box_title` must
+    be "What" or "How" - Guidelines/Trip-wire never call this, they have no
+    content-mode concept (their cards keep `content_modes=[]`)."""
+    options: List[dict] = []
+    for mode_id in _MODE_IDS_BY_BOX[box_title]:
+        if mode_id == "skeleton":
+            options.append(
+                {"id": mode_id, "label": _MODE_LABELS[mode_id], "available": True, "reason": None}
+            )
+            continue
+        available, reason = _grounded_evidence_availability(box_title, evidence)
+        options.append(
+            {"id": mode_id, "label": _MODE_LABELS[mode_id], "available": available, "reason": reason}
+        )
+    return options
+
+
+def _default_mode(box_title: str, content_modes: List[dict]) -> str:
+    """"grounded" if available for How (What never defaults past "skeleton" -
+    Proposal Sec 10), else "skeleton" - which is always available (it needs
+    no evidence), so this never falls through to no default at all."""
+    preferred = "grounded" if box_title == "How" else "skeleton"
+    by_id = {opt["id"]: opt for opt in content_modes}
+    if by_id.get(preferred, {}).get("available"):
+        return preferred
+    return "skeleton"
+
+
+def _frontmatter_fields(path: Path) -> dict:
+    """Minimal `key: value` frontmatter reader, deliberately duplicated from
+    `scaffold_state._parse_frontmatter()` rather than imported (see module
+    docstring) - same algorithm, including its most load-bearing edge case:
+    a missing closing `---` returns `{}` (no partial dict), so a file that
+    merely starts with a stray `---` line is never misread as having real
+    frontmatter. Returns `{}` for anything unreadable (missing file, not
+    UTF-8, no frontmatter at all) - callers treat that the same as "not a
+    draft," never as an error."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return {}
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}
+    frontmatter: dict = {}
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+        if ":" in lines[i]:
+            key, _, value = lines[i].partition(":")
+            frontmatter[key.strip()] = value.strip()
+    if end is None:
+        return {}
+    return frontmatter
 
 
 @dataclass
@@ -82,6 +223,21 @@ class StubCard:
     # target path) - carried on the card so the frontend never has to hardcode it,
     # and a future paste-back card is a value this field can simply also take if a
     # route for it is ever added.
+    card_kind: str = "scaffold"  # "scaffold" (what_how_card/guidelines_card/
+    # tripwire_card) | "upgrade" (upgrade_card). The frontend needs this to pick
+    # the right affordance for a box's single stub-card slot (D24's `renderStubCards`
+    # keys on `box_title` alone, one card per box - see wizard.js) without having to
+    # infer which builder produced it from field presence.
+    content_modes: List[dict] = field(default_factory=list)  # [{id, label,
+    # available, reason}, ...] - empty for Guidelines/Trip-wire (they have no
+    # content-mode concept); populated for every What/How scaffold-or-upgrade
+    # card by `_mode_options()` below, from the optional `evidence` a caller
+    # passes into `what_how_card`/`upgrade_card`.
+    default_mode: Optional[str] = None  # one of content_modes' ids, or None
+    # when content_modes is empty (Guidelines/Trip-wire).
+    draft_files: List[str] = field(default_factory=list)  # upgrade_card only -
+    # the repo-relative draft files it found under the resolved path(s); always
+    # empty for a scaffold-kind card.
 
 
 def _has_content(repo_root: Path, rel_path: str) -> bool:
@@ -118,6 +274,7 @@ def what_how_card(
     resolved_paths: List[str],
     *,
     layer_decisions_pending: bool = False,
+    evidence="unknown",
 ) -> Optional[StubCard]:
     """Returns a card iff every one of the box's resolved paths is currently empty
     (per `_has_content`) - a box with *any* real content is not the empty case
@@ -135,7 +292,13 @@ def what_how_card(
     whatever was last confirmed (or the pre-Discover baseline default), and a
     still-pending decision means Apply may be about to change that path out
     from under the very instruction this card just handed the user - sending
-    them to scaffold content at a path Discover already proposed replacing."""
+    them to scaffold content at a path Discover already proposed replacing.
+
+    `evidence` (default `"unknown"`, so every pre-existing caller/test keeps
+    working unchanged): optionally the caller's `scaffold_state.probe_size()`
+    result (a plain dict - this module never imports that function itself,
+    see module docstring), used only to populate the card's
+    `content_modes`/`default_mode` (P1 W1 mode selector, Proposal Sec 10)."""
     if layer_decisions_pending:
         return None
     if not resolved_paths:
@@ -145,6 +308,7 @@ def what_how_card(
         return None
 
     expected_path = resolved_paths[0]
+    content_modes = _mode_options(box_title, evidence)
     return StubCard(
         box_title=box_title,
         expected_path=expected_path,
@@ -153,6 +317,8 @@ def what_how_card(
             f"A new file (or a small set of files) under `{expected_path}`, "
             f"non-empty, in your coding agent's usual writing style."
         ),
+        content_modes=content_modes,
+        default_mode=_default_mode(box_title, content_modes),
     )
 
 
@@ -263,4 +429,82 @@ def tripwire_card(
             "only from source streams you reviewed and confirmed - not "
             "auto-generated."
         ),
+    )
+
+
+def upgrade_card(
+    box_title: str,
+    repo_root,
+    resolved_paths: List[str],
+    *,
+    layer_decisions_pending: bool = False,
+    evidence="unknown",
+) -> Optional[StubCard]:
+    """The opposite case from `what_how_card()`: a resolved What/How path that
+    already has content, every byte of which is still an untouched
+    `ult-autoscaffold-content` draft (Proposal Sec 9.4/10 - eval case 13).
+    Returns a card only when *every* file found under every resolved path
+    carries `generated_by: ult-autoscaffold-content` and `status: draft` in
+    its frontmatter; any finalized file, any file with no frontmatter at all
+    (a human wrote it, or edited a draft enough to strip the markers), or an
+    empty directory suppresses the card entirely - same all-or-nothing
+    posture `what_how_card()` takes for "any resolved path has content"
+    above, just inverted.
+
+    A truncated file listing (more files than `_UPGRADE_SCAN_LIMIT`)
+    suppresses the card too: this function can only ever claim "every file
+    here is a draft," and a truncated listing means it never actually looked
+    at all of them - conservative by construction, matching this module's
+    posture elsewhere (`what_how_card`'s own defensive `not resolved_paths`
+    branch).
+
+    `layer_decisions_pending`/`evidence` mean exactly what they mean on
+    `what_how_card()` - a still-pending What/How decision suppresses this
+    card for the same "the resolved path might be about to change out from
+    under this instruction" reason, and `evidence` only ever feeds
+    `content_modes`/`default_mode`, never the draft-detection logic above."""
+    if layer_decisions_pending:
+        return None
+    if not resolved_paths:
+        return None
+    repo_root = Path(repo_root).resolve()
+
+    found_files: List[str] = []
+    for rel_path in resolved_paths:
+        listing = wbf.list_files(repo_root, rel_path, limit=_UPGRADE_SCAN_LIMIT)
+        if listing.truncated:
+            return None
+        for name in listing.files:
+            found_files.append((Path(rel_path.rstrip("/")) / name).as_posix())
+    if not found_files:
+        return None
+
+    for rel in found_files:
+        fields = _frontmatter_fields(repo_root / rel)
+        if fields.get("generated_by") != "ult-autoscaffold-content":
+            return None
+        if fields.get("status") != "draft":
+            return None
+
+    expected_path = resolved_paths[0]
+    content_modes = _mode_options(box_title, evidence)
+    return StubCard(
+        box_title=box_title,
+        expected_path=expected_path,
+        prompt_text=(
+            "Run the `ult-autoscaffold-content` skill against this repo in "
+            "upgrade mode: regenerate every untouched draft under "
+            f"`{expected_path}` at the chosen content mode, and write a "
+            "proposal under `cache/autoscaffold-content/proposed/` for any "
+            "draft a human has since edited, rather than overwriting it."
+        ),
+        expect_description=(
+            f"Every untouched draft under `{expected_path}` regenerated in "
+            "place at the chosen content mode; any draft you've since "
+            "edited left alone, with a separate proposal for it instead."
+        ),
+        content_modes=content_modes,
+        default_mode=_default_mode(box_title, content_modes),
+        card_kind="upgrade",
+        draft_files=sorted(found_files),
     )

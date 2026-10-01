@@ -1465,14 +1465,150 @@ def _path_is_contained(candidate, root):
     return candidate_parts[:len(root_parts)] == root_parts
 
 
+# --------------------------------------------------------------------------- #
+# TASK-0303 (AutoScaffold_Mode_Plan.md Phase 3 / P1): content-mode           #
+# resolution -- REQ-001's precedence chain, Sec 4.4's (layer, kind) cap      #
+# matrix (F4/F15-corrected), and Sec 6.2's evidence gate. See TASK-0301's    #
+# test classes (ContentModePrecedenceTests, DefaultModeByLayerTests,        #
+# ContentModeCapMatrixTests, ContentModeEvidenceGateTests) for the full     #
+# behavioral contract this implements.                                      #
+# --------------------------------------------------------------------------- #
+
+CONTENT_MODES = ("skeleton", "grounded", "augmented")
+CONTENT_MODE_RANK = {mode: rank for rank, mode in enumerate(CONTENT_MODES)}
+
+# Precedence level 4 (REQ-001): the per-kind default when no
+# prompt/config/global value applies. Deliberately per-LAYER, not one flat
+# constant -- TASK-0303's own wording ("Default What-L2 overview to
+# skeleton") only makes sense that way. how_l2 (today's only implemented
+# packet layer) keeps continuing pre-P1 behaviour (every how_l2 packet
+# already shipped grounded content unconditionally); what_l2 has no
+# packet-generation path in this release, so it defaults low rather than
+# volunteering content for a layer that isn't built yet. Looked up with
+# `.get(layer, "skeleton")` -- any future, not-yet-listed layer fails safe
+# to the same conservative default as what_l2.
+DEFAULT_MODE_BY_LAYER = {"how_l2": "grounded", "what_l2": "skeleton"}
+
+# Sec 4.4's ceiling matrix, corrected by adversarial-review F4 (keyed on
+# (layer, kind), not kind alone -- context_md means something different
+# under how_l2 vs. what_l2) and F15 (the original proposal's "augmented,
+# restricted" carve-out for CONTEXT.md/architecture-overview can't be
+# linted/enforced, so v1 ships only these two pairs able to reach
+# "augmented" at all). Any (layer, kind) pair not listed here -- including
+# every what_l2 pair, whatever its kind -- caps at "grounded" via
+# `_mode_cap()`'s `.get(..., "grounded")` default: v1 has no uncapped pair.
+MODE_CAP_BY_LAYER_KIND = {
+    ("how_l2", "coding_standards"): "augmented",
+    ("how_l2", "testing_guidelines"): "augmented",
+}
+
+
+def _mode_cap(layer, kind):
+    return MODE_CAP_BY_LAYER_KIND.get((layer, kind), "grounded")
+
+
+def _kind_grounded_viable(kind, evidence):
+    """True if `kind` has grounded-mode evidence, per probe_size()'s own
+    `evidence` shape (`greenfield`, `grounded_viable` keyed by
+    GROUNDED_VIABLE_KINDS) -- no adapter needed at the call site. Greenfield
+    always wins (Sec 6.2: "greenfield downgrades every kind to skeleton"),
+    even for a kind whose own `grounded_viable` entry happens to read True.
+    A kind outside GROUNDED_VIABLE_KINDS (context_md, interface_boundary,
+    architecture_overview) has no independent signal of its own -- it's
+    evidenced by the module/interface's own existence, so it's viable
+    whenever the repo isn't greenfield."""
+    if evidence.get("greenfield"):
+        return False
+    per_kind = evidence.get("grounded_viable") or {}
+    if kind in GROUNDED_VIABLE_KINDS:
+        return bool(per_kind.get(kind))
+    return True
+
+
+def resolve_content_mode(kind, layer=PACKET_LAYER, *, prompt_override=None,
+                          config_overrides=None, global_mode=None, evidence=None):
+    """REQ-001's precedence chain for one (layer, kind) pair: explicit
+    prompt override > per-(layer, kind) config override > the config's
+    global `content_mode` > the per-layer default (DEFAULT_MODE_BY_LAYER).
+    The winning value is then capped by Sec 4.4's (layer, kind) ceiling
+    (MODE_CAP_BY_LAYER_KIND / `_mode_cap()`) and, unless `evidence` is
+    omitted entirely (pre-P1 callers that haven't run probe_size() get no
+    gate at all), collapsed to "skeleton" when Sec 6.2's evidence gate
+    finds the kind isn't grounded-viable.
+
+    Returns {"content_mode_requested": ..., "content_mode": ...,
+    "mode_reason": str or None} -- `mode_reason` is set exactly when the
+    cap or the evidence gate changed the requested value, explaining why.
+
+    Raises ValueError if any of prompt_override, config_overrides[kind], or
+    global_mode is given but isn't one of CONTENT_MODES -- validated before
+    precedence is resolved, and scoped to only the entries relevant to this
+    (layer, kind) call: an invalid value under a *different* kind's config
+    override must not raise here."""
+    config_overrides = config_overrides or {}
+    kind_override = config_overrides.get(kind)
+    for label, value in (
+        ("prompt_override", prompt_override),
+        ("config_overrides[{!r}]".format(kind), kind_override),
+        ("global_mode", global_mode),
+    ):
+        if value is not None and value not in CONTENT_MODE_RANK:
+            raise ValueError(
+                "invalid content mode {!r} for {} -- must be one of {}".format(
+                    value, label, CONTENT_MODES
+                )
+            )
+
+    if prompt_override is not None:
+        requested = prompt_override
+    elif kind_override is not None:
+        requested = kind_override
+    elif global_mode is not None:
+        requested = global_mode
+    else:
+        requested = DEFAULT_MODE_BY_LAYER.get(layer, "skeleton")
+
+    effective = requested
+    reason = None
+
+    cap = _mode_cap(layer, kind)
+    if CONTENT_MODE_RANK[effective] > CONTENT_MODE_RANK[cap]:
+        effective = cap
+        reason = "capped at {} ({}/{} ceiling, Sec 4.4)".format(cap, layer, kind)
+
+    if evidence is not None and effective != "skeleton" and not _kind_grounded_viable(kind, evidence):
+        effective = "skeleton"
+        if evidence.get("greenfield"):
+            reason = "downgraded to skeleton: repo is greenfield (Sec 6.2)"
+        else:
+            reason = (
+                "downgraded to skeleton: no grounded-mode evidence for {} "
+                "(Sec 6.2)".format(kind)
+            )
+
+    return {
+        "content_mode_requested": requested,
+        "content_mode": effective,
+        "mode_reason": reason,
+    }
+
+
 def _make_packet(kind, packet_id, module_id, tier, output_path, must_cite,
-                  evidence_hints, read_budget, head_commit):
+                  evidence_hints, read_budget, head_commit, *,
+                  prompt_override=None, config_overrides=None,
+                  global_mode=None, evidence=None):
     """Assemble one Sec 5.2 work-packet dict from already-resolved,
-    kind-specific inputs. Every schema field always present, with P0a's
-    fixed `effective_mode: "grounded"` compatibility default and
-    `mode_reason: null` -- P1 is what adds real requested-mode selection
-    and cap-matrix precedence (Sec 4.2); `plan` doesn't guess at that
-    logic early."""
+    kind-specific inputs. Every schema field always present. `content_mode`
+    (and `content_mode_requested`/`mode_reason` alongside it) comes from
+    `resolve_content_mode()` (TASK-0303) -- callers that pass none of
+    prompt_override/config_overrides/global_mode/evidence get exactly
+    that function's own no-input default for `layer` (PACKET_LAYER here),
+    which for how_l2 is "grounded", matching pre-P1 behaviour."""
+    mode = resolve_content_mode(
+        kind, PACKET_LAYER, prompt_override=prompt_override,
+        config_overrides=config_overrides, global_mode=global_mode,
+        evidence=evidence,
+    )
     return {
         "packet_id": packet_id,
         "layer": PACKET_LAYER,
@@ -1481,8 +1617,9 @@ def _make_packet(kind, packet_id, module_id, tier, output_path, must_cite,
         "tier": tier,
         "output_path": output_path,
         "template": TEMPLATE_PATH_BY_KIND[kind],
-        "effective_mode": "grounded",
-        "mode_reason": None,
+        "content_mode_requested": mode["content_mode_requested"],
+        "content_mode": mode["content_mode"],
+        "mode_reason": mode["mode_reason"],
         "required_sections": list(REQUIRED_SECTIONS_BY_KIND[kind]),
         "probe_checklist_ref": PROBE_CHECKLIST_REF_BY_KIND[kind],
         "must_cite": list(must_cite),
@@ -1494,7 +1631,10 @@ def _make_packet(kind, packet_id, module_id, tier, output_path, must_cite,
     }
 
 
-def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
+def build_work_packets(state, repo_root, how_l2_path, graph_path=None, *,
+                        content_mode_prompt_override=None,
+                        content_mode_config_overrides=None,
+                        content_mode_global=None):
     """Sec 5.2: one work packet per pending How-L2 document `scan`/the
     repo-doc and interface trackers already selected (module status ==
     "pending" and tier in PACKET_ELIGIBLE_MODULE_TIERS; repo_docs[kind]
@@ -1527,6 +1667,16 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
     and Sec 5.6's containment/uniqueness refusal enforced here at build
     time, in addition to (never instead of) mark-*'s own later runtime
     check on the actual written file.
+
+    TASK-0303: every packet's `content_mode`/`content_mode_requested`/
+    `mode_reason` comes from `resolve_content_mode()`, fed this call's own
+    `content_mode_prompt_override`/`content_mode_config_overrides`/
+    `content_mode_global` (all optional; a caller passing none of them
+    gets exactly resolve_content_mode()'s own how_l2 default, i.e. today's
+    pre-P1 "grounded" behaviour) plus a fresh `probe_size(repo_root)`
+    evidence read for the Sec 6.2 evidence gate -- greenfield or a kind
+    lacking grounded-mode signals collapses that packet to "skeleton"
+    regardless of what was requested.
     """
     repo_root = Path(repo_root)
     how_l2_path = how_l2_path.replace("\\", "/").rstrip("/")
@@ -1536,7 +1686,20 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
     if graph_path:
         graph_evidence = _compute_module_graph_evidence(_load_graph(graph_path))
 
-    signals = probe_size(repo_root)["signals"]
+    probe = probe_size(repo_root)
+    signals = probe["signals"]
+    content_mode_evidence = {
+        "greenfield": probe["greenfield"],
+        "grounded_viable": probe["grounded_viable"],
+    }
+
+    def _resolved_mode_kwargs():
+        return dict(
+            prompt_override=content_mode_prompt_override,
+            config_overrides=content_mode_config_overrides,
+            global_mode=content_mode_global,
+            evidence=content_mode_evidence,
+        )
     repo_doc_must_cite = {
         "coding_standards": sorted(set(
             signals["formatter_config"] + signals["linter_config"]
@@ -1573,6 +1736,7 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
             },
             read_budget=READ_BUDGET_BY_TIER[tier],
             head_commit=head_commit,
+            **_resolved_mode_kwargs()
         ))
 
     repo_docs = state.get("repo_docs") or {}
@@ -1594,6 +1758,7 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
             evidence_hints=dict(_EMPTY_EVIDENCE_HINTS),
             read_budget=READ_BUDGET_REPO_DOC,
             head_commit=head_commit,
+            **_resolved_mode_kwargs()
         ))
 
     for interface in state.get("interfaces", []):
@@ -1616,6 +1781,7 @@ def build_work_packets(state, repo_root, how_l2_path, graph_path=None):
             evidence_hints=dict(_EMPTY_EVIDENCE_HINTS),
             read_budget=READ_BUDGET_INTERFACE,
             head_commit=head_commit,
+            **_resolved_mode_kwargs()
         ))
 
     packets.sort(key=lambda p: p["packet_id"])
@@ -2243,6 +2409,156 @@ def _extract_sections(body):
     return sections
 
 
+# TASK-0304 (P1): Sec 4.1's `skeleton` contract -- a deterministic,
+# no-LLM rendering of a kind's own template, with every required_sections
+# heading and its guidance comment kept verbatim and only one visible
+# placeholder line substituted per section. No claim about the repo
+# beyond the mechanical facts the packet itself already states (module
+# path/name, or the two module names of an interface_boundary packet).
+_SKELETON_NOT_WRITTEN_LINE = "_Not written yet — see guidance in source._"
+_LEADING_COMMENT_RE = re.compile(r"\A(<!--.*?-->)", re.DOTALL)
+
+
+def _skill_root():
+    """Directory one level above this file (scripts/) -- this skill's own
+    installation root, where templates/ and SKILL.md live. Used only to
+    read this skill's own template files; everything about the *target*
+    repo comes from `packet`, never from here."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _read_skill_version():
+    """This skill's own `version:` frontmatter field from SKILL.md, read
+    fresh every call rather than hardcoded, so emit_skeleton()'s default
+    never drifts from a bumped SKILL.md version the way a copy-pasted
+    constant would. Falls back to "unknown" if SKILL.md is missing or has
+    no version key -- never raises."""
+    skill_md = _skill_root() / "SKILL.md"
+    if not skill_md.is_file():
+        return "unknown"
+    frontmatter, _body = _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+    return frontmatter.get("version") or "unknown"
+
+
+def _split_interface_module_id(module_id):
+    """Inverse of build_work_packets()'s "{module_a}--{module_b}" join for
+    an interface_boundary packet's module_id -- left-split on the first
+    "--", the same "module names never contain --" assumption that join
+    itself already makes silently. There is no separate module_a/module_b
+    field on the packet, only this combined id."""
+    module_a, _sep, module_b = module_id.partition("--")
+    return module_a, module_b
+
+
+def emit_skeleton(packet, *, generated_at=None, skill_version=None):
+    """Sec 4.1's `skeleton` contract, produced deterministically with no
+    LLM: this skill's own template for `packet["kind"]`, every
+    required_sections heading kept together with its own guidance comment
+    verbatim (sections outside required_sections, e.g. context_md's
+    conditional "State machine (if applicable)", are omitted entirely --
+    skeleton mode has no evidence to decide whether a conditional section
+    even applies), each section's placeholder body replaced by one visible
+    "_Not written yet -- see guidance in source._" line, and only
+    mechanical facts already present on `packet` substituted into the
+    header (module path/name, or both module names for an
+    interface_boundary packet). Raises ValueError if the template is
+    missing a heading `packet["required_sections"]` names -- a template/
+    packet mismatch bug, not a runtime data problem."""
+    if generated_at is None:
+        generated_at = _now_iso()
+    if skill_version is None:
+        skill_version = _read_skill_version()
+
+    template_path = _skill_root() / packet["template"]
+    text = template_path.read_text(encoding="utf-8")
+
+    replacements = {
+        "<YYYY-MM-DD>": generated_at,
+        # TASK-0307 (P1): frontmatter always carries what was actually asked
+        # for too, plus a reason when the two differ -- Sec 4's "each
+        # lowered mode is recorded in frontmatter... and stated in chat"
+        # applies to skeleton mode as much as to a worker's grounded/
+        # augmented draft. `content_mode_requested` falls back to the
+        # packet's own recorded value; `mode_reason` renders as the
+        # literal string "none" (not blank/absent) when there was no
+        # downgrade -- _parse_frontmatter() is a flat key:value splitter
+        # with no null handling, so a real, greppable token beats an
+        # empty value that would look like a missing key.
+        "<content-mode-requested>": packet.get("content_mode_requested") or "skeleton",
+        "<content-mode>": "skeleton",
+        "<mode-reason>": packet.get("mode_reason") or "none",
+        "<skill-version>": skill_version,
+    }
+    if packet["kind"] == "interface_boundary":
+        module_a, module_b = _split_interface_module_id(packet["module_id"])
+        replacements["<module-a>"] = module_a
+        replacements["<module-b>"] = module_b
+    elif packet.get("module_id"):
+        module_path = packet["module_id"].rstrip("/")
+        replacements["<module-path>"] = module_path
+        replacements["<module-name>"] = module_path.rsplit("/", 1)[-1]
+    for token, value in replacements.items():
+        text = text.replace(token, value)
+
+    frontmatter, body = _parse_frontmatter(text)
+    frontmatter_block = "\n".join(
+        ["---"] + ["{}: {}".format(k, v) for k, v in frontmatter.items()] + ["---"]
+    )
+
+    body_lines = body.split("\n")
+    first_heading_idx = len(body_lines)
+    for i, line in enumerate(body_lines):
+        if _HEADING_RE.match(line):
+            first_heading_idx = i
+            break
+    header_block = "\n".join(body_lines[:first_heading_idx]).strip("\n")
+
+    sections = _extract_sections(body)
+    required = packet["required_sections"]
+    missing = [h for h in required if h not in sections]
+    if missing:
+        raise ValueError(
+            "template {} is missing required section(s) {!r} named by "
+            "REQUIRED_SECTIONS_BY_KIND[{!r}]".format(
+                packet["template"], missing, packet["kind"]
+            )
+        )
+
+    blocks = [header_block]
+    for heading, raw in sections.items():
+        if heading not in required:
+            continue
+        comment_match = _LEADING_COMMENT_RE.match(raw)
+        section_lines = ["## " + heading]
+        if comment_match:
+            section_lines.append("")
+            section_lines.append(comment_match.group(1))
+        section_lines.append("")
+        section_lines.append(_SKELETON_NOT_WRITTEN_LINE)
+        blocks.append("\n".join(section_lines))
+
+    body_text = "\n\n".join(blocks).rstrip("\n") + "\n"
+    return frontmatter_block + "\n\n" + body_text
+
+
+def _stale_head_warnings(repo_root, packet):
+    """Sec 6 risk-table's advisory-only "packet HEAD differs from repo
+    HEAD" warning (proposal: "Packets go stale mid-run (the code changes)
+    | Each packet records the HEAD commit. mark-* warns if HEAD has
+    changed since the packet was created."), shared by both validate()'s
+    normal path and its skeleton-mode early return."""
+    warnings = []
+    packet_head = packet.get("head_commit")
+    if packet_head:
+        current_head = _git_head_commit(repo_root)
+        if current_head and current_head != packet_head:
+            warnings.append(
+                "packet HEAD '{}' differs from current HEAD '{}' -- repo "
+                "changed since this packet was created".format(packet_head, current_head)
+            )
+    return warnings
+
+
 def validate(repo_root, path, packet):
     """Sec 6's P0a validator table, run against the file at `repo_root /
     path` for the given work packet. Returns
@@ -2275,10 +2591,10 @@ def validate(repo_root, path, packet):
         )
 
     content_mode = frontmatter.get("content_mode")
-    if content_mode and content_mode != packet["effective_mode"]:
+    if content_mode and content_mode != packet["content_mode"]:
         failures.append(
-            "frontmatter content_mode '{}' does not match packet effective_mode "
-            "'{}'".format(content_mode, packet["effective_mode"])
+            "frontmatter content_mode '{}' does not match packet content_mode "
+            "'{}'".format(content_mode, packet["content_mode"])
         )
 
     doc_kind = frontmatter.get("doc_kind")
@@ -2288,6 +2604,42 @@ def validate(repo_root, path, packet):
                 doc_kind, packet["kind"]
             )
         )
+
+    # TASK-0304 (P1): Sec 6's "Skeleton" row -- for content_mode: skeleton,
+    # byte identity with emit_skeleton()'s own output (generated_at pinned
+    # to this file's own value, the one field the contract allows to vary)
+    # is the sole content-correctness gate. The evidence-shaped checks
+    # below (Sections/Must-cite/Citation resolution/Gap honesty/Floor/
+    # Conflicts) are built around citations and gap lines a mechanically-
+    # generated skeleton document can never contain -- applying them here
+    # would fail every skeleton document unconditionally, so they don't
+    # run for this mode. Existence and the frontmatter checks above still
+    # run first, for better diagnostics on a badly mangled file.
+    if packet["content_mode"] == "skeleton":
+        try:
+            expected = emit_skeleton(packet, generated_at=frontmatter.get("generated_at"))
+        except (OSError, ValueError) as e:
+            failures.append("could not compute expected skeleton output: {}".format(e))
+            expected = None
+        if expected is not None:
+            # \r\n -> \n only (cross-platform line-ending tolerance,
+            # matching this codebase's existing posture elsewhere) --
+            # deliberately NOT also stripping trailing whitespace per line
+            # the way _normalized_body_hash() does, since exact content
+            # fidelity is the actual point of a byte-identity check.
+            actual_norm = text.replace("\r\n", "\n")
+            expected_norm = expected.replace("\r\n", "\n")
+            if actual_norm != expected_norm:
+                failures.append(
+                    "content_mode is 'skeleton' but the file is not "
+                    "byte-identical to the deterministic emit-skeleton "
+                    "output for this packet (excluding generated_at)"
+                )
+        return {
+            "valid": len(failures) == 0,
+            "failures": failures,
+            "warnings": _stale_head_warnings(repo_root, packet),
+        }
 
     sections = _extract_sections(body)
     for heading in packet["required_sections"]:
@@ -2379,23 +2731,11 @@ def validate(repo_root, path, packet):
                     "evidence:' line found".format(tool, sorted(distinct_sources))
                 )
 
-    # Stale-packet-HEAD warning (proposal risk table: "Packets go stale
-    # mid-run (the code changes) | Each packet records the HEAD commit.
-    # mark-* warns if HEAD has changed since the packet was created.").
-    # Advisory only -- never affects `valid`/`failures` -- since the code
-    # moving on between packet creation and worker completion is expected
-    # in a long-running wave, not necessarily a real staleness problem.
-    warnings = []
-    packet_head = packet.get("head_commit")
-    if packet_head:
-        current_head = _git_head_commit(repo_root)
-        if current_head and current_head != packet_head:
-            warnings.append(
-                "packet HEAD '{}' differs from current HEAD '{}' -- repo "
-                "changed since this packet was created".format(packet_head, current_head)
-            )
-
-    return {"valid": len(failures) == 0, "failures": failures, "warnings": warnings}
+    return {
+        "valid": len(failures) == 0,
+        "failures": failures,
+        "warnings": _stale_head_warnings(repo_root, packet),
+    }
 
 
 def _normalized_body_hash(full_path):
@@ -2457,6 +2797,38 @@ def _record_validation_or_raise(record, validation_result, accept_validation_fai
     return outcome
 
 
+def _finalize_mode_frontmatter(repo_root, output_path, packet):
+    """TASK-0307 (P1): SKILL.md Step 5a tells a grounded/augmented worker
+    never to read `content_mode_requested` -- that field is for the
+    orchestrator's own reporting, not a signal the worker gets to act on
+    -- so the worker leaves the template's `<content-mode-requested>`/
+    `<mode-reason>` frontmatter placeholders untouched. This is the
+    orchestrator-only counterpart, called from every packet-driven
+    mark-*-generated path right before `validate()`: it mechanically
+    fills those same two tokens from the packet, the same way
+    `emit_skeleton()` already does for skeleton mode. A no-op (nothing to
+    replace) once the file already carries real values -- skeleton-mode
+    output already arrives with both fields filled by `emit_skeleton()`
+    itself, so a second pass over already-correct text changes nothing.
+
+    Never touches `output_sha256`: that hash is computed over the body
+    with frontmatter stripped (`_normalized_body_hash()`), so a
+    frontmatter-only rewrite here can't perturb the staleness/regenerate
+    detection Sec 9.4 relies on. Silently does nothing if the file
+    doesn't exist yet -- `validate()`'s own "file does not exist" failure
+    is the right place for that to surface, not a second error here."""
+    full_path = Path(repo_root) / output_path
+    if not full_path.is_file():
+        return
+    text = full_path.read_text(encoding="utf-8")
+    requested = packet.get("content_mode_requested") or packet.get("content_mode")
+    reason = packet.get("mode_reason") or "none"
+    patched = text.replace("<content-mode-requested>", requested)
+    patched = patched.replace("<mode-reason>", reason)
+    if patched != text:
+        full_path.write_text(patched, encoding="utf-8")
+
+
 def mark_generated(state, module_id, output_path, packet=None, repo_root=None,
                     accept_validation_failure=None, final=False):
     """`packet`/`repo_root` are optional at the function level (existing
@@ -2475,6 +2847,7 @@ def mark_generated(state, module_id, output_path, packet=None, repo_root=None,
             "module '{}' is already '{}' -- not pending".format(module_id, module["status"])
         )
     if packet is not None:
+        _finalize_mode_frontmatter(repo_root, output_path, packet)
         result = validate(repo_root, output_path, packet)
         outcome = _record_validation_or_raise(
             module, result, accept_validation_failure, packet,
@@ -2512,6 +2885,7 @@ def mark_repo_doc_generated(state, kind, output_path, packet=None, repo_root=Non
             "repo doc '{}' is already '{}' -- not pending".format(kind, doc["status"])
         )
     if packet is not None:
+        _finalize_mode_frontmatter(repo_root, output_path, packet)
         result = validate(repo_root, output_path, packet)
         outcome = _record_validation_or_raise(
             doc, result, accept_validation_failure, packet,
@@ -2568,6 +2942,7 @@ def mark_interface_generated(state, interface_id, output_path, packet=None, repo
             )
         )
     if packet is not None:
+        _finalize_mode_frontmatter(repo_root, output_path, packet)
         result = validate(repo_root, output_path, packet)
         outcome = _record_validation_or_raise(
             interface, result, accept_validation_failure, packet,
@@ -2597,6 +2972,212 @@ def mark_interface_deferred(state, interface_id, reason):
     interface["status"] = "deferred"
     interface["defer_reason"] = reason
     return interface
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0305/0306 (P1): reset / check-regenerable / list-generated --mode     #
+# (Proposal Sec 9.4 "Regenerate and upgrade" [F6, Q5]).                     #
+# --------------------------------------------------------------------------- #
+
+_RESETTABLE_KINDS = ("module", "repo_doc", "interface")
+
+_PROPOSED_CACHE_PREFIX = "cache/autoscaffold-content/proposed/"
+
+_DECISION_ABSENT_OR_EMPTY = "absent_or_empty"
+_DECISION_REGENERABLE = "regenerable"
+_DECISION_PROPOSE_EDITED = "propose_edited"
+_DECISION_PROPOSE_LEGACY = "propose_legacy"
+
+
+def _find_record(state, kind, record_id):
+    """Dispatch to the existing per-kind lookup (`_find_module`/
+    `_find_repo_doc`/`_find_interface`) so `reset`/`check_regenerable` work
+    across all three record shapes without a fourth, parallel storage
+    convention -- `kind` is exactly the vocabulary Sec 9.4's table uses."""
+    if kind == "module":
+        return _find_module(state, record_id)
+    if kind == "repo_doc":
+        return _find_repo_doc(state, record_id)
+    if kind == "interface":
+        return _find_interface(state, record_id)
+    raise ValueError(
+        "unknown kind '{}' -- must be one of {}".format(kind, _RESETTABLE_KINDS)
+    )
+
+
+def _proposed_path_for(output_path):
+    """Sec 9.4's mirrored proposal location: the same relative path, moved
+    under cache/autoscaffold-content/proposed/ -- the already-established
+    cache root (CEP-INDEX.md/TRIAGE-STATE.json live at its top level) --
+    so a caller that must never overwrite a real file always has an
+    unambiguous, collision-free place to write its candidate instead. Pure
+    path arithmetic; nothing is read or written here."""
+    return _PROPOSED_CACHE_PREFIX + output_path.lstrip("/")
+
+
+def reset(state, kind, record_id, repo_root, reason):
+    """Sec 9.4 row 2: a `generated` record whose on-disk file is still, by
+    normalised hash, exactly what autoscaffold last wrote there goes back to
+    `pending`, clearing the way for a fresh packet + mark-* cycle (Sec 9.4:
+    "reset <state> <id> --reason, then a new packet, then mark-*").
+
+    Reset independently re-verifies "untouched" rather than trusting the
+    caller already ran check_regenerable() -- rows 3/4's "never overwritten"
+    guarantee must hold even when reset() is called directly, so it raises
+    ValueError (leaving the record exactly as it was) unless ALL of:
+      - the record's status is "generated",
+      - it has a stored `output_sha256` (a legacy draft that autoscaffold
+        never hashed is refused outright -- Sec 9.4 row 4), and
+      - the output file still exists and its current normalised hash still
+        matches that stored `output_sha256` (row 3: a human edit is refused).
+
+    `output_sha256` is deliberately left untouched here (not cleared to
+    None): the next mark_generated/mark_repo_doc_generated/
+    mark_interface_generated call's own `previous_sha256 = record.get(
+    "output_sha256")` line is what shifts this value into `previous_sha256`,
+    exactly as it already does for every ordinary re-mark. Reset must not
+    add a second, competing writer of `previous_sha256`, or a reset
+    immediately followed by mark-* would overwrite it with None instead of
+    carrying it forward -- this is how "previous_sha256 is preserved on
+    reset" is satisfied without reimplementing the rotation."""
+    record = _find_record(state, kind, record_id)
+    if record["status"] != "generated":
+        raise ValueError(
+            "{} '{}' is '{}', not 'generated' -- only a generated record can "
+            "be reset".format(kind, record_id, record["status"])
+        )
+    stored_hash = record.get("output_sha256")
+    if not stored_hash:
+        raise ValueError(
+            "{} '{}' has no stored output_sha256 -- it looks like a legacy "
+            "draft autoscaffold never hashed, or was generated before this "
+            "field existed. reset refuses it rather than guess (Sec 9.4: "
+            "legacy output is never silently overwritten); write a proposal "
+            "to {} instead".format(
+                kind, record_id, _proposed_path_for(record.get("output_path") or "<output>")
+            )
+        )
+    output_path = record.get("output_path")
+    full_path = Path(repo_root) / output_path if output_path else None
+    if not output_path or not full_path.is_file():
+        raise ValueError(
+            "{} '{}' output '{}' does not exist on disk -- cannot verify it "
+            "is untouched before resetting".format(kind, record_id, output_path)
+        )
+    current_hash = _normalized_body_hash(full_path)
+    if current_hash != stored_hash:
+        raise ValueError(
+            "{} '{}' output '{}' has changed since autoscaffold generated it "
+            "(normalised hash mismatch) -- reset refuses to discard what may "
+            "be a human edit; write a proposal to {} instead of "
+            "resetting".format(kind, record_id, output_path, _proposed_path_for(output_path))
+        )
+    record["status"] = "pending"
+    record["reset_reason"] = reason
+    record["reset_at"] = _now_iso()
+    return record
+
+
+def check_regenerable(state, kind, record_id, repo_root):
+    """Read-only Sec 9.4 classification for one already-scanned record --
+    never mutates `state` and never writes to disk. Tells the caller (the
+    orchestrator, deciding where to write freshly generated content) which
+    of the four target-state rows applies:
+
+      - "absent_or_empty":   no output recorded yet, or the file is missing
+                              or empty -- just generate normally.
+      - "regenerable":       generated_by is autoscaffold AND the current
+                              normalised hash still matches output_sha256 --
+                              safe to `reset` then regenerate.
+      - "propose_edited":    a stored hash exists but no longer matches (a
+                              human edited it), or the file's own
+                              `generated_by` frontmatter isn't autoscaffold's
+                              -- never overwritten; propose instead.
+      - "propose_legacy":    generated but no output_sha256 was ever stored
+                              (a legacy draft -- e.g. hand-authored docs that
+                              predate autoscaffold in any target repo) --
+                              always propose.
+
+    `proposed_path` (Sec 9.4's mirrored `cache/autoscaffold-content/
+    proposed/<mirrored path>` location) is set for the two "never overwrite"
+    decisions and None otherwise."""
+    record = _find_record(state, kind, record_id)
+    output_path = record.get("output_path")
+    full_path = Path(repo_root) / output_path if output_path else None
+    if not output_path or not full_path.is_file():
+        return {"decision": _DECISION_ABSENT_OR_EMPTY, "proposed_path": None}
+
+    text = full_path.read_text(encoding="utf-8")
+    if not text.strip():
+        return {"decision": _DECISION_ABSENT_OR_EMPTY, "proposed_path": None}
+
+    stored_hash = record.get("output_sha256")
+    if not stored_hash:
+        return {
+            "decision": _DECISION_PROPOSE_LEGACY,
+            "proposed_path": _proposed_path_for(output_path),
+        }
+
+    frontmatter, _body = _parse_frontmatter(text)
+    generated_by = frontmatter.get("generated_by")
+    current_hash = _normalized_body_hash(full_path)
+    if generated_by == ORPHANED_CEP_OUTPUT_GENERATED_BY and current_hash == stored_hash:
+        return {"decision": _DECISION_REGENERABLE, "proposed_path": None}
+
+    return {
+        "decision": _DECISION_PROPOSE_EDITED,
+        "proposed_path": _proposed_path_for(output_path),
+    }
+
+
+def _iter_records(state):
+    """Every module/repo-doc/interface record in `state`, tagged with the
+    same `kind` vocabulary `_find_record`/`reset`/`check_regenerable` use, so
+    `list_generated` can walk all three shapes uniformly."""
+    for m in state.get("modules", []):
+        yield "module", m["id"], m
+    for doc_kind, doc in (state.get("repo_docs") or {}).items():
+        yield "repo_doc", doc_kind, doc
+    for i in state.get("interfaces", []):
+        yield "interface", i["id"], i
+
+
+def list_generated(state, repo_root, mode=None):
+    """Sec 9.4's `list-generated --mode <m>` [M10]: every record currently
+    `generated`, with its `content_mode` read live from the output file's
+    own frontmatter -- Sec 9.3: "The mode is not stored in state. Frontmatter
+    is the source of truth" -- never from a field on the state record itself.
+
+    `mode=None` lists every generated record regardless of mode; otherwise
+    only those whose frontmatter `content_mode` equals `mode` exactly. A
+    generated record whose output file has since vanished or can't be read
+    is still included, with `content_mode: None`, rather than raising --
+    "generated but its file disappeared" is itself worth surfacing, not
+    hiding behind an exception. Read-only."""
+    results = []
+    for kind, record_id, record in _iter_records(state):
+        if record.get("status") != "generated":
+            continue
+        output_path = record.get("output_path")
+        content_mode = None
+        if output_path:
+            full_path = Path(repo_root) / output_path
+            try:
+                text = full_path.read_text(encoding="utf-8")
+            except OSError:
+                text = None
+            if text is not None:
+                frontmatter, _body = _parse_frontmatter(text)
+                content_mode = frontmatter.get("content_mode")
+        if mode is not None and content_mode != mode:
+            continue
+        results.append({
+            "kind": kind,
+            "id": record_id,
+            "output_path": output_path,
+            "content_mode": content_mode,
+        })
+    return results
 
 
 def list_interfaces(state, eligible_only=False, generated_module_ids=None,
@@ -2940,7 +3521,50 @@ def _validation_failed_note(record):
     return " -- VALIDATION-FAILED: {}".format("; ".join(validation.get("reasons") or []))
 
 
-def render_index(state, repo_name):
+def _mode_note(record, repo_root):
+    """TASK-0307 (P1): Sec 9.3 "The mode is not stored in state. Frontmatter
+    is the source of truth, and render-index reads it from there" -- so a
+    generated module/repo-doc/interface's index line shows its actual
+    content mode by reading the mode fields straight out of the output
+    file's own frontmatter, the same way list_generated() (TASK-0306)
+    already does, never from anything persisted in TRIAGE-STATE.json.
+
+    Returns "" in every one of these cases, so a caller that doesn't care
+    about modes yet -- or hits one it can't read -- gets exactly the old
+    rendering back, never a crash:
+      - `repo_root` wasn't given (back-compat: the 2-arg render_index()
+        call every pre-TASK-0307 caller/test still makes)
+      - the record was never generated, or has no output_path yet
+      - the output file is missing, unreadable, or has no content_mode
+        in its frontmatter (e.g. a hand-authored legacy doc predating
+        this skill's frontmatter contract entirely)
+
+    When the file *is* readable: plain "-- mode: <content_mode>" when
+    nothing was downgraded, or "-- mode: <content_mode> (requested
+    <content_mode_requested> -- <mode_reason>)" when the two differ --
+    Sec 4's "each lowered mode is ... stated in chat" extends naturally to
+    stating it in the router file workers/humans actually read."""
+    if repo_root is None or record.get("status") != "generated" or not record.get("output_path"):
+        return ""
+    full_path = Path(repo_root) / record["output_path"]
+    try:
+        text = full_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    frontmatter, _body = _parse_frontmatter(text)
+    content_mode = frontmatter.get("content_mode")
+    if not content_mode:
+        return ""
+    requested = frontmatter.get("content_mode_requested")
+    if requested and requested != content_mode:
+        reason = frontmatter.get("mode_reason")
+        if not reason or reason == "none":
+            reason = "no reason recorded"
+        return " -- mode: {} (requested {} -- {})".format(content_mode, requested, reason)
+    return " -- mode: {}".format(content_mode)
+
+
+def render_index(state, repo_name, repo_root=None):
     modules = state.get("modules", [])
     by_tier = {0: [], 1: [], 2: [], 3: [], None: []}
     for m in modules:
@@ -2994,8 +3618,9 @@ def render_index(state, repo_name):
                 detail = "{} files".format(m.get("file_count"))
             path_note = " -> `{}`".format(m["output_path"]) if m.get("output_path") else ""
             lines.append(
-                "- `{}` ({}, {}) -- **{}**{}{}{}".format(
+                "- `{}` ({}, {}) -- **{}**{}{}{}{}".format(
                     m["id"], detail, m["basis"], m["status"], path_note,
+                    _mode_note(m, repo_root),
                     _validation_bypass_note(m), _validation_failed_note(m),
                 )
             )
@@ -3020,8 +3645,9 @@ def render_index(state, repo_name):
         doc = repo_docs[kind]
         label = kind.replace("_", " ").title()
         path_note = " -> `{}`".format(doc["output_path"]) if doc.get("output_path") else ""
-        lines.append("- {} -- **{}**{}{}{}".format(
+        lines.append("- {} -- **{}**{}{}{}{}".format(
             label, doc["status"], path_note,
+            _mode_note(doc, repo_root),
             _validation_bypass_note(doc), _validation_failed_note(doc),
         ))
     lines.append("")
@@ -3036,9 +3662,10 @@ def render_index(state, repo_name):
         for i in sorted(interfaces, key=lambda e: e["id"]):
             path_note = " -> `{}`".format(i["output_path"]) if i.get("output_path") else ""
             lines.append(
-                "- `{}` <-> `{}` ({}, weight {}) -- **{}**{}{}{}".format(
+                "- `{}` <-> `{}` ({}, weight {}) -- **{}**{}{}{}{}".format(
                     i["module_a"], i["module_b"], ",".join(i["relations"]), i["weight"],
                     i["status"], path_note,
+                    _mode_note(i, repo_root),
                     _validation_bypass_note(i), _validation_failed_note(i),
                 )
             )
@@ -3170,6 +3797,24 @@ def _cmd_validate(args):
     return 0 if result["valid"] else 1
 
 
+def _cmd_emit_skeleton(args):
+    """TASK-0304: deterministically render the content_mode: skeleton
+    document for a packet -- no LLM, no repo_root, no state. Prints to
+    stdout by default; --out writes it (atomically) instead."""
+    packet = _load_packet_arg(args.packet)
+    text = emit_skeleton(
+        packet, generated_at=args.generated_at, skill_version=args.skill_version,
+    )
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        aaw.write_text_atomic(out_path, text)
+        print("wrote {}".format(args.out))
+    else:
+        print(text, end="")
+    return 0
+
+
 def _print_validation_warnings(record):
     # Mirrors _cmd_scan's "print non-fatal warnings immediately, not just
     # persisted" posture, for the stale-packet-HEAD warning (validate()'s
@@ -3250,15 +3895,21 @@ def _cmd_render_index(args):
             return 1
         with state_lock(args.state):
             state = load_state(args.state)
-            text = render_index(state, args.repo_name)
+            text = render_index(state, args.repo_name, repo_root=repo_root)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             aaw.write_text_atomic(out_path, text)
             mark_index_rendered(state, args.out)
             save_state(args.state, state)
             print("wrote {}".format(out_path))
         return 0
+    # TASK-0307 (P1): --repo-root is optional here (only --out forces it,
+    # above) but when it IS given on a stdout-only call, still thread it
+    # through so the rendered index shows mode/downgrade notes -- no
+    # reason to make a human ask for --out just to see that.
+    repo_root_arg = getattr(args, "repo_root", None)
+    repo_root = Path(repo_root_arg).resolve() if repo_root_arg else None
     state = load_state(args.state)
-    text = render_index(state, args.repo_name)
+    text = render_index(state, args.repo_name, repo_root=repo_root)
     print(text)
     return 0
 
@@ -3333,6 +3984,42 @@ def _cmd_mark_interface_deferred(args):
         save_state(args.state, state)
         print(json.dumps(interface, indent=2))
         return 0
+
+
+def _cmd_reset(args):
+    """TASK-0306: CLI surface over reset() -- state_lock-guarded like every
+    other mutating command."""
+    with state_lock(args.state):
+        state = load_state(args.state)
+        try:
+            record = reset(state, args.kind, args.id, args.repo_root, args.reason)
+        except ValueError as e:
+            print("ERROR: {}".format(e), file=sys.stderr)
+            return 1
+        save_state(args.state, state)
+        print(json.dumps(record, indent=2))
+        return 0
+
+
+def _cmd_check_regenerable(args):
+    """TASK-0306: CLI surface over check_regenerable() -- read-only, no
+    state_lock needed since nothing is written."""
+    state = load_state(args.state)
+    try:
+        result = check_regenerable(state, args.kind, args.id, args.repo_root)
+    except ValueError as e:
+        print("ERROR: {}".format(e), file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_list_generated(args):
+    """TASK-0306: CLI surface over list_generated() -- read-only."""
+    state = load_state(args.state)
+    result = list_generated(state, args.repo_root, mode=args.mode)
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def _cmd_list_interfaces(args):
@@ -3417,6 +4104,23 @@ def main(argv=None):
     p_validate.add_argument("--repo-root", required=True)
     p_validate.add_argument("--packet", required=True, help="Path to the packet JSON file.")
     p_validate.set_defaults(func=_cmd_validate)
+
+    p_skel = sub.add_parser(
+        "emit-skeleton",
+        help="Deterministically render the content_mode: skeleton document "
+             "for a packet (Sec 4.1), no LLM.",
+    )
+    p_skel.add_argument("--packet", required=True, help="Path to packet JSON file.")
+    p_skel.add_argument(
+        "--out", default=None, help="Write rendered skeleton here instead of stdout."
+    )
+    p_skel.add_argument(
+        "--generated-at", default=None, help="Override the frontmatter generated_at value."
+    )
+    p_skel.add_argument(
+        "--skill-version", default=None, help="Override the frontmatter skill_version value."
+    )
+    p_skel.set_defaults(func=_cmd_emit_skeleton)
 
     p_gen = sub.add_parser("mark-generated", help="Mark one module generated.")
     p_gen.add_argument("state")
@@ -3508,6 +4212,48 @@ def main(argv=None):
     p_ifdef.add_argument("interface_id")
     p_ifdef.add_argument("--reason", required=True)
     p_ifdef.set_defaults(func=_cmd_mark_interface_deferred)
+
+    p_reset = sub.add_parser(
+        "reset",
+        help="TASK-0306: transition an untouched, matching-hash 'generated' "
+        "record back to 'pending' (Sec 9.4 row 2), clearing the way for a "
+        "fresh packet + mark-* cycle. Refuses (no state change) if the "
+        "record was edited since generation or is a legacy draft with no "
+        "stored hash.",
+    )
+    p_reset.add_argument("state")
+    p_reset.add_argument("kind", choices=_RESETTABLE_KINDS)
+    p_reset.add_argument("id")
+    p_reset.add_argument("--repo-root", required=True)
+    p_reset.add_argument("--reason", required=True)
+    p_reset.set_defaults(func=_cmd_reset)
+
+    p_checkregen = sub.add_parser(
+        "check-regenerable",
+        help="TASK-0306: read-only Sec 9.4 classification of one record -- "
+        "'regenerable', or 'propose_edited'/'propose_legacy' with the "
+        "mirrored cache/autoscaffold-content/proposed/ path to write a "
+        "candidate to instead of overwriting the real output.",
+    )
+    p_checkregen.add_argument("state")
+    p_checkregen.add_argument("kind", choices=_RESETTABLE_KINDS)
+    p_checkregen.add_argument("id")
+    p_checkregen.add_argument("--repo-root", required=True)
+    p_checkregen.set_defaults(func=_cmd_check_regenerable)
+
+    p_listgen = sub.add_parser(
+        "list-generated",
+        help="TASK-0306: list generated records, with content_mode read "
+        "live from each output file's frontmatter (never stored in state).",
+    )
+    p_listgen.add_argument("state")
+    p_listgen.add_argument("--repo-root", required=True)
+    p_listgen.add_argument(
+        "--mode", default=None,
+        help="Only list records whose frontmatter content_mode equals this "
+        "value. Omit to list every generated record regardless of mode.",
+    )
+    p_listgen.set_defaults(func=_cmd_list_generated)
 
     p_iflist = sub.add_parser("list-interfaces", help="Print the interfaces list.")
     p_iflist.add_argument("state")

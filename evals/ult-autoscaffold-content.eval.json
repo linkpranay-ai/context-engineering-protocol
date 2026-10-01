@@ -77,6 +77,27 @@
       "input": "We keep our formatting and review rules written down in CONTRIBUTING.md, a Confluence page, and an old wiki article — can you merge all three into one consistent policy for the team?",
       "not_expected_skill": "autoscaffold-content",
       "notes": "Guards the trigger-collision risk between this skill's new Step 5c (generates a NEW coding-standards doc only when none exists) and compiling-project-guidelines (compiles/reconciles EXISTING scattered sources, now including this skill's own How-L2 output per compiling-project-guidelines' Step 1 6th discovery bullet). Multiple existing sources being reconciled is the compiling-project-guidelines signal, not this skill's."
+    },
+    {
+      "id": "ult-autoscaffold-content-12",
+      "type": "positive",
+      "input": "Just scaffold the fast deterministic version for docs/how/repo — I don't need it fully written yet, just the section headers, frontmatter, and TBD placeholders so I can fill them in myself later.",
+      "expected_skill": "autoscaffold-content",
+      "notes": "P1 skeleton-mode trigger: an explicit ask for the deterministic, no-LLM content_mode: skeleton path (Sec 4.1's emit-skeleton) rather than the (layer, kind) default — still routes to this skill, it just resolves every in-scope packet to skeleton instead of the usual grounded/augmented ceiling."
+    },
+    {
+      "id": "ult-autoscaffold-content-13",
+      "type": "positive",
+      "input": "We generated a bunch of placeholder docs with the autoscaffold skill a while back and never touched most of them — now that there's real commit history, can you go back and fill the untouched ones in properly instead of leaving them as bare skeletons?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "P1 upgrade-drafts trigger (Sec 9.4 / the wizard's 'Upgrade drafts' card): regenerate untouched skeleton drafts at a higher content mode via reset + check-regenerable, writing proposals under cache/.../proposed/ for anything a human has since edited rather than overwriting it — still this skill's job, not a fresh scaffold run from Step 1."
+    },
+    {
+      "id": "ult-autoscaffold-content-14",
+      "type": "positive",
+      "input": "This is a brand-new repo we just stood up — barely any commit history yet. ult-repo-layout already resolved How-L2. Can you generate the module docs there at grounded mode?",
+      "expected_skill": "autoscaffold-content",
+      "notes": "Greenfield-downgrade trigger (Sec 9.2/Q1): an explicit grounded request against a repo the evidence probe reports as greenfield still routes here, but resolves to skeleton instead of the requested mode, with mode_reason stated back to the user and recorded in frontmatter/CEP-INDEX — the downgrade is this skill's own behavior, not a reason to decline the request."
     }
   ]
 }

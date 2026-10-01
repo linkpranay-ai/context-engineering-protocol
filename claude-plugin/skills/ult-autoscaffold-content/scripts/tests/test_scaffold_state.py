@@ -2203,10 +2203,12 @@ def _interface(module_a, module_b, status="pending"):
 
 
 class WorkPacketPlanningTests(unittest.TestCase):
-    """TASK-0103: deterministic packet IDs/content, the P0a fixed
-    effective_mode, output-path uniqueness/containment, must_cite
-    derivation, tier-based soft read budgets, and recorded HEAD commit --
-    against build_work_packets()/`plan` (Sec 5.2)."""
+    """TASK-0103: deterministic packet IDs/content, per-packet content-mode
+    resolution (TASK-0303 -- resolve_content_mode() wired through real
+    probe_size() evidence, so a greenfield fixture downgrades every kind to
+    skeleton), output-path uniqueness/containment, must_cite derivation,
+    tier-based soft read budgets, and recorded HEAD commit -- against
+    build_work_packets()/`plan` (Sec 5.2)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -2276,9 +2278,13 @@ class WorkPacketPlanningTests(unittest.TestCase):
         packets = ss.build_work_packets(state, self.repo_root, "org")
         self.assertEqual([p["module_id"] for p in packets], ["core/"])
 
-    # -- P0a fixed effective_mode --------------------------------------- #
+    # -- TASK-0303 real content-mode resolution ------------------------- #
 
-    def test_effective_mode_is_fixed_to_grounded_for_every_kind(self):
+    def test_greenfield_repo_downgrades_every_packet_to_skeleton(self):
+        # self.repo_root is a genuinely empty tmp dir, so probe_size()
+        # reports greenfield=True and resolve_content_mode() collapses
+        # every kind's default ("grounded" for how_l2) down to skeleton,
+        # recording a non-None mode_reason (Sec 6.2, TASK-0303).
         state = self._state(
             modules=[_module("core/", 1)],
             interfaces=[_interface("core", "utils")],
@@ -2286,8 +2292,9 @@ class WorkPacketPlanningTests(unittest.TestCase):
         packets = ss.build_work_packets(state, self.repo_root, "org")
         self.assertEqual(len(packets), 2)
         for packet in packets:
-            self.assertEqual(packet["effective_mode"], "grounded")
-            self.assertIsNone(packet["mode_reason"])
+            self.assertEqual(packet["content_mode_requested"], "grounded")
+            self.assertEqual(packet["content_mode"], "skeleton")
+            self.assertIsNotNone(packet["mode_reason"])
 
     # -- repo docs (coding_standards / testing_guidelines) --------------- #
 
@@ -2494,7 +2501,7 @@ def _make_doc(packet, sections, frontmatter_overrides=None):
         "generated_by": "ult-autoscaffold-content",
         "generated_at": "2026-09-28",
         "status": "draft",
-        "content_mode": packet["effective_mode"],
+        "content_mode": packet["content_mode"],
         "doc_kind": packet["kind"],
         "skill_version": "2.0.0-dev",
     }
@@ -2533,7 +2540,8 @@ class GeneratedValidationTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -2600,7 +2608,7 @@ class GeneratedValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("status" in f for f in result["failures"]))
 
-    def test_content_mode_mismatch_with_packet_effective_mode_fails(self):
+    def test_content_mode_mismatch_with_packet_content_mode_fails(self):
         doc = _make_doc(self.packet, self.baseline_sections,
                          frontmatter_overrides={"content_mode": "skeleton"})
         path = self._write_doc(doc)
@@ -2866,7 +2874,8 @@ class MarkGeneratedValidationWiringTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3087,6 +3096,225 @@ class MarkGeneratedValidationWiringTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# TASK-0307 (P1): `content_mode_requested`/`mode_reason` frontmatter is      #
+# orchestrator-filled, not worker-filled (SKILL.md Step 5a: "never ask the   #
+# worker to read content_mode_requested -- that field is for the            #
+# orchestrator's own reporting, not for the worker"). A worker leaves the    #
+# template's <content-mode-requested>/<mode-reason> tokens untouched; every  #
+# packet-driven mark-*-generated call finalizes them from the packet before  #
+# validate() runs, the same way emit_skeleton() already does for skeleton    #
+# mode. render_index() then reads the finished values back out of the       #
+# output file's own frontmatter (Sec 9.3: mode lives in frontmatter, never   #
+# in state), the same way list_generated() (TASK-0306) already does.        #
+# --------------------------------------------------------------------------- #
+
+class FinalizeModeFrontmatterTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.citable_files = ["src/a.py", "src/b.py", "src/c.py"]
+        for f in self.citable_files:
+            _write(self.repo_root / f, "line1\nline2\nline3\n")
+        self.packet = {
+            "packet_id": "how-l2--core--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "core/",
+            "tier": 2,
+            "output_path": "org/core/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
+            "mode_reason": None,
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": ["src/a.py"],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+        self.good_sections = _full_sections(self.packet["required_sections"], self.citable_files)
+
+    def _write_worker_doc(self, packet, **frontmatter_overrides):
+        # Simulates exactly what a worker leaves behind: the template's
+        # <content-mode-requested>/<mode-reason> tokens untouched, since
+        # SKILL.md tells it never to read content_mode_requested at all.
+        overrides = {
+            "content_mode_requested": "<content-mode-requested>",
+            "mode_reason": "<mode-reason>",
+        }
+        overrides.update(frontmatter_overrides)
+        sections = _full_sections(packet["required_sections"], self.citable_files)
+        doc = _make_doc(packet, sections, frontmatter_overrides=overrides)
+        _write(self.repo_root / packet["output_path"], doc)
+
+    # -- mark_generated (module) ------------------------------------------ #
+
+    def test_mark_generated_fills_placeholders_left_untouched_by_worker(self):
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(self.packet)
+        module = ss.mark_generated(
+            state, "core/", self.packet["output_path"],
+            packet=self.packet, repo_root=self.repo_root,
+        )
+        self.assertEqual(module["status"], "generated")
+        text = (self.repo_root / self.packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "grounded")
+        # packet's mode_reason is None (no downgrade) -- literal "none",
+        # not blank/absent, since the frontmatter parser has no null type.
+        self.assertEqual(frontmatter["mode_reason"], "none")
+
+    def test_mark_generated_fills_a_real_downgrade_reason(self):
+        packet = dict(self.packet)
+        packet["mode_reason"] = "greenfield -- no prior commits to ground citations in"
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(packet)
+        ss.mark_generated(
+            state, "core/", packet["output_path"], packet=packet, repo_root=self.repo_root,
+        )
+        text = (self.repo_root / packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(
+            frontmatter["mode_reason"], "greenfield -- no prior commits to ground citations in"
+        )
+
+    def test_mark_generated_does_not_disturb_already_filled_mode_fields(self):
+        # No <content-mode-requested>/<mode-reason> tokens present at all --
+        # simulates skeleton-mode output, already finalized by
+        # emit_skeleton() itself. The replace-by-token approach must be a
+        # true no-op here, never an unconditional overwrite.
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(
+            self.packet, content_mode_requested="augmented", mode_reason="already-final"
+        )
+        ss.mark_generated(
+            state, "core/", self.packet["output_path"],
+            packet=self.packet, repo_root=self.repo_root,
+        )
+        text = (self.repo_root / self.packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "augmented")
+        self.assertEqual(frontmatter["mode_reason"], "already-final")
+
+    # -- mark_repo_doc_generated / mark_interface_generated ----------------- #
+
+    def _repo_doc_packet(self):
+        packet = dict(self.packet)
+        packet.update({
+            "packet_id": "repo--coding-standards",
+            "kind": "coding_standards",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/CODING-STANDARDS.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["coding_standards"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["coding_standards"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["coding_standards"],
+            "must_cite": [],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("coding_standards", None)]),
+            "read_budget": ss.READ_BUDGET_REPO_DOC,
+        })
+        return packet
+
+    def test_mark_repo_doc_generated_fills_placeholders(self):
+        packet = self._repo_doc_packet()
+        state = {"modules": [], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(packet)
+        ss.mark_repo_doc_generated(
+            state, "coding_standards", packet["output_path"],
+            packet=packet, repo_root=self.repo_root,
+        )
+        text = (self.repo_root / packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "grounded")
+        self.assertEqual(frontmatter["mode_reason"], "none")
+
+    def _interface_packet(self):
+        packet = dict(self.packet)
+        packet.update({
+            "packet_id": "interface--core--utils",
+            "kind": "interface_boundary",
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/interfaces/core-to-utils.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["interface_boundary"],
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["interface_boundary"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["interface_boundary"],
+            "must_cite": [],
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("interface_boundary", None)]),
+            "read_budget": ss.READ_BUDGET_INTERFACE,
+        })
+        return packet
+
+    def test_mark_interface_generated_fills_placeholders(self):
+        interface_id = ss._interface_id("core/", "utils/")
+        packet = self._interface_packet()
+        state = {
+            "modules": [], "repo_docs": _repo_docs(),
+            "interfaces": [_interface("core/", "utils/")],
+        }
+        self._write_worker_doc(packet)
+        ss.mark_interface_generated(
+            state, interface_id, packet["output_path"],
+            packet=packet, repo_root=self.repo_root,
+        )
+        text = (self.repo_root / packet["output_path"]).read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "grounded")
+        self.assertEqual(frontmatter["mode_reason"], "none")
+
+    # -- render_index() mode display ---------------------------------------- #
+
+    def test_render_index_with_no_repo_root_omits_mode_note(self):
+        # Back-compat: every pre-TASK-0307 caller passes only 2 args.
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(self.packet)
+        ss.mark_generated(
+            state, "core/", self.packet["output_path"],
+            packet=self.packet, repo_root=self.repo_root,
+        )
+        text = ss.render_index(state, "demo-repo")
+        self.assertNotIn("mode:", text)
+
+    def test_render_index_with_repo_root_shows_mode_when_no_downgrade(self):
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(self.packet, content_mode_requested="grounded", mode_reason="none")
+        ss.mark_generated(
+            state, "core/", self.packet["output_path"],
+            packet=self.packet, repo_root=self.repo_root,
+        )
+        text = ss.render_index(state, "demo-repo", repo_root=self.repo_root)
+        self.assertIn("-- mode: grounded", text)
+        self.assertNotIn("requested", text)
+
+    def test_render_index_with_repo_root_shows_downgrade_reason(self):
+        packet = dict(self.packet)
+        packet["content_mode"] = "augmented"
+        packet["mode_reason"] = "probe found no prior commits"
+        state = {"modules": [_module("core/", 2)], "repo_docs": _repo_docs(), "interfaces": []}
+        self._write_worker_doc(packet)
+        ss.mark_generated(
+            state, "core/", packet["output_path"], packet=packet, repo_root=self.repo_root,
+        )
+        text = ss.render_index(state, "demo-repo", repo_root=self.repo_root)
+        self.assertIn(
+            "-- mode: augmented (requested grounded -- probe found no prior commits)", text
+        )
+
+    def test_render_index_tolerates_missing_output_file(self):
+        # A generated record whose file got moved/deleted out from under it
+        # must never crash render-index -- just no mode note for that line.
+        state = {"modules": [_module("core/", 2, status="generated")], "repo_docs": _repo_docs(),
+                 "interfaces": []}
+        state["modules"][0]["output_path"] = "org/core/CONTEXT.md"  # never written to disk
+        text = ss.render_index(state, "demo-repo", repo_root=self.repo_root)
+        self.assertNotIn("mode:", text)
+
+
+# --------------------------------------------------------------------------- #
 # TASK-0108: `final=True` -- the second, terminal half of Sec 5.4's retry     #
 # contract. The default (final=False, exercised above by                     #
 # MarkGeneratedValidationWiringTests) is the *first* attempt: validation     #
@@ -3113,7 +3341,8 @@ class FinalFailureStatusTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3360,7 +3589,8 @@ class StalePacketHeadWarningTests(unittest.TestCase):
             "tier": 2,
             "output_path": "org/core/CONTEXT.md",
             "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
-            "effective_mode": "grounded",
+            "content_mode_requested": "grounded",
+            "content_mode": "grounded",
             "mode_reason": None,
             "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
             "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
@@ -3764,6 +3994,1236 @@ class ListInterfacesWithSitesCLITests(unittest.TestCase):
             graph_path=str(self.repo_root / "missing-graph.json"),
         )
         self.assertEqual(rc, 1)
+
+
+class ContentModePrecedenceTests(unittest.TestCase):
+    """TASK-0301 (AutoScaffold_Mode_Plan.md Phase 3 / P1). REQ-001's
+    precedence chain for `content_mode_requested`, resolved by
+    `resolve_content_mode(kind, layer, prompt_override=, config_overrides=,
+    global_mode=)`, highest wins:
+
+      1. prompt_override      -- explicit instruction this run
+      2. config_overrides[kind] -- per-(layer, kind) config override
+      3. global_mode          -- the config's global content_mode value
+      4. the per-layer default -- no flat constant: TASK-0303 states this
+         explicitly as "default What-L2 overview to skeleton", which only
+         makes sense as a *per-layer* default, not a single global one --
+         how_l2 (today's only implemented packet layer) defaults to
+         "grounded", matching current pre-P1 behaviour, while what_l2
+         (no packet-generation path in this release) defaults to
+         "skeleton" until a mode is explicitly requested for it (still
+         capped at "grounded" per Sec 4.4/F4 if someone does ask for
+         more). See DefaultModeByLayerTests for the level-4 cases
+         specifically.
+
+    Most tests here pin the requested-mode winner using coding_standards
+    under how_l2, the one (layer, kind) pair whose cap is "augmented"
+    (Sec 4.4/F15), so the cap never masks the precedence result. Cap and
+    evidence-gate clamping are covered separately by
+    ContentModeCapMatrixTests and ContentModeEvidenceGateTests.
+    """
+
+    def test_no_inputs_defaults_to_grounded_for_how_l2(self):
+        result = ss.resolve_content_mode("coding_standards", ss.PACKET_LAYER)
+        self.assertEqual(result["content_mode_requested"], "grounded")
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_global_mode_beats_default(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER, global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_config_override_beats_global_mode(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"coding_standards": "augmented"},
+            global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "augmented")
+
+    def test_config_override_only_applies_to_its_own_kind(self):
+        # A testing_guidelines override must not leak into a
+        # coding_standards resolution -- overrides are per-(layer, kind).
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"testing_guidelines": "augmented"},
+            global_mode="skeleton",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_prompt_override_beats_everything(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            prompt_override="skeleton",
+            config_overrides={"coding_standards": "augmented"},
+            global_mode="augmented",
+        )
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+    def test_invalid_prompt_override_raises_before_resolving(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER, prompt_override="thorough",
+            )
+
+    def test_invalid_config_override_raises(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER,
+                config_overrides={"coding_standards": "verbose"},
+            )
+
+    def test_invalid_global_mode_raises(self):
+        with self.assertRaises(ValueError):
+            ss.resolve_content_mode(
+                "coding_standards", ss.PACKET_LAYER, global_mode="full",
+            )
+
+    def test_config_override_for_a_different_kind_does_not_raise(self):
+        # An invalid value under a kind that isn't being resolved right now
+        # must not block this resolution -- only the entry actually in play
+        # is validated.
+        result = ss.resolve_content_mode(
+            "coding_standards", ss.PACKET_LAYER,
+            config_overrides={"testing_guidelines": "not-a-mode"},
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+
+
+class DefaultModeByLayerTests(unittest.TestCase):
+    """TASK-0303's own wording -- "Default What-L2 overview to skeleton;
+    allow grounded on explicit request" -- only makes sense if
+    precedence level 4 (REQ-001) is a *per-layer* default, not the single
+    flat "grounded" a plain reading of proposal Sec 9.1 ("Absent means
+    grounded") would suggest for every layer alike. how_l2 is today's
+    only implemented packet layer, so its default of "grounded" simply
+    continues current pre-P1 behaviour (every how_l2 packet already ships
+    grounded content unconditionally); what_l2 has no packet-generation
+    path in this release at all, so its default is the conservative
+    "skeleton" -- it still honours an explicit request up to its own cap
+    ("grounded", Sec 4.4/F4), it just never volunteers grounded content
+    for a layer that isn't implemented yet.
+    """
+
+    def test_how_l2_kind_with_no_inputs_defaults_to_grounded(self):
+        for kind in ("context_md", "coding_standards", "testing_guidelines", "interface_boundary"):
+            result = ss.resolve_content_mode(kind, "how_l2")
+            self.assertEqual(result["content_mode_requested"], "grounded", kind)
+
+    def test_what_l2_kind_with_no_inputs_defaults_to_skeleton(self):
+        for kind in ("context_md", "requirements_overview"):
+            result = ss.resolve_content_mode(kind, "what_l2")
+            self.assertEqual(result["content_mode_requested"], "skeleton", kind)
+            self.assertEqual(result["content_mode"], "skeleton", kind)
+
+    def test_what_l2_kind_honours_explicit_grounded_request(self):
+        # "allow grounded on explicit request" -- the low per-layer
+        # default is not a ceiling; an explicit ask still resolves to
+        # grounded (what_l2's own cap), same as any other layer.
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="grounded",
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_what_l2_kind_explicit_augmented_request_still_capped_at_grounded(self):
+        # The low default doesn't change the cap: F4 still caps every
+        # what_l2 kind at grounded even when the request is explicit.
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_global_mode_still_overrides_the_what_l2_default(self):
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", global_mode="grounded",
+        )
+        self.assertEqual(result["content_mode_requested"], "grounded")
+
+    def test_unlisted_layer_defaults_to_the_safest_mode(self):
+        # Any future layer not yet in the default table must fail safe
+        # (skeleton -- no claims) rather than silently inherit how_l2's
+        # grounded default.
+        result = ss.resolve_content_mode("some_future_kind", "some_future_layer")
+        self.assertEqual(result["content_mode_requested"], "skeleton")
+
+
+class ContentModeCapMatrixTests(unittest.TestCase):
+    """The (layer, kind) ceiling matrix (proposal Sec 4.4), corrected by
+    adversarial-review F4 (keyed on (layer, kind), not kind alone --
+    context_md is written under both what_l2 and how_l2 with different
+    ceilings) and F15 (v1 simplification: the "augmented, restricted"
+    distinction for CONTEXT.md/architecture overview can't be
+    linted/enforced, so v1 caps everything except how_l2's
+    coding_standards/testing_guidelines at grounded). content_mode =
+    min(requested, cap) -- these tests always request "augmented" (the
+    highest mode) so the cap is what's under test, not precedence.
+    """
+
+    def test_how_l2_coding_standards_reaches_augmented(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_how_l2_testing_guidelines_reaches_augmented(self):
+        result = ss.resolve_content_mode(
+            "testing_guidelines", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_how_l2_context_md_caps_at_grounded(self):
+        # F15: the "restricted" carve-out for CONTEXT.md can't be
+        # enforced automatically, so v1 caps it at grounded even though
+        # the original proposal draft allowed "augmented, restricted".
+        result = ss.resolve_content_mode(
+            "context_md", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_how_l2_architecture_overview_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "architecture_overview", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_how_l2_interface_boundary_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "interface_boundary", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_what_l2_context_md_caps_at_grounded_regardless_of_kind(self):
+        # F4: What-L2 is always capped at grounded, whatever kind name is
+        # used -- context_md is the exact kind name that collides with
+        # the how_l2 row above, so this pins the layer (not just the
+        # kind string) as the discriminator.
+        result = ss.resolve_content_mode(
+            "context_md", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_what_l2_requirements_overview_caps_at_grounded(self):
+        result = ss.resolve_content_mode(
+            "requirements_overview", "what_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_cap_never_upgrades_a_lower_request(self):
+        # A cap is a ceiling, never a floor -- requesting skeleton under a
+        # kind capped at augmented must still yield skeleton.
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="skeleton",
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_grounded_request_under_augmented_cap_is_unaffected(self):
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_unknown_layer_kind_pair_defaults_to_grounded_cap(self):
+        # Anything not explicitly listed in the cap matrix caps at
+        # grounded -- v1 has no uncapped (layer, kind) pair.
+        result = ss.resolve_content_mode(
+            "some_future_kind", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+
+class ContentModeEvidenceGateTests(unittest.TestCase):
+    """The evidence gate (proposal Sec 6.2): a requested/capped mode above
+    skeleton collapses to skeleton when its kind lacks grounded-mode
+    evidence. `evidence` is the dict probe_size() already returns
+    (`greenfield`, `grounded_viable` keyed by GROUNDED_VIABLE_KINDS) --
+    resolve_content_mode() takes it as-is, no adapter needed.
+    """
+
+    def _evidence(self, greenfield=False, **grounded_viable):
+        return {"greenfield": greenfield, "grounded_viable": grounded_viable}
+
+    def test_no_evidence_argument_never_downgrades(self):
+        # Callers that haven't run probe-evidence yet (or don't need to,
+        # e.g. tests above) get pre-P1 behaviour: no evidence gate applied.
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="augmented",
+        )
+        self.assertEqual(result["content_mode"], "augmented")
+
+    def test_viable_kind_is_not_downgraded(self):
+        evidence = self._evidence(coding_standards=True)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+        self.assertIsNone(result["mode_reason"])
+
+    def test_non_viable_kind_collapses_to_skeleton(self):
+        evidence = self._evidence(coding_standards=False)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNotNone(result["mode_reason"])
+
+    def test_non_viable_kind_does_not_affect_a_different_kind(self):
+        # testing_guidelines lacking evidence must not collapse a
+        # coding_standards resolution in the same run.
+        evidence = self._evidence(coding_standards=True, testing_guidelines=False)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="grounded",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_greenfield_collapses_every_kind_to_skeleton(self):
+        # TASK-0303 (plan doc): "Greenfield downgrades every kind to
+        # skeleton" -- unconditional, even for coding_standards/
+        # testing_guidelines whose grounded_viable happens to read True
+        # (greenfield always wins; Sec 6.2).
+        evidence = self._evidence(
+            greenfield=True, coding_standards=True, testing_guidelines=True,
+        )
+        for kind in ("coding_standards", "testing_guidelines", "context_md"):
+            result = ss.resolve_content_mode(
+                kind, "how_l2", prompt_override="augmented", evidence=evidence,
+            )
+            self.assertEqual(result["content_mode"], "skeleton", kind)
+            self.assertIsNotNone(result["mode_reason"])
+
+    def test_kind_outside_grounded_viable_kinds_is_viable_unless_greenfield(self):
+        # context_md/interface_boundary/architecture_overview have no
+        # entry in GROUNDED_VIABLE_KINDS -- they're evidenced by the
+        # module/interface's own existence, so they're viable whenever the
+        # repo isn't greenfield, with no signal dict entry needed for them.
+        evidence = self._evidence()
+        result = ss.resolve_content_mode(
+            "context_md", "how_l2", prompt_override="grounded", evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "grounded")
+
+    def test_requesting_skeleton_is_never_gated(self):
+        # skeleton mode makes no claims to evidence -- the gate only ever
+        # applies to grounded/augmented.
+        evidence = self._evidence(greenfield=True)
+        result = ss.resolve_content_mode(
+            "coding_standards", "how_l2", prompt_override="skeleton",
+            evidence=evidence,
+        )
+        self.assertEqual(result["content_mode"], "skeleton")
+        self.assertIsNone(result["mode_reason"])
+
+
+class EmitSkeletonTests(unittest.TestCase):
+    """TASK-0304 (AutoScaffold_Mode_Plan.md Phase 3 / P1). `emit_skeleton()`
+    renders proposal Sec 4.1's `skeleton` contract deterministically, with
+    no LLM and no repo_root/filesystem input beyond this skill's own
+    templates/: every required_sections heading, its guidance comment
+    verbatim, and one visible "_Not written yet -- see guidance in
+    source._" line replacing the template's own TBD placeholder body. Only
+    `generated_at`/`skill_version` are allowed to vary between calls."""
+
+    def _context_packet(self, module_id="utils/", **overrides):
+        packet = {
+            "packet_id": "how-l2--utils--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": module_id,
+            "tier": 2,
+            "output_path": "org/utils/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": [],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+        packet.update(overrides)
+        return packet
+
+    def _interface_packet(self, **overrides):
+        packet = {
+            "packet_id": "how-l2--app-to-utils--interface",
+            "layer": "how_l2",
+            "kind": "interface_boundary",
+            "module_id": "app--utils",
+            "tier": None,
+            "output_path": "org/interfaces/app-to-utils.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["interface_boundary"],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["interface_boundary"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["interface_boundary"],
+            "must_cite": [],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("interface_boundary", None)]),
+            "read_budget": ss.READ_BUDGET_INTERFACE,
+            "head_commit": None,
+        }
+        packet.update(overrides)
+        return packet
+
+    def _repo_doc_packet(self, kind="coding_standards", **overrides):
+        packet = {
+            "packet_id": "how-l2--coding-standards",
+            "layer": "how_l2",
+            "kind": kind,
+            "module_id": None,
+            "tier": None,
+            "output_path": "org/CODING-STANDARDS.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND[kind],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND[kind]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND[kind],
+            "must_cite": [],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[(kind, None)]),
+            "read_budget": ss.READ_BUDGET_REPO_DOC,
+            "head_commit": None,
+        }
+        packet.update(overrides)
+        return packet
+
+    # -- determinism ---------------------------------------------------- #
+
+    def test_same_inputs_produce_byte_identical_output(self):
+        packet = self._context_packet()
+        first = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                  skill_version="0.5.0")
+        second = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                   skill_version="0.5.0")
+        self.assertEqual(first, second)
+
+    def test_only_generated_at_line_differs_across_calls(self):
+        packet = self._context_packet()
+        first = ss.emit_skeleton(packet, generated_at="2026-01-01T00:00:00Z",
+                                  skill_version="0.5.0")
+        second = ss.emit_skeleton(packet, generated_at="2026-12-31T00:00:00Z",
+                                   skill_version="0.5.0")
+        first_lines = first.split("\n")
+        second_lines = second.split("\n")
+        self.assertEqual(len(first_lines), len(second_lines))
+        diffs = [
+            i for i, (a, b) in enumerate(zip(first_lines, second_lines)) if a != b
+        ]
+        self.assertEqual(len(diffs), 1)
+        self.assertTrue(first_lines[diffs[0]].startswith("generated_at:"))
+
+    def test_omitted_generated_at_defaults_to_now_and_is_present(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertTrue(frontmatter.get("generated_at"))
+
+    def test_omitted_skill_version_defaults_to_skill_md_version(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        # SKILL.md's own frontmatter, read fresh -- never hardcoded, so this
+        # only asserts it's non-empty and not the literal placeholder token.
+        self.assertTrue(frontmatter.get("skill_version"))
+        self.assertNotEqual(frontmatter.get("skill_version"), "<skill-version>")
+
+    # -- frontmatter content ---------------------------------------------- #
+
+    def test_frontmatter_fields_match_packet(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["generated_by"], "ult-autoscaffold-content")
+        self.assertEqual(frontmatter["status"], "draft")
+        self.assertEqual(frontmatter["content_mode"], "skeleton")
+        self.assertEqual(frontmatter["doc_kind"], "context_md")
+        self.assertEqual(frontmatter["skill_version"], "0.5.0")
+
+    def test_frontmatter_carries_requested_mode_and_downgrade_reason(self):
+        # TASK-0307 (P1): the fixture's own content_mode_requested/
+        # mode_reason ("grounded"/"greenfield") differ from the "skeleton"
+        # content_mode emit_skeleton() always forces -- exactly the
+        # downgrade case Sec 4 says must be "recorded in frontmatter...
+        # and stated in chat".
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["content_mode_requested"], "grounded")
+        self.assertEqual(frontmatter["mode_reason"], "greenfield")
+
+    def test_frontmatter_mode_reason_renders_as_literal_none_when_absent(self):
+        # _parse_frontmatter() is a flat key:value splitter with no null
+        # handling -- a packet.get("mode_reason") of None must still land
+        # as a real, greppable token, not vanish or blank the line out.
+        packet = self._context_packet(mode_reason=None)
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["mode_reason"], "none")
+
+    def test_interface_frontmatter_carries_both_module_names(self):
+        packet = self._interface_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["module_a"], "app")
+        self.assertEqual(frontmatter["module_b"], "utils")
+
+    # -- sections ----------------------------------------------------------- #
+
+    def test_every_required_section_present_with_not_written_yet_line(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        _frontmatter, body = ss._parse_frontmatter(text)
+        sections = ss._extract_sections(body)
+        for heading in packet["required_sections"]:
+            self.assertIn(heading, sections)
+            self.assertIn(
+                "_Not written yet — see guidance in source._", sections[heading]
+            )
+
+    def test_guidance_comment_preserved_verbatim_in_a_section(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        self.assertIn("Two", text)  # Purpose section's guidance comment text
+        self.assertIn("<!--", text)
+        self.assertIn("-->", text)
+
+    def test_conditional_non_required_section_is_omitted(self):
+        # "State machine (if applicable)" is deliberately NOT in
+        # REQUIRED_SECTIONS_BY_KIND["context_md"] -- skeleton mode has no
+        # evidence to decide applicability, so it must not appear at all.
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        self.assertNotIn("State machine", text)
+
+    def test_no_tbd_fill_in_placeholder_survives_in_section_bodies(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        _frontmatter, body = ss._parse_frontmatter(text)
+        sections = ss._extract_sections(body)
+        for heading in packet["required_sections"]:
+            self.assertNotIn("TBD — fill in", sections[heading])
+
+    def test_no_stray_template_placeholder_tokens_remain(self):
+        packet = self._context_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        for token in ("<content-mode>", "<content-mode-requested>", "<mode-reason>",
+                      "<skill-version>", "<YYYY-MM-DD>",
+                      "<module-name>", "<module-path>"):
+            self.assertNotIn(token, text)
+
+    # -- mechanical facts only, no evidence claims -------------------------- #
+
+    def test_context_md_header_carries_module_path_and_name(self):
+        packet = self._context_packet(module_id="src/core/")
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        self.assertIn("# core — Module Context", text)
+        self.assertIn("**Source path:** `src/core`", text)
+
+    def test_interface_header_carries_both_module_names(self):
+        packet = self._interface_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        self.assertIn("# Interface: `app` ↔ `utils`", text)
+
+    def test_repo_doc_packet_has_no_module_placeholders_to_substitute(self):
+        # coding_standards/testing_guidelines templates carry no module
+        # fields at all -- emit_skeleton must not choke on module_id=None.
+        packet = self._repo_doc_packet()
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["doc_kind"], "coding_standards")
+
+    def test_raises_if_template_is_missing_a_required_section(self):
+        packet = self._context_packet(required_sections=["Purpose", "Not-A-Real-Section"])
+        with self.assertRaises(ValueError):
+            ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                              skill_version="0.5.0")
+
+
+class SkeletonValidationTests(unittest.TestCase):
+    """TASK-0304 / proposal Sec 6's "Skeleton" validation row: for
+    `content_mode: skeleton`, `validate()` requires byte identity with
+    `emit_skeleton()`'s own output (generated_at pinned to the file's own
+    value) instead of running the evidence-shaped checks (Sections/
+    Must-cite/Citation resolution/Gap honesty/Floor/Conflicts), which a
+    mechanically-generated skeleton document can never satisfy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.packet = {
+            "packet_id": "how-l2--utils--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "utils/",
+            "tier": 2,
+            "output_path": "org/utils/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            # Deliberately non-empty, unlike a real greenfield packet --
+            # proves the skeleton path does NOT run the must_cite check
+            # (which a no-LLM skeleton could never satisfy).
+            "must_cite": ["src/nonexistent.py"],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+
+    def _write_skeleton(self, generated_at="2026-09-30T00:00:00Z", mutate=None):
+        text = ss.emit_skeleton(self.packet, generated_at=generated_at,
+                                 skill_version="0.5.0")
+        if mutate:
+            text = mutate(text)
+        _write(self.repo_root / self.packet["output_path"], text)
+        return self.packet["output_path"]
+
+    def test_exact_emit_skeleton_output_passes(self):
+        path = self._write_skeleton()
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertEqual(result["failures"], [])
+        self.assertTrue(result["valid"])
+
+    def test_passes_regardless_of_which_generated_at_was_used(self):
+        # generated_at is the one field allowed to vary -- validate() must
+        # re-derive the expected text using the file's OWN generated_at,
+        # not "now".
+        path = self._write_skeleton(generated_at="2020-01-01T00:00:00Z")
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertTrue(result["valid"])
+
+    def test_edited_section_body_fails(self):
+        path = self._write_skeleton(
+            mutate=lambda t: t.replace(
+                "_Not written yet — see guidance in source._",
+                "This module does something.", 1,
+            )
+        )
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("skeleton" in f.lower() for f in result["failures"]))
+
+    def test_dropped_section_fails(self):
+        path = self._write_skeleton(
+            mutate=lambda t: t.replace("## Gotchas", "## Not Gotchas", 1)
+        )
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+
+    def test_mismatched_content_mode_frontmatter_still_caught(self):
+        # The earlier, always-run content_mode frontmatter-vs-packet check
+        # still applies before the skeleton branch's byte-identity check.
+        path = self._write_skeleton(
+            mutate=lambda t: t.replace("content_mode: skeleton", "content_mode: grounded", 1)
+        )
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("content_mode" in f for f in result["failures"]))
+
+    def test_skeleton_mode_does_not_run_must_cite_check(self):
+        # self.packet["must_cite"] names a file that doesn't exist on disk
+        # and is never cited -- a grounded-mode validate() would fail this;
+        # skeleton mode must not even look at it.
+        path = self._write_skeleton()
+        result = ss.validate(self.repo_root, path, self.packet)
+        self.assertTrue(result["valid"])
+
+    def test_crlf_line_endings_do_not_cause_a_false_mismatch(self):
+        # Written via write_bytes (not the shared _write helper) so the
+        # CRLF bytes land on disk exactly as constructed -- Path.write_text
+        # applies its own platform newline translation on Windows, which
+        # would double an already-CRLF "\r\n" into "\r\r\n" and defeat the
+        # point of this test.
+        text = ss.emit_skeleton(self.packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        crlf_text = text.replace("\n", "\r\n")
+        full_path = self.repo_root / self.packet["output_path"]
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(crlf_text.encode("utf-8"))
+        result = ss.validate(self.repo_root, self.packet["output_path"], self.packet)
+        self.assertTrue(result["valid"])
+
+    def test_stale_head_warning_still_applies_to_skeleton_packets(self):
+        packet = dict(self.packet, head_commit="0" * 40)
+        text = ss.emit_skeleton(packet, generated_at="2026-09-30T00:00:00Z",
+                                 skill_version="0.5.0")
+        _write(self.repo_root / packet["output_path"], text)
+        subprocess.run(
+            ["git", "init", "-q"], cwd=str(self.repo_root), check=True,
+        )
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit",
+             "--allow-empty", "-q", "-m", "init"],
+            cwd=str(self.repo_root), check=True,
+        )
+        result = ss.validate(self.repo_root, packet["output_path"], packet)
+        self.assertTrue(result["valid"])
+        self.assertTrue(any("HEAD" in w for w in result["warnings"]))
+
+
+class EmitSkeletonCLITests(unittest.TestCase):
+    """`emit-skeleton` -- the CLI surface over emit_skeleton(), matching
+    this suite's existing argparse.Namespace() convention for CLI-entry-
+    point tests (see ListInterfacesWithSitesCLITests)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.packet = {
+            "packet_id": "how-l2--utils--context",
+            "layer": "how_l2",
+            "kind": "context_md",
+            "module_id": "utils/",
+            "tier": 2,
+            "output_path": "org/utils/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded",
+            "content_mode": "skeleton",
+            "mode_reason": "greenfield",
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": [],
+            "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 2)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[2],
+            "head_commit": None,
+        }
+        self.packet_path = self.repo_root / "packet.json"
+        _write(self.packet_path, json.dumps(self.packet))
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            packet=str(self.packet_path), out=None,
+            generated_at="2026-09-30T00:00:00Z", skill_version="0.5.0",
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_emit_skeleton(args)
+        return rc, buf.getvalue()
+
+    def test_prints_skeleton_to_stdout_by_default(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        frontmatter, _ = ss._parse_frontmatter(out)
+        self.assertEqual(frontmatter["content_mode"], "skeleton")
+
+    def test_out_writes_to_file_instead_of_stdout(self):
+        out_path = self.repo_root / "CONTEXT.md"
+        rc, _stdout = self._run(out=str(out_path))
+        self.assertEqual(rc, 0)
+        text = out_path.read_text(encoding="utf-8")
+        frontmatter, _ = ss._parse_frontmatter(text)
+        self.assertEqual(frontmatter["doc_kind"], "context_md")
+
+    def test_cli_output_matches_emit_skeleton_function_output(self):
+        rc, out = self._run()
+        direct = ss.emit_skeleton(self.packet, generated_at="2026-09-30T00:00:00Z",
+                                   skill_version="0.5.0")
+        self.assertEqual(out, direct)
+
+
+# --------------------------------------------------------------------------- #
+# TASK-0305 (P1): reset / check-regenerable / list-generated --mode          #
+# (Proposal Sec 9.4's "Regenerate and upgrade" table -- these tests describe #
+# the four target-state rows before TASK-0306 implements them.)             #
+# --------------------------------------------------------------------------- #
+
+class ResetTests(unittest.TestCase):
+    """`ss.reset(state, kind, record_id, repo_root, reason)`: Sec 9.4 row 2
+    ("generated_by is autoscaffold and the normalised hash matches
+    output_sha256" -> offer to regenerate via reset). Reset itself
+    re-verifies "untouched" rather than trusting the caller, since a wrong
+    reset would let a later mark-* clobber a human edit -- rows 3/4's "never
+    overwritten" guarantee has to hold even if something calls reset()
+    directly instead of going through check_regenerable() first."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def _generated_module_state(self, body="hello\n"):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(self.repo_root / output_path, body)
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        return state, output_path
+
+    def test_untouched_matching_hash_module_transitions_to_pending(self):
+        state, _output_path = self._generated_module_state()
+        module = ss.reset(state, "module", "core/", self.repo_root, "regenerate at skeleton")
+        self.assertEqual(module["status"], "pending")
+
+    def test_reset_records_reason(self):
+        state, _output_path = self._generated_module_state()
+        module = ss.reset(state, "module", "core/", self.repo_root, "regenerate at skeleton")
+        self.assertEqual(module["reset_reason"], "regenerate at skeleton")
+        self.assertIsNotNone(module["reset_at"])
+
+    def test_reset_preserves_previous_sha256_through_the_next_mark_generated(self):
+        # Uses the real mark_generated(..., packet=...) hash-rotation path
+        # (accept_validation_failure so arbitrary fixture text doesn't need
+        # to satisfy validate()'s floors) -- the plain mark_generated(state,
+        # id, path) call used elsewhere in this class never touches
+        # previous_sha256/output_sha256 at all (only the packet-carrying
+        # branch does), so this is the one test that needs it.
+        packet = {
+            "packet_id": "how-l2--core--context", "layer": "how_l2", "kind": "context_md",
+            "module_id": "core/", "tier": 1, "output_path": "org/core/CONTEXT.md",
+            "template": ss.TEMPLATE_PATH_BY_KIND["context_md"],
+            "content_mode_requested": "grounded", "content_mode": "grounded",
+            "mode_reason": None,
+            "required_sections": list(ss.REQUIRED_SECTIONS_BY_KIND["context_md"]),
+            "probe_checklist_ref": ss.PROBE_CHECKLIST_REF_BY_KIND["context_md"],
+            "must_cite": [], "evidence_hints": dict(ss._EMPTY_EVIDENCE_HINTS),
+            "domain_pack": None,
+            "validation_floor": dict(ss.VALIDATION_FLOORS[("context_md", 1)]),
+            "read_budget": ss.READ_BUDGET_BY_TIER[1], "head_commit": None,
+        }
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = packet["output_path"]
+        _write(self.repo_root / output_path, "first generation, deliberately invalid\n")
+        ss.mark_generated(
+            state, "core/", output_path, packet=packet, repo_root=self.repo_root,
+            accept_validation_failure="test-fixture",
+        )
+        first_hash = ss._find_module(state, "core/")["output_sha256"]
+        ss.reset(state, "module", "core/", self.repo_root, "regenerate at skeleton")
+        # A fresh cycle: new content, new packet, mark-generated again --
+        # exactly the "reset, then a new packet, then mark-*" flow Sec 9.4
+        # describes for this row.
+        _write(self.repo_root / output_path, "second generation, also deliberately invalid\n")
+        ss.mark_generated(
+            state, "core/", output_path, packet=packet, repo_root=self.repo_root,
+            accept_validation_failure="test-fixture",
+        )
+        module = ss._find_module(state, "core/")
+        self.assertEqual(module["previous_sha256"], first_hash)
+        self.assertNotEqual(module["output_sha256"], first_hash)
+
+    def test_reset_refuses_when_file_was_edited_since_generation(self):
+        state, output_path = self._generated_module_state()
+        _write(self.repo_root / output_path, "a human edited this\n")
+        with self.assertRaises(ValueError):
+            ss.reset(state, "module", "core/", self.repo_root, "regenerate")
+        # Refused reset must not have moved the record out of "generated" --
+        # this is the "changed output is never overwritten" guarantee.
+        self.assertEqual(ss._find_module(state, "core/")["status"], "generated")
+
+    def test_reset_refuses_legacy_output_with_no_stored_hash(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("legacy/", 1))
+        output_path = "org/legacy/CONTEXT.md"
+        _write(self.repo_root / output_path, "a hand-authored legacy draft\n")
+        ss.mark_generated(state, "legacy/", output_path)
+        # No output_sha256 was ever recorded for this record (the legacy-
+        # draft case Sec 9.4 calls out) -- reset must refuse, not treat a
+        # missing hash as "vacuously untouched".
+        self.assertIsNone(ss._find_module(state, "legacy/").get("output_sha256"))
+        with self.assertRaises(ValueError):
+            ss.reset(state, "module", "legacy/", self.repo_root, "regenerate")
+        self.assertEqual(ss._find_module(state, "legacy/")["status"], "generated")
+
+    def test_reset_refuses_when_status_is_not_generated(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1, status="pending"))
+        with self.assertRaises(ValueError):
+            ss.reset(state, "module", "core/", self.repo_root, "regenerate")
+
+    def test_reset_refuses_when_output_file_is_missing(self):
+        state, output_path = self._generated_module_state()
+        (self.repo_root / output_path).unlink()
+        with self.assertRaises(ValueError):
+            ss.reset(state, "module", "core/", self.repo_root, "regenerate")
+
+    def test_reset_works_for_repo_doc_kind(self):
+        state = ss.empty_state()
+        output_path = "org/CODING-STANDARDS.md"
+        _write(self.repo_root / output_path, "standards\n")
+        ss.mark_repo_doc_generated(state, "coding_standards", output_path)
+        doc = state["repo_docs"]["coding_standards"]
+        doc["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        result = ss.reset(state, "repo_doc", "coding_standards", self.repo_root, "regenerate")
+        self.assertEqual(result["status"], "pending")
+
+    def test_reset_works_for_interface_kind(self):
+        state = ss.empty_state()
+        interface = _interface("core/", "utils/")
+        interface["status"] = "generated"
+        state["interfaces"].append(interface)
+        output_path = "org/interfaces/core--utils.md"
+        _write(self.repo_root / output_path, "interface doc\n")
+        interface["output_path"] = output_path
+        interface["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        result = ss.reset(state, "interface", interface["id"], self.repo_root, "regenerate")
+        self.assertEqual(result["status"], "pending")
+
+    def test_reset_unknown_kind_raises(self):
+        state, _output_path = self._generated_module_state()
+        with self.assertRaises(ValueError):
+            ss.reset(state, "not-a-kind", "core/", self.repo_root, "regenerate")
+
+    def test_normalized_hash_treats_crlf_and_lf_as_identical_for_reset(self):
+        state, output_path = self._generated_module_state(body="line one\nline two\n")
+        full_path = self.repo_root / output_path
+        crlf_bytes = full_path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8")
+        full_path.write_bytes(crlf_bytes)
+        # On-disk bytes are now CRLF, but the stored hash was computed (and
+        # is re-computed here) over normalized (LF) text -- reset must still
+        # see this as "untouched" rather than "edited".
+        module = ss.reset(state, "module", "core/", self.repo_root, "regenerate")
+        self.assertEqual(module["status"], "pending")
+
+
+class CheckRegenerableTests(unittest.TestCase):
+    """`ss.check_regenerable(state, kind, record_id, repo_root)`: read-only
+    Sec 9.4 classification. Never mutates state or touches disk."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+
+    def test_pending_module_with_no_output_is_absent_or_empty(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "absent_or_empty")
+        self.assertIsNone(result["proposed_path"])
+
+    def test_generated_record_whose_file_is_empty_is_absent_or_empty(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(self.repo_root / output_path, "")
+        ss.mark_generated(state, "core/", output_path)
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "absent_or_empty")
+
+    def test_untouched_autoscaffold_output_is_regenerable(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "regenerable")
+        self.assertIsNone(result["proposed_path"])
+
+    def test_edited_output_proposes_instead_of_offering_regenerate(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\na human edited this\n",
+        )
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "propose_edited")
+        self.assertEqual(
+            result["proposed_path"], "cache/autoscaffold-content/proposed/" + output_path
+        )
+
+    def test_legacy_draft_with_no_stored_hash_always_proposes(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("legacy/", 1))
+        output_path = "org/legacy/CONTEXT.md"
+        _write(self.repo_root / output_path, "a hand-authored legacy draft, no frontmatter\n")
+        ss.mark_generated(state, "legacy/", output_path)
+        result = ss.check_regenerable(state, "module", "legacy/", self.repo_root)
+        self.assertEqual(result["decision"], "propose_legacy")
+        self.assertEqual(
+            result["proposed_path"], "cache/autoscaffold-content/proposed/" + output_path
+        )
+
+    def test_matching_hash_but_not_generated_by_autoscaffold_still_proposes(self):
+        # Defense in depth for Sec 9.4's "generated_by is autoscaffold AND
+        # hash matches" -- both conditions must hold, not just the hash.
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(self.repo_root / output_path, "---\ngenerated_by: some-other-tool\n---\n\nbody\n")
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "propose_edited")
+
+    def test_check_regenerable_does_not_mutate_state_or_disk(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        before = json.dumps(state, sort_keys=True)
+        before_bytes = (self.repo_root / output_path).read_bytes()
+        ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(json.dumps(state, sort_keys=True), before)
+        self.assertEqual((self.repo_root / output_path).read_bytes(), before_bytes)
+
+    def test_crlf_on_disk_still_counts_as_untouched(self):
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        text = "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\nline two\n"
+        _write(self.repo_root / output_path, text)
+        ss.mark_generated(state, "core/", output_path)
+        module = ss._find_module(state, "core/")
+        module["output_sha256"] = ss._normalized_body_hash(self.repo_root / output_path)
+        crlf_bytes = text.replace("\n", "\r\n").encode("utf-8")
+        (self.repo_root / output_path).write_bytes(crlf_bytes)
+        result = ss.check_regenerable(state, "module", "core/", self.repo_root)
+        self.assertEqual(result["decision"], "regenerable")
+
+
+class ListGeneratedTests(unittest.TestCase):
+    """`ss.list_generated(state, repo_root, mode=None)`: Sec 9.3 -- "the mode
+    is not stored in state", so this always reads content_mode live from
+    each generated record's own output file's frontmatter."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state = ss.empty_state()
+
+    def _generate_module(self, module_id, output_path, content_mode):
+        self.state["modules"].append(_module(module_id, 1))
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\ncontent_mode: {}\n---\n\nbody\n".format(
+                content_mode
+            ),
+        )
+        ss.mark_generated(self.state, module_id, output_path)
+
+    def test_lists_only_generated_records(self):
+        self.state["modules"].append(_module("pending-mod/", 1, status="pending"))
+        self._generate_module("core/", "org/core/CONTEXT.md", "grounded")
+        results = ss.list_generated(self.state, self.repo_root)
+        ids = [r["id"] for r in results]
+        self.assertIn("core/", ids)
+        self.assertNotIn("pending-mod/", ids)
+
+    def test_reads_content_mode_from_frontmatter_not_state(self):
+        self._generate_module("core/", "org/core/CONTEXT.md", "skeleton")
+        results = ss.list_generated(self.state, self.repo_root)
+        [core] = [r for r in results if r["id"] == "core/"]
+        self.assertEqual(core["content_mode"], "skeleton")
+        # Confirms the state record itself was never asked to carry a mode.
+        self.assertNotIn("content_mode", ss._find_module(self.state, "core/"))
+
+    def test_filters_by_mode(self):
+        self._generate_module("core/", "org/core/CONTEXT.md", "grounded")
+        self._generate_module("utils/", "org/utils/CONTEXT.md", "skeleton")
+        results = ss.list_generated(self.state, self.repo_root, mode="skeleton")
+        ids = [r["id"] for r in results]
+        self.assertEqual(ids, ["utils/"])
+
+    def test_includes_all_record_kinds(self):
+        self._generate_module("core/", "org/core/CONTEXT.md", "grounded")
+        _write(
+            self.repo_root / "org/CODING-STANDARDS.md",
+            "---\ngenerated_by: ult-autoscaffold-content\ncontent_mode: grounded\n---\n\nx\n",
+        )
+        ss.mark_repo_doc_generated(self.state, "coding_standards", "org/CODING-STANDARDS.md")
+        results = ss.list_generated(self.state, self.repo_root)
+        kinds = {r["kind"] for r in results}
+        self.assertEqual(kinds, {"module", "repo_doc"})
+
+    def test_missing_output_file_is_included_with_none_mode_not_raised(self):
+        self._generate_module("core/", "org/core/CONTEXT.md", "grounded")
+        (self.repo_root / "org/core/CONTEXT.md").unlink()
+        results = ss.list_generated(self.state, self.repo_root)
+        [core] = [r for r in results if r["id"] == "core/"]
+        self.assertIsNone(core["content_mode"])
+
+
+class ResetCLITests(unittest.TestCase):
+    """`reset` -- matching this suite's argparse.Namespace() CLI-entry-point
+    convention (see EmitSkeletonCLITests)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        self.output_path = "org/core/CONTEXT.md"
+        _write(self.repo_root / self.output_path, "body\n")
+        ss.mark_generated(state, "core/", self.output_path)
+        state["modules"][0]["output_sha256"] = ss._normalized_body_hash(
+            self.repo_root / self.output_path
+        )
+        ss.save_state(self.state_path, state)
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            state=str(self.state_path), kind="module", id="core/",
+            repo_root=str(self.repo_root), reason="regenerate at skeleton",
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_reset(args)
+        return rc, buf.getvalue()
+
+    def test_reset_cli_transitions_module_to_pending_and_persists(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        self.assertIn('"pending"', out)
+        reloaded = ss.load_state(self.state_path)
+        self.assertEqual(ss._find_module(reloaded, "core/")["status"], "pending")
+
+    def test_reset_cli_reports_error_on_hash_mismatch_without_persisting(self):
+        _write(self.repo_root / self.output_path, "edited\n")
+        rc, _out = self._run()
+        self.assertEqual(rc, 1)
+        reloaded = ss.load_state(self.state_path)
+        self.assertEqual(ss._find_module(reloaded, "core/")["status"], "generated")
+
+
+class CheckRegenerableCLITests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\n---\n\nbody\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        state["modules"][0]["output_sha256"] = ss._normalized_body_hash(
+            self.repo_root / output_path
+        )
+        ss.save_state(self.state_path, state)
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            state=str(self.state_path), kind="module", id="core/",
+            repo_root=str(self.repo_root),
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_check_regenerable(args)
+        return rc, buf.getvalue()
+
+    def test_prints_regenerable_decision_as_json(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["decision"], "regenerable")
+
+
+class ListGeneratedCLITests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo_root = Path(self.tmp.name)
+        self.state_path = self.repo_root / "TRIAGE-STATE.json"
+        state = ss.empty_state()
+        state["modules"].append(_module("core/", 1))
+        output_path = "org/core/CONTEXT.md"
+        _write(
+            self.repo_root / output_path,
+            "---\ngenerated_by: ult-autoscaffold-content\ncontent_mode: skeleton\n---\n\nb\n",
+        )
+        ss.mark_generated(state, "core/", output_path)
+        ss.save_state(self.state_path, state)
+
+    def _run(self, **extra):
+        args = argparse.Namespace(
+            state=str(self.state_path), repo_root=str(self.repo_root), mode=None,
+        )
+        for k, v in extra.items():
+            setattr(args, k, v)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ss._cmd_list_generated(args)
+        return rc, buf.getvalue()
+
+    def test_lists_generated_records_as_json(self):
+        rc, out = self._run()
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["content_mode"], "skeleton")
+
+    def test_mode_filter_excludes_non_matching(self):
+        rc, out = self._run(mode="grounded")
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload, [])
 
 
 if __name__ == "__main__":

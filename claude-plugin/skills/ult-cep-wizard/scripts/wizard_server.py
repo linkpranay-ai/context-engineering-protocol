@@ -95,6 +95,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wizard_apply  # noqa: E402
 import wizard_auth  # noqa: E402
+import wizard_autoscaffold_probe  # noqa: E402
 import wizard_boxes  # noqa: E402
 import wizard_containment  # noqa: E402
 import wizard_content_hash  # noqa: E402
@@ -687,17 +688,44 @@ def _make_handler(ctx: _ServerContext):
                         what_pending = True
                     if "how" in f.layer:
                         how_pending = True
+            # P1 W1 (Proposal Sec 9.4/10, "W1: probe cost"): a lazy, cached
+            # ult-autoscaffold-content evidence probe feeds the What/How and
+            # Upgrade cards' content_modes/default_mode. Computed once per
+            # request, right here alongside the cards that are its only
+            # consumers (never at server startup or from any other handler) -
+            # "lazy" in the proposal's sense. Its own cache (keyed by HEAD
+            # commit + signal-file mtimes) is what keeps repeated calls cheap;
+            # see wizard_autoscaffold_probe.py's module docstring.
+            evidence = wizard_autoscaffold_probe.get_evidence(ctx.repo_root)
+            what_paths = [p.path for p in view.what.paths]
+            how_paths = [p.path for p in view.how.paths]
             what_card = wizard_stub_content.what_how_card(
                 "What",
                 ctx.repo_root,
-                [p.path for p in view.what.paths],
+                what_paths,
                 layer_decisions_pending=what_pending,
+                evidence=evidence,
             )
             how_card = wizard_stub_content.what_how_card(
                 "How",
                 ctx.repo_root,
-                [p.path for p in view.how.paths],
+                how_paths,
                 layer_decisions_pending=how_pending,
+                evidence=evidence,
+            )
+            what_upgrade_card = wizard_stub_content.upgrade_card(
+                "What",
+                ctx.repo_root,
+                what_paths,
+                layer_decisions_pending=what_pending,
+                evidence=evidence,
+            )
+            how_upgrade_card = wizard_stub_content.upgrade_card(
+                "How",
+                ctx.repo_root,
+                how_paths,
+                layer_decisions_pending=how_pending,
+                evidence=evidence,
             )
             guidelines_card = wizard_stub_content.guidelines_card(
                 ctx.repo_root,
@@ -715,7 +743,14 @@ def _make_handler(ctx: _ServerContext):
             )
             payload["stub_cards"] = [
                 asdict(card)
-                for card in (what_card, how_card, guidelines_card, tripwire_card)
+                for card in (
+                    what_card,
+                    how_card,
+                    what_upgrade_card,
+                    how_upgrade_card,
+                    guidelines_card,
+                    tripwire_card,
+                )
                 if card is not None
             ]
             self._send_json(HTTPStatus.OK, payload)
