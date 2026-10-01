@@ -784,6 +784,198 @@ class TestApiStatusWithOptionalSkillsInstalled(WizardServerTestCase):
         self.assertIn("ult-institutional-memory-distill", tripwire_stub["prompt_text"])
 
 
+# --------------------------------------------------------------------------
+# TASK-0405 (P1 W1, Proposal Sec 9.4/10): the mode selector / Upgrade drafts
+# card / "Check now" refresh wizard.js renders (TASK-0404) are all driven by
+# the same "stub_cards" list test_wizard_stub_content.py already exercises
+# at the Python-object level - these three classes instead drive it end to
+# end over real HTTP, the same way the rest of this file tests everything
+# else: the exact /api/status key set is unchanged (still {"what", "how",
+# "guidelines", "tripwire", "stub_cards"} - stub_cards stays a sibling of
+# the four box views, never nested inside one of them), every mode-bearing
+# card's content_modes/default_mode/card_kind/draft_files round-trip
+# through JSON with the exact shape wizard_stub_content.StubCard promises,
+# an all-drafts path is discoverable as an "upgrade" card over HTTP (not
+# just via wsc.upgrade_card() called directly), and none of this writes
+# anything to disk beyond the one cache file
+# wizard_autoscaffold_probe.py's own module docstring documents.
+# --------------------------------------------------------------------------
+
+
+class TestApiStatusModeCardShapeOverHttp(WizardServerTestCase):
+    """ult-autoscaffold-content installed (so What/How cards exercise the
+    real evidence-probe path, not just the owning-skill-absent short
+    circuit) - every stub card the base minimal-repo fixture produces must
+    still carry exactly the fields StubCard promises, surviving the
+    dataclasses.asdict() -> json.dumps() -> json.loads() round trip over a
+    real socket intact."""
+
+    EXTRA_SKILLS = (
+        ("ult-autoscaffold-content", ("scaffold_state.py", "autoscaffold_atomic_write.py")),
+    )
+
+    def test_mode_bearing_cards_have_the_exact_content_modes_shape(self):
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(
+            set(payload.keys()),
+            {"what", "how", "guidelines", "tripwire", "stub_cards"},
+        )
+
+        mode_bearing = [c for c in payload["stub_cards"] if c["box_title"] in ("What", "How")]
+        # The base fixture resolves What to docs/requirements/ (confirmed by
+        # TestApiStatusMinimalRepo above) and it's empty on disk, so its
+        # scaffold card must be among these - this loop would silently pass
+        # on an empty list if that ever regressed, so pin a floor here too.
+        self.assertGreaterEqual(len(mode_bearing), 1)
+        for card in mode_bearing:
+            self.assertIn(card["card_kind"], ("scaffold", "upgrade"))
+            self.assertIsInstance(card["draft_files"], list)
+            self.assertTrue(card["content_modes"], "What/How card must carry content_modes")
+            ids = set()
+            for option in card["content_modes"]:
+                self.assertEqual(
+                    set(option.keys()), {"id", "label", "available", "reason"}
+                )
+                self.assertIn(option["id"], ("skeleton", "grounded", "augmented"))
+                self.assertIsInstance(option["label"], str)
+                self.assertIsInstance(option["available"], bool)
+                if option["available"]:
+                    self.assertIsNone(option["reason"])
+                else:
+                    self.assertIsInstance(option["reason"], str)
+                ids.add(option["id"])
+            self.assertIn(card["default_mode"], ids)
+            # What never offers "augmented" (Proposal Sec 10) - pin that
+            # boundary at the HTTP shape-check level too, not just in
+            # test_wizard_stub_content.py's direct-call test.
+            if card["box_title"] == "What":
+                self.assertNotIn("augmented", ids)
+
+        # Guidelines/Trip-wire cards (when present) have no content-mode
+        # concept - StubCard's own default (content_modes=[], default_mode
+        # =None) must survive the same round trip unchanged.
+        non_mode_bearing = [
+            c for c in payload["stub_cards"] if c["box_title"] not in ("What", "How")
+        ]
+        for card in non_mode_bearing:
+            self.assertEqual(card["content_modes"], [])
+            self.assertIsNone(card["default_mode"])
+            self.assertEqual(card["card_kind"], "scaffold")
+
+
+_UPGRADE_DRAFT_FRONTMATTER = """---
+generated_by: ult-autoscaffold-content
+generated_at: 2026-09-01T00:00:00Z
+status: draft
+content_mode_requested: skeleton
+content_mode: skeleton
+mode_reason: default
+doc_kind: requirements_overview
+skill_version: 1
+---
+
+# Requirements Overview
+
+TBD.
+"""
+
+
+class TestApiStatusUpgradeDiscoveryOverHttp(WizardServerTestCase):
+    """TASK-0401's upgrade_card() is already covered calling it directly
+    (test_wizard_stub_content.py's TestUpgradeCard) - this proves the same
+    discovery also fires through the real /api/status route wizard.js
+    actually calls, with What's resolved path (docs/requirements/, same as
+    TestApiStatusMinimalRepo) populated with nothing but an untouched
+    ult-autoscaffold-content draft."""
+
+    def setUp(self):
+        super().setUp()
+        draft_dir = self.repo_root / "docs" / "requirements"
+        draft_dir.mkdir(parents=True, exist_ok=True)
+        (draft_dir / "REQUIREMENTS-OVERVIEW.md").write_text(
+            _UPGRADE_DRAFT_FRONTMATTER, encoding="utf-8"
+        )
+
+    def test_what_card_is_upgrade_kind_with_the_draft_listed(self):
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        payload = json.loads(resp.read().decode("utf-8"))
+
+        what_cards = [c for c in payload["stub_cards"] if c["box_title"] == "What"]
+        # what_how_card() and upgrade_card() are mutually exclusive on the
+        # same resolved paths (StubCard's own dataclass comment) - exactly
+        # one "What" card, never a scaffold/upgrade pair for the same box.
+        self.assertEqual(len(what_cards), 1)
+        card = what_cards[0]
+        self.assertEqual(card["card_kind"], "upgrade")
+        self.assertEqual(
+            card["draft_files"], ["docs/requirements/REQUIREMENTS-OVERVIEW.md"]
+        )
+        # An upgrade card still carries the same content_modes/default_mode
+        # shape a scaffold card does (TestWhatHowCardContentModes's sibling
+        # test_card_carries_content_modes_like_what_how_card, re-affirmed
+        # here over real HTTP).
+        self.assertTrue(card["content_modes"])
+        self.assertIsNotNone(card["default_mode"])
+
+
+class TestApiStatusNoDiskMutationOverHttp(WizardServerTestCase):
+    """Hitting /api/status must never write anything under repo_root except
+    the one cache file wizard_autoscaffold_probe.py's own module docstring
+    documents as a deliberate, optional-optimization write
+    (cache/autoscaffold-content/probe.json) - everything else (What/How
+    resolved-path content, context-layout-discovery.md, contexts/
+    .layout-slots.yaml, the installed skills themselves) must come back
+    byte-for-byte identical. ult-autoscaffold-content is installed so the
+    probe actually runs its real code path (rather than short-circuiting on
+    "owning skill not installed"), and /api/status is hit twice to exercise
+    both the fresh-probe-writes-cache path and the cache-hit-skips-the-
+    probe path in one test."""
+
+    EXTRA_SKILLS = (
+        ("ult-autoscaffold-content", ("scaffold_state.py", "autoscaffold_atomic_write.py")),
+    )
+
+    _PROBE_CACHE_REL = "cache/autoscaffold-content/probe.json"
+
+    def _snapshot_excluding_probe_cache(self):
+        return sorted(
+            (p.relative_to(self.repo_root).as_posix(), p.read_bytes())
+            for p in self.repo_root.rglob("*")
+            if p.is_file()
+            and p.relative_to(self.repo_root).as_posix() != self._PROBE_CACHE_REL
+        )
+
+    def test_status_writes_nothing_but_the_probe_cache(self):
+        before = self._snapshot_excluding_probe_cache()
+        self.assertFalse((self.repo_root / self._PROBE_CACHE_REL).exists())
+
+        cookie = self._authenticated_cookie()
+        resp = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp.status, 200)
+        self.assertTrue((self.repo_root / self._PROBE_CACHE_REL).exists())
+        after_first_call = self._snapshot_excluding_probe_cache()
+        self.assertEqual(before, after_first_call)
+        cache_bytes_after_first = (self.repo_root / self._PROBE_CACHE_REL).read_bytes()
+
+        # Second call: same HEAD (none - no git init in this fixture, same
+        # as test_wizard_autoscaffold_probe.py's own TestNoGitRepo case) and
+        # same signal fingerprint, so this is a cache hit - get_evidence()
+        # must not re-run the probe or touch the cache file at all.
+        resp2 = self._get("/api/status", cookie=cookie)
+        self.assertEqual(resp2.status, 200)
+        after_second_call = self._snapshot_excluding_probe_cache()
+        self.assertEqual(before, after_second_call)
+        self.assertEqual(
+            cache_bytes_after_first, (self.repo_root / self._PROBE_CACHE_REL).read_bytes()
+        )
+
+
 class TestApiPicker(WizardServerTestCase):
     def test_no_cookie_is_401(self):
         resp = self._get("/api/picker")

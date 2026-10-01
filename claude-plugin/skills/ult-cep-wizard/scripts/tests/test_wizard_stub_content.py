@@ -212,6 +212,28 @@ class TestWhatHowCardContentModes(unittest.TestCase):
         self.assertEqual(card.card_kind, "scaffold")
         self.assertEqual(card.draft_files, [])
 
+    def test_every_content_mode_entry_has_the_exact_dict_shape(self):
+        # TASK-0405: pin the exact key set (not just individual field
+        # presence, which the tests above already check one `next()` at a
+        # time) - this is the shape wizard.js's buildModeSelector() reads
+        # directly and wizard_server.py's asdict()/json round trip must
+        # preserve unchanged over HTTP (see
+        # test_wizard_server.py's TestApiStatusModeCardShapeOverHttp).
+        card = wsc.what_how_card(
+            "How", self.root, ["org/"],
+            evidence={
+                "greenfield": False,
+                "grounded_viable": {"coding_standards": True, "testing_guidelines": False},
+            },
+        )
+        for option in card.content_modes:
+            self.assertEqual(set(option.keys()), {"id", "label", "available", "reason"})
+            self.assertIsInstance(option["id"], str)
+            self.assertIsInstance(option["label"], str)
+            self.assertIsInstance(option["available"], bool)
+            self.assertTrue(option["available"] or isinstance(option["reason"], str))
+            self.assertTrue(not option["available"] or option["reason"] is None)
+
 
 class TestGuidelinesCard(unittest.TestCase):
     def setUp(self):
@@ -461,6 +483,33 @@ class TestZeroOnDiskMutation(unittest.TestCase):
         wsc.upgrade_card("What", self.root, ["drafts/"])  # all drafts -> card
         wsc.upgrade_card("How", self.root, ["org/"])  # not a draft -> no card
         wsc.upgrade_card("What", self.root, ["docs/requirements/"])  # empty -> no card
+
+        # TASK-0405: also sweep every evidence-bearing branch
+        # (_grounded_evidence_availability's three cases) through both
+        # builders - the original three calls above only ever exercised the
+        # no-evidence-passed default, leaving _mode_options()'s evidence
+        # dict-handling code untested for disk safety.
+        unknown_card = wsc.what_how_card(
+            "How", self.root, ["docs/requirements/"], evidence="unknown",
+        )
+        greenfield_card = wsc.what_how_card(
+            "What", self.root, ["docs/requirements/"],
+            evidence={"greenfield": True, "grounded_viable": {}},
+        )
+        viable_card = wsc.upgrade_card(
+            "What", self.root, ["drafts/"],
+            evidence={
+                "greenfield": False,
+                "grounded_viable": {"requirements_overview": True},
+            },
+        )
+        # evidence only ever affects a card's content_modes/default_mode,
+        # never whether the card itself appears - docs/requirements/ is
+        # still empty and drafts/ is still all-drafts (as already proven by
+        # the no-evidence calls above), so all three still produce a card.
+        self.assertIsNotNone(unknown_card)
+        self.assertIsNotNone(greenfield_card)
+        self.assertIsNotNone(viable_card)
 
         after = self._snapshot()
         self.assertEqual(before, after)
